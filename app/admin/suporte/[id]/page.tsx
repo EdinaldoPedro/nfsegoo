@@ -43,7 +43,7 @@ export default function ResolucaoAdmin() {
           const userId = localStorage.getItem('userId');
 
           // Busca Ticket com Token
-          const resTicket = await fetch(`/api/suporte/tickets/${id}`, {
+          const resTicket = await fetch(`/api/admin/suporte/${id}`, {
               headers: { 
                   'x-user-id': userId || '',
                   'Authorization': `Bearer ${token}` // <--- ENVIA TOKEN
@@ -167,7 +167,7 @@ export default function ResolucaoAdmin() {
       const token = localStorage.getItem('token'); // <--- RECUPERA TOKEN
 
       try {
-          const res = await fetch(`/api/suporte/tickets/${id}`, {
+          const res = await fetch(`/api/admin/suporte/${id}`, {
               method: 'PUT', 
               headers: {
                   'Content-Type':'application/json',

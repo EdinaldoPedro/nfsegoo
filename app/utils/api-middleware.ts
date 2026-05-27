@@ -2,8 +2,14 @@ import { NextResponse } from 'next/server';
 import { verifyJWT } from '@/app/utils/auth';
 import { cookies } from 'next/headers';
 import { prisma } from '@/app/utils/prisma';
+import { validateSameOrigin } from '@/app/utils/request-guards';
 
 export async function getAuthenticatedUser(request: Request) {
+  const originError = validateSameOrigin(request);
+  if (originError) {
+    return null;
+  }
+
   // 1. Busca o token no Cookie HttpOnly
   const cookieStore = cookies();
   const token = cookieStore.get('auth_token')?.value;

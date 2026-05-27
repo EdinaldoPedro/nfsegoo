@@ -57,7 +57,8 @@ export async function processarRetornoNota(notaId: string, empresaId: string, ve
             const pdfBuffer = await downloader.downloadPdfOficial(
                 nota.chaveAcesso,
                 nota.empresa.certificadoA1!,
-                nota.empresa.senhaCertificado!
+                nota.empresa.senhaCertificado!,
+                nota.empresa.id
             );
             const pdfGzip = zlib.gzipSync(pdfBuffer);
             const pdfBase64 = pdfGzip.toString('base64');
@@ -133,7 +134,8 @@ export async function processarCancelamentoNota(notaId: string, empresaId: strin
             const pdfBuffer = await downloader.downloadPdfOficial(
                 nota.chaveAcesso,
                 nota.empresa.certificadoA1!,
-                nota.empresa.senhaCertificado!
+                nota.empresa.senhaCertificado!,
+                nota.empresa.id
             );
 
             // Compacta e Substitui

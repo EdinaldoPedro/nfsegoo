@@ -24,6 +24,15 @@ export default function NovoTicketPage() {
 
   // Carrega opções de assunto
   useEffect(() => {
+      const role = localStorage.getItem('userRole') || '';
+      const isSupportMode = localStorage.getItem('isSupportMode') === 'true';
+      const isInternalSupport = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(role);
+
+      if (isInternalSupport && !isSupportMode) {
+          router.replace('/admin/suporte');
+          return;
+      }
+
       const userId = localStorage.getItem('userId');
 
       fetch('/api/admin/suporte/catalogo', {

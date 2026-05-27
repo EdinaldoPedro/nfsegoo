@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 import { isSupportRole } from '@/app/utils/access-control';
 import { prisma } from '@/app/utils/prisma';
+import { stripEmpresaSecrets } from '@/app/utils/safe-data';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,9 +31,9 @@ export async function GET(request: Request) {
             empresaId: emp.id,
             level: 'ERRO',
             createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
-          },
-        });
-        return { ...emp, errosRecentes: erros };
+      },
+    });
+        return { ...stripEmpresaSecrets(emp), errosRecentes: erros };
       }),
     );
 

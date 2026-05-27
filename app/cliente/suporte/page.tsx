@@ -14,6 +14,15 @@ export default function MeusChamados() {
   const [termoBusca, setTermoBusca] = useState('');
 
   useEffect(() => {
+    const role = localStorage.getItem('userRole') || '';
+    const isSupportMode = localStorage.getItem('isSupportMode') === 'true';
+    const isInternalSupport = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(role);
+
+    if (isInternalSupport && !isSupportMode) {
+        router.replace('/admin/suporte');
+        return;
+    }
+
     carregarDados();
   }, []);
 

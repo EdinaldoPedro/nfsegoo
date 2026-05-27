@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 import { upsertEmpresaAndLinkUser } from '@/app/services/empresaService';
+import { stripEmpresaSecrets } from '@/app/utils/safe-data';
 
 const prisma = new PrismaClient();
 
@@ -21,7 +22,10 @@ export async function GET(request: Request) {
             include: { empresa: true },
             orderBy: { updatedAt: 'desc' }
         });
-        return NextResponse.json(vinculos);
+        return NextResponse.json(vinculos.map((vinculo) => ({
+            ...vinculo,
+            empresa: stripEmpresaSecrets(vinculo.empresa)
+        })));
     }
     if (mode === 'cliente') {
         if (!user.empresaId) return NextResponse.json([]);

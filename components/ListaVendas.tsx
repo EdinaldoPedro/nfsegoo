@@ -35,6 +35,11 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
   const [cancelData, setCancelData] = useState({ vendaId: '', tipo: '', detalhe: '' });
   const [cancelando, setCancelando] = useState(false);
 
+  const formatarData = (data?: string | Date | null) => {
+      if (!data) return '-';
+      return new Date(data).toLocaleDateString('pt-BR');
+  };
+
   const MOTIVOS_CANCELAMENTO = [
       "Erro na emissão", "Serviço não prestado", "Erro de assinatura", "Duplicidade da nota", "Outros"
   ];
@@ -309,6 +314,7 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
                     <th className="p-4">Nota</th>
                     <th className="p-4">Cliente</th>
                     <th className="p-4">Item (Serviço)</th>
+                    <th className="p-4">Emissão</th>
                     <th className="p-4 text-right">Valor</th>
                     <th className="p-4 text-center">Status</th>
                     <th className="p-4 text-right">Ações</th>
@@ -316,9 +322,9 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
             </thead>
             <tbody className="divide-y divide-slate-100">
                 {loading ? (
-                    <tr><td colSpan={6} className="p-8 text-center text-slate-400"><Loader2 className="animate-spin mx-auto mb-2"/>Carregando...</td></tr>
+                    <tr><td colSpan={7} className="p-8 text-center text-slate-400"><Loader2 className="animate-spin mx-auto mb-2"/>Carregando...</td></tr>
                 ) : vendas.length === 0 ? (
-                    <tr><td colSpan={6} className="p-8 text-center text-slate-400">Nenhuma venda encontrada.</td></tr>
+                    <tr><td colSpan={7} className="p-8 text-center text-slate-400">Nenhuma venda encontrada.</td></tr>
                 ) : (
                     vendas.map((venda) => {
                         const nota = venda.notas[0]; 
@@ -340,6 +346,9 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
                                             {nota.codigoTribNacional}
                                         </span>
                                     ) : <span className="text-slate-300">-</span>}
+                                </td>
+                                <td className="p-4 font-medium text-slate-600 whitespace-nowrap">
+                                    {formatarData(nota?.dataEmissao || venda.createdAt)}
                                 </td>
                                 <td className="p-4 text-right font-bold text-slate-700">
                                     {Number(venda.valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}

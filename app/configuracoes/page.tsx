@@ -224,11 +224,9 @@ export default function ConfiguracoesEmpresa() {
                         </p>
                     </div>
                 </div>
-                {!isContador && (
-                    <button onClick={() => consultarCNPJ(true)} disabled={buscando} className="whitespace-nowrap bg-white text-orange-700 border border-orange-200 px-4 py-2 rounded-lg text-sm font-bold hover:bg-orange-100 transition shadow-sm">
-                        {buscando ? 'Buscando...' : '↻ Atualizar Dados da Receita'}
-                    </button>
-                )}
+                <button onClick={() => consultarCNPJ(true)} disabled={buscando} className="whitespace-nowrap bg-white text-orange-700 border border-orange-200 px-4 py-2 rounded-lg text-sm font-bold hover:bg-orange-100 transition shadow-sm">
+                    {buscando ? 'Buscando...' : '↻ Atualizar Dados da Receita'}
+                </button>
             </div>
         ) : (
             <div className="bg-blue-50 border-l-4 border-blue-400 p-4 mb-8 rounded-r shadow-sm flex items-start gap-4">

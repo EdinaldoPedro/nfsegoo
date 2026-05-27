@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
+import { stripEmpresaSecrets } from '@/app/utils/safe-data';
 
 const prisma = new PrismaClient();
 
@@ -94,10 +95,8 @@ export async function GET(request: Request) {
 
         data = empresas.map(emp => {
             // Removemos os dados sensíveis antes de enviar para o Frontend Admin
-            const { certificadoA1, senhaCertificado, ...empresaSegura } = emp;
-            
             return {
-                ...empresaSegura,
+                ...stripEmpresaSecrets(emp),
                 origem: 'PRESTADOR',
                 donos: emp.donoUser ? [emp.donoUser] : [],
                 clientesVinculados: emp.minhaCarteira.map((v: any) => v.cliente)
@@ -158,7 +157,7 @@ export async function PUT(request: Request) {
             where: { id },
             data: cleanData
         });
-        return NextResponse.json(updated);
+        return NextResponse.json(stripEmpresaSecrets(updated));
     }
   } catch (e: any) {
     return NextResponse.json({ error: 'Erro ao atualizar: ' + e.message }, { status: 500 });

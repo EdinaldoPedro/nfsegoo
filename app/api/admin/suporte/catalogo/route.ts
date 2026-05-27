@@ -11,11 +11,12 @@ async function ensureSupport(request: Request) {
 }
 
 export async function GET(request: Request) {
-  const authError = await ensureSupport(request);
-  if (authError) return authError;
+  const user = await getAuthenticatedUser(request);
+  if (!user) return unauthorized();
 
   try {
     const itens = await prisma.ticketCatalog.findMany({
+      where: isSupportRole(user.role) ? {} : { ativo: true },
       orderBy: { titulo: 'asc' },
     });
     return NextResponse.json(itens);

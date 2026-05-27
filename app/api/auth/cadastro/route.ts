@@ -1,17 +1,25 @@
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { validarCPF } from '@/app/utils/cpf';
 import { EmailService } from '@/app/services/EmailService';
 import { registrarEventoCrm } from '@/app/services/crmService';
-
-const prisma = new PrismaClient();
+import { prisma } from '@/app/utils/prisma';
+import { checkRateLimit } from '@/app/utils/rate-limit';
+import { validateJsonContentLength, validateSameOrigin } from '@/app/utils/request-guards';
 
 export async function POST(request: Request) {
     try {
+        const originError = validateSameOrigin(request);
+        if (originError) return originError;
+
+        const sizeError = validateJsonContentLength(request);
+        if (sizeError) return sizeError;
+
         const body = await request.json();
         const { nome, email, documento, telefone, senha } = body;
+        const emailNormalizado = String(email || '').trim().toLowerCase();
+        const documentoLimpo = String(documento || '').replace(/\D/g, '');
 
         if (!nome || !email || !documento || !senha) {
             return NextResponse.json({ error: 'Todos os campos são obrigatórios' }, { status: 400 });
@@ -19,6 +27,14 @@ export async function POST(request: Request) {
 
         // 1. Validação do Nome
         const nomeRegex = /^[A-Za-záàâãéèêíïóôõöúçñÁÀÂÃÉÈÍÏÓÔÕÖÚÇÑ ]+$/;
+        const ip = request.headers.get('x-forwarded-for') || '127.0.0.1';
+        const ipAllowed = await checkRateLimit(`cadastro_ip_${ip}`, 10, 60 * 60 * 1000);
+        const docAllowed = await checkRateLimit(`cadastro_doc_${documentoLimpo}`, 3, 60 * 60 * 1000);
+
+        if (!ipAllowed || !docAllowed) {
+            return NextResponse.json({ error: 'Muitas tentativas de cadastro. Aguarde e tente novamente.' }, { status: 429 });
+        }
+
         if (!nomeRegex.test(nome)) {
             return NextResponse.json({ error: 'O nome contém caracteres inválidos. Use apenas letras e acentos.' }, { status: 400 });
         }
@@ -37,15 +53,15 @@ export async function POST(request: Request) {
         if (!validarCPF(cpf)) {
             return NextResponse.json({ error: 'CPF inválido.' }, { status: 400 });
         }
-        const cpfLimpo = cpf.replace(/\D/g, '');
+        const cpfLimpo = documentoLimpo;
 
         // 4. Verificação de Duplicidade (Check Final)
         const usuarioExistente = await prisma.user.findFirst({
-            where: { OR: [{ email }, { cpf: cpfLimpo }] }
+            where: { OR: [{ email: emailNormalizado }, { cpf: cpfLimpo }] }
         });
 
         if (usuarioExistente) {
-            return NextResponse.json({ error: 'E-mail ou CPF já cadastrados.' }, { status: 409 });
+            return NextResponse.json({ error: 'Nao foi possivel concluir o cadastro com os dados informados.' }, { status: 409 });
         }
 
         // 5. Preparação dos Dados
@@ -55,13 +71,14 @@ export async function POST(request: Request) {
 
         // Define o cargo (Primeiro usuário vira ADMIN, resto COMUM)
         const totalUsers = await prisma.user.count();
-        const role = totalUsers === 0 ? 'ADMIN' : 'COMUM';
+        const bootstrapAdminEmail = process.env.BOOTSTRAP_ADMIN_EMAIL?.trim().toLowerCase();
+        const role = totalUsers === 0 && bootstrapAdminEmail === emailNormalizado ? 'ADMIN' : 'COMUM';
 
         // 6. Criação do Usuário
         const newUser = await prisma.user.create({
             data: {
                 nome,
-                email,
+                email: emailNormalizado,
                 senha: senhaHash,
                 cpf: cpfLimpo,
                 telefone,
@@ -92,7 +109,7 @@ export async function POST(request: Request) {
         // 7. Envio do E-mail
         const emailService = new EmailService();
         const html = emailService.getTemplateVerificacaoEmail(nome, verificationCode);
-        await emailService.sendEmail(email, 'Confirme seu cadastro', html);
+        await emailService.sendEmail(emailNormalizado, 'Confirme seu cadastro', html);
 
         return NextResponse.json({ success: true, message: 'Código enviado.' }, { status: 201 });
 

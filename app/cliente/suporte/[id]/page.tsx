@@ -66,6 +66,15 @@ export default function ClienteTicketDetalhes({ params }: { params: { id: string
 
     // === CARREGAR DADOS ===
     useEffect(() => {
+        const role = localStorage.getItem('userRole') || '';
+        const isSupportMode = localStorage.getItem('isSupportMode') === 'true';
+        const isInternalSupport = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(role);
+
+        if (isInternalSupport && !isSupportMode) {
+            router.replace('/admin/suporte');
+            return;
+        }
+
         fetchTicket();
         // Atualiza a cada 5 segundos para ver novas respostas em tempo real
         const interval = setInterval(fetchTicket, 5000); 

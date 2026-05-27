@@ -8,7 +8,6 @@ import { NacionalAdapter } from '../adapters/NacionalAdapter';
 import { ICanonicalRps } from '../interfaces/ICanonicalRps';
 import { MeiHandler } from '../handlers/MeiHandler';
 import { SimplesNacionalHandler } from '../handlers/SimplesNacionalHandler';
-import { decrypt } from '@/app/utils/crypto';
 
 export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
     
@@ -36,8 +35,6 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
         const { prestador, tomador, servico, numeroDPS, serieDPS, ambiente, dataCompetencia } = dados as any;
 
         // === DESCRIPTOGRAFIA EM MEMÓRIA (NOVO) ===
-        if (prestador.certificadoA1) prestador.certificadoA1 = decrypt(prestador.certificadoA1) || prestador.certificadoA1;
-        if (prestador.senhaCertificado) prestador.senhaCertificado = decrypt(prestador.senhaCertificado) || prestador.senhaCertificado;
 
         try {
             // 1. Validações Prévias
@@ -135,11 +132,9 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
     async consultar(chave: string, empresa: any): Promise<IResultadoConsulta> {
         try {
             // === DESCRIPTOGRAFIA EM MEMÓRIA (NOVO) ===
-            if (empresa.certificadoA1) empresa.certificadoA1 = decrypt(empresa.certificadoA1) || empresa.certificadoA1;
-            if (empresa.senhaCertificado) empresa.senhaCertificado = decrypt(empresa.senhaCertificado) || empresa.senhaCertificado;
 
-            const credenciais = this.extrairCredenciais(empresa.certificadoA1, empresa.senhaCertificado);
-            const httpsAgent = new https.Agent({ cert: credenciais.cert, key: credenciais.key, rejectUnauthorized: false, family: 4 });
+            const credenciais = this.extrairCredenciais(empresa, 'CONSULT_NFSE');
+            const httpsAgent = new https.Agent({ cert: credenciais.cert, key: credenciais.key, rejectUnauthorized: true, family: 4 });
             
             const urlBase = empresa.ambiente === 'PRODUCAO' 
                 ? "https://sefin.nfse.gov.br/SefinNacional/nfse" 
@@ -150,7 +145,7 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
 
             const response = await axios.get(urlConsulta, {
                 headers: { 
-                    'Authorization': 'Basic ' + Buffer.from(`${this.cleanString(empresa.documento)}:${empresa.senhaCertificado}`).toString('base64')
+                    'Authorization': 'Basic ' + Buffer.from(`${this.cleanString(empresa.documento)}:${credenciais.senha}`).toString('base64')
                 },
                 httpsAgent
             });
@@ -207,8 +202,6 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
     async cancelar(chave: string, protocolo: string, motivoCompleto: string, empresa: any): Promise<IResultadoCancelamento> {
         try {
             // === DESCRIPTOGRAFIA EM MEMÓRIA (NOVO) ===
-            if (empresa.certificadoA1) empresa.certificadoA1 = decrypt(empresa.certificadoA1) || empresa.certificadoA1;
-            if (empresa.senhaCertificado) empresa.senhaCertificado = decrypt(empresa.senhaCertificado) || empresa.senhaCertificado;
 
             const dhEvento = this.formatarDataSefaz(new Date());
             const tpEvento = '101101';
@@ -250,8 +243,8 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
             const xmlGzip = zlib.gzipSync(xmlBuffer);
             const payloadBase64 = xmlGzip.toString('base64');
 
-            const credenciais = this.extrairCredenciais(empresa.certificadoA1, empresa.senhaCertificado);
-            const httpsAgent = new https.Agent({ cert: credenciais.cert, key: credenciais.key, rejectUnauthorized: false, family: 4 });
+            const credenciais = this.extrairCredenciais(empresa, 'CANCEL_NFSE');
+            const httpsAgent = new https.Agent({ cert: credenciais.cert, key: credenciais.key, rejectUnauthorized: true, family: 4 });
             
             const urlBase = empresa.ambiente === 'PRODUCAO' 
                 ? "https://sefin.nfse.gov.br/SefinNacional/nfse"
@@ -261,7 +254,7 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
             const response = await axios.post(urlEventos, 
                 { pedidoRegistroEventoXmlGZipB64: payloadBase64 }, 
                 {
-                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Basic ' + Buffer.from(`${this.cleanString(empresa.documento)}:${empresa.senhaCertificado}`).toString('base64') },
+                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Basic ' + Buffer.from(`${this.cleanString(empresa.documento)}:${credenciais.senha}`).toString('base64') },
                     httpsAgent
                 }
             );
@@ -300,7 +293,7 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
 
     private assinarPedidoEvento(xml: string, tagId: string, empresa: any): string {
         try {
-            const credenciais = this.extrairCredenciais(empresa.certificadoA1, empresa.senhaCertificado);
+            const credenciais = this.extrairCredenciais(empresa, 'SIGN_CANCEL');
             const certClean = credenciais.cert.replace(/-----BEGIN CERTIFICATE-----|-----END CERTIFICATE-----|[\r\n]/g, '');
             
             const match = xml.match(/<infPedReg[\s\S]*?<\/infPedReg>/);

@@ -3,88 +3,23 @@ import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-m
 import { isSupportRole } from '@/app/utils/access-control';
 import { prisma } from '@/app/utils/prisma';
 
-async function ensureSupport(request: Request) {
+export async function GET(request: Request) {
   const user = await getAuthenticatedUser(request);
   if (!user) return unauthorized();
   if (!isSupportRole(user.role)) return forbidden();
-  return null;
-}
-
-export async function GET(request: Request) {
-  const authError = await ensureSupport(request);
-  if (authError) return authError;
 
   try {
-    const itens = await prisma.ticketCatalog.findMany({
-      orderBy: { titulo: 'asc' },
-    });
-    return NextResponse.json(itens);
-  } catch (e: any) {
-    console.error('Erro API Catalogo GET:', e);
-    return NextResponse.json({ error: `Erro ao buscar: ${e.message}` }, { status: 500 });
-  }
-}
-
-export async function POST(request: Request) {
-  const authError = await ensureSupport(request);
-  if (authError) return authError;
-
-  try {
-    const body = await request.json();
-
-    if (!body.titulo) {
-      return NextResponse.json({ error: 'TÃ­tulo Ã© obrigatÃ³rio' }, { status: 400 });
-    }
-
-    const novo = await prisma.ticketCatalog.create({
-      data: {
-        titulo: body.titulo,
-        prioridade: body.prioridade || 'MEDIA',
-        instrucoes: body.instrucoes,
-        ativo: body.ativo !== undefined ? body.ativo : true,
+    const tickets = await prisma.ticket.findMany({
+      include: {
+        solicitante: { select: { nome: true, email: true } },
+        atendente: { select: { nome: true, id: true } },
+        _count: { select: { mensagens: true } },
       },
+      orderBy: { updatedAt: 'desc' },
     });
-    return NextResponse.json(novo, { status: 201 });
-  } catch (e: any) {
-    console.error('Erro API Catalogo POST:', e);
-    return NextResponse.json({ error: `Erro ao criar: ${e.message}` }, { status: 500 });
-  }
-}
 
-export async function PUT(request: Request) {
-  const authError = await ensureSupport(request);
-  if (authError) return authError;
-
-  try {
-    const body = await request.json();
-    const atualizado = await prisma.ticketCatalog.update({
-      where: { id: body.id },
-      data: {
-        titulo: body.titulo,
-        prioridade: body.prioridade,
-        instrucoes: body.instrucoes,
-        ativo: body.ativo,
-      },
-    });
-    return NextResponse.json(atualizado);
-  } catch {
-    return NextResponse.json({ error: 'Erro ao atualizar' }, { status: 500 });
-  }
-}
-
-export async function DELETE(request: Request) {
-  const authError = await ensureSupport(request);
-  if (authError) return authError;
-
-  const { searchParams } = new URL(request.url);
-  const id = searchParams.get('id');
-
-  if (!id) return NextResponse.json({ error: 'ID necessÃ¡rio' }, { status: 400 });
-
-  try {
-    await prisma.ticketCatalog.delete({ where: { id } });
-    return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ error: 'NÃ£o Ã© possÃ­vel excluir (pode estar em uso)' }, { status: 500 });
+    return NextResponse.json(tickets);
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message || 'Erro ao buscar tickets' }, { status: 500 });
   }
 }

@@ -3,9 +3,16 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { checkRateLimit } from '@/app/utils/rate-limit';
 import { prisma } from '@/app/utils/prisma';
+import { validateJsonContentLength, validateSameOrigin } from '@/app/utils/request-guards';
 
 export async function POST(request: Request) {
     try {
+        const originError = validateSameOrigin(request);
+        if (originError) return originError;
+
+        const sizeError = validateJsonContentLength(request);
+        if (sizeError) return sizeError;
+
         const { token, senha } = await request.json();
 
         if (!token || !senha) {

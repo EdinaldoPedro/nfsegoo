@@ -2,13 +2,19 @@ import { NextResponse } from 'next/server';
 import { forbidden, getAuthenticatedUser, unauthorized } from '@/app/utils/api-middleware';
 import { isSupportTicketRole } from '@/app/utils/access-control';
 import { prisma } from '@/app/utils/prisma';
+import { normalizeBase64Attachment, validateJsonContentLength } from '@/app/utils/request-guards';
 
 export async function POST(request: Request) {
   const user = await getAuthenticatedUser(request);
   if (!user) return unauthorized();
 
   try {
+    const sizeError = validateJsonContentLength(request, 7 * 1024 * 1024);
+    if (sizeError) return sizeError;
+
     const { ticketId, mensagem, interno, anexoBase64, anexoNome } = await request.json();
+    const anexo = normalizeBase64Attachment(anexoBase64, anexoNome);
+    if (anexo.errorResponse) return anexo.errorResponse;
 
     const ticket = await prisma.ticket.findUnique({
       where: { id: ticketId },
@@ -33,10 +39,10 @@ export async function POST(request: Request) {
       data: {
         ticketId: ticket.id,
         usuarioId: user.id,
-        mensagem: mensagem || (anexoBase64 ? 'Enviou um anexo.' : ''),
+        mensagem: mensagem || (anexo.value ? 'Enviou um anexo.' : ''),
         interno: interno || false,
-        anexoBase64: anexoBase64 || null,
-        anexoNome: anexoNome || null,
+        anexoBase64: anexo.value,
+        anexoNome: anexo.fileName,
       },
     });
 

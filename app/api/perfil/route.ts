@@ -4,6 +4,7 @@ import { syncCnaesGlobalmente } from '@/app/services/syncService';
 import forge from 'node-forge';
 import { validateRequest } from '@/app/utils/api-security';
 import { encrypt } from '@/app/utils/crypto';
+import { hasEmpresaAccess, isAdminRole } from '@/app/utils/access-control';
 
 export const dynamic = 'force-dynamic';
 
@@ -214,7 +215,7 @@ export async function GET(request: Request) {
 }
 
 export async function PUT(request: Request) {
-  const { targetId, errorResponse } = await validateRequest(request);
+  const { user: authenticatedUser, targetId, errorResponse } = await validateRequest(request);
   if (errorResponse) return errorResponse;
 
   const userId = targetId;
@@ -228,6 +229,14 @@ export async function PUT(request: Request) {
         where: { id: userId },
         include: { empresa: true }
     });
+
+    if (!user) {
+        return NextResponse.json({ error: 'Usuario nao encontrado.' }, { status: 404 });
+    }
+
+    if (authenticatedUser?.id !== userId && !isAdminRole(authenticatedUser?.role)) {
+        return NextResponse.json({ error: 'Acesso proibido.' }, { status: 403 });
+    }
 
     const userDataToUpdate: any = {
         nome: body.nome,
@@ -245,6 +254,10 @@ export async function PUT(request: Request) {
 
     if (body.documento) {
       const cnpjLimpo = body.documento.replace(/\D/g, '');
+
+      if (cnpjLimpo.length !== 14) {
+          return NextResponse.json({ error: 'CNPJ invalido.' }, { status: 400 });
+      }
       
       if (body.cep && (!body.codigoIbge || body.codigoIbge.length < 7)) {
           const ibgeResgatado = await buscarIbgePorCep(body.cep);
@@ -281,11 +294,47 @@ export async function PUT(request: Request) {
           }
       }
 
-      const empresaSalva = await prisma.empresa.upsert({
+      const empresaExistente = await prisma.empresa.findUnique({
           where: { documento: cnpjLimpo },
-          update: dadosEmpresa,
-          create: { documento: cnpjLimpo, ...dadosEmpresa }
+          select: { id: true }
       });
+
+      let empresaAlvoId: string | null = null;
+
+      if (contextEmpresaId && contextEmpresaId !== 'null' && contextEmpresaId !== 'undefined') {
+          const temAcessoAoContexto = await hasEmpresaAccess(user, contextEmpresaId);
+          if (!temAcessoAoContexto) {
+              return NextResponse.json({ error: 'Voce nao tem acesso a esta empresa.' }, { status: 403 });
+          }
+
+          if (empresaExistente && empresaExistente.id !== contextEmpresaId) {
+              return NextResponse.json({ error: 'CNPJ ja cadastrado para outra empresa.' }, { status: 409 });
+          }
+
+          empresaAlvoId = contextEmpresaId;
+      } else if (user.empresaId) {
+          if (empresaExistente && empresaExistente.id !== user.empresaId) {
+              return NextResponse.json({ error: 'CNPJ ja cadastrado para outra empresa.' }, { status: 409 });
+          }
+
+          empresaAlvoId = user.empresaId;
+      } else if (empresaExistente) {
+          const temAcessoEmpresaExistente = await hasEmpresaAccess(user, empresaExistente.id);
+          if (!temAcessoEmpresaExistente) {
+              return NextResponse.json({ error: 'CNPJ ja cadastrado para outra empresa.' }, { status: 409 });
+          }
+
+          empresaAlvoId = empresaExistente.id;
+      }
+
+      const empresaSalva = empresaAlvoId
+          ? await prisma.empresa.update({
+              where: { id: empresaAlvoId },
+              data: { documento: cnpjLimpo, ...dadosEmpresa }
+          })
+          : await prisma.empresa.create({
+              data: { documento: cnpjLimpo, ...dadosEmpresa }
+          });
 
       if (user?.empresaId !== empresaSalva.id && !contextEmpresaId) {
           await prisma.user.update({ where: { id: userId }, data: { empresaId: empresaSalva.id } });

@@ -143,6 +143,10 @@ export default function Sidebar() {
 
   const statusCert = getStatusCertificado();
   const showAdminPanel = checkIsStaff(userRole) && userRole !== 'CONTADOR' && !isSupportMode;
+  const supportHref =
+    !isSupportMode && ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(userRole)
+      ? '/admin/suporte'
+      : '/cliente/suporte';
 
   return (
     <>
@@ -259,7 +263,7 @@ export default function Sidebar() {
         </div>
 
         <div className="bg-gray-50 p-4 border-t space-y-2 shrink-0 dark:bg-slate-950 dark:border-slate-800">
-            <Link href="/cliente/suporte" onClick={() => setIsOpen(false)} className="tour-sidebar-suporte flex items-center justify-between text-gray-600 hover:text-blue-600 w-full p-2 text-sm transition dark:text-gray-400">
+            <Link href={supportHref} onClick={() => setIsOpen(false)} className="tour-sidebar-suporte flex items-center justify-between text-gray-600 hover:text-blue-600 w-full p-2 text-sm transition dark:text-gray-400">
                 <div className="flex items-center gap-2">
                     <Phone size={16} /> {t('menu', 'support')}
                 </div>

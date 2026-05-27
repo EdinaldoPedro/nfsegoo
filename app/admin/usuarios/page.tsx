@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { 
     Search, LogIn, CreditCard, Edit, Save, X, Building2, Unlink, 
     RefreshCw, KeyRound, AtSign, AlertTriangle, ShieldCheck, 
-    History, Clock, CheckCircle, UserCog, User 
+    History, Clock, CheckCircle, UserCog, User, PackagePlus 
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useDialog } from '@/app/contexts/DialogContext';
@@ -14,6 +14,8 @@ export default function GestaoClientes() {
   
   const [clientes, setClientes] = useState<any[]>([]);
   const [planosDisponiveis, setPlanosDisponiveis] = useState<any[]>([]);
+  const [solicitacoesPendentes, setSolicitacoesPendentes] = useState<any[]>([]);
+  const [loadingSolicitacoes, setLoadingSolicitacoes] = useState(true);
   const [term, setTerm] = useState('');
   
   const [editingUser, setEditingUser] = useState<any>(null);
@@ -24,15 +26,14 @@ export default function GestaoClientes() {
   const [justificativa, setJustificativa] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [pendingContractAction, setPendingContractAction] = useState<'plano' | 'pacote' | null>(null);
 
   // === ESTADOS PARA HISTÓRICO DE PLANOS ===
   const [historyUser, setHistoryUser] = useState<any>(null);
   const [historyData, setHistoryData] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
-  const opcoesAssinatura = (planosDisponiveis || []).flatMap((p: any) => {
-      if (p.tipo && p.tipo !== 'PLANO') {
-          return [{ value: `${p.slug}|AVULSO`, label: `${p.name} (Pacote avulso)` }];
-      }
+  const opcoesPlanoBase = (planosDisponiveis || []).flatMap((p: any) => {
+      if (p.tipo && p.tipo !== 'PLANO') return [];
       if (Number(p.priceMonthly) === 0 && Number(p.priceYearly) > 0) {
           return [{ value: `${p.slug}|ANUAL`, label: `${p.name} Anual` }];
       }
@@ -41,9 +42,14 @@ export default function GestaoClientes() {
       }
       return [{ value: `${p.slug}|MENSAL`, label: `${p.name} Mensal` }];
   });
+  const opcoesPacotes = (planosDisponiveis || []).flatMap((p: any) => {
+      if (!p.tipo || p.tipo === 'PLANO') return [];
+      return [{ value: `${p.slug}|AVULSO`, label: p.name }];
+  });
 
   useEffect(() => {
     carregarUsuarios();
+    carregarSolicitacoes();
     
     // Busca planos com proteção contra erro
     fetch('/api/plans?visao=admin', { 
@@ -67,9 +73,24 @@ export default function GestaoClientes() {
     });
   };
 
+  const carregarSolicitacoes = () => {
+    setLoadingSolicitacoes(true);
+    fetch('/api/admin/pedidos', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(data => setSolicitacoesPendentes(Array.isArray(data) ? data : []))
+      .catch(() => setSolicitacoesPendentes([]))
+      .finally(() => setLoadingSolicitacoes(false));
+  };
+
   // --- 1. ABRIR MODAL DE CONFIRMAÇÃO ---
-  const handlePreSaveUser = () => {
-      if (!editingUser.planoCombinado) return;
+  const handlePreSaveUser = (action: 'plano' | 'pacote') => {
+      if (!editingUser) return;
+      if (action === 'plano' && !editingUser.planoCombinado) return;
+      if (action === 'pacote' && !editingUser.pacoteCombinado) {
+          return dialog.showAlert({ type: 'warning', description: 'Selecione um pacote para adicionar.' });
+      }
+
+      setPendingContractAction(action);
       setShowConfirmModal(true);
   };
 
@@ -78,8 +99,11 @@ export default function GestaoClientes() {
       if(!justificativa || justificativa.length < 5) return dialog.showAlert({type:'warning', description: 'Digite uma justificativa válida.'});
       if(!adminPassword) return dialog.showAlert({type:'warning', description: 'Digite sua senha.'});
 
+      if (!pendingContractAction) return;
+
       setIsProcessing(true);
-      const [slug, ciclo] = editingUser.planoCombinado.split('|');
+      const origemContrato = pendingContractAction === 'pacote' ? editingUser.pacoteCombinado : editingUser.planoCombinado;
+      const [slug, ciclo] = origemContrato.split('|');
 
       try {
           const res = await fetch('/api/admin/users', {
@@ -98,11 +122,13 @@ export default function GestaoClientes() {
 
           if(res.ok) {
               setShowConfirmModal(false);
+              setPendingContractAction(null);
               setEditingUser(null);
               setJustificativa('');
               setAdminPassword('');
               carregarUsuarios();
-              dialog.showAlert({ type: 'success', title: 'Sucesso', description: slug.startsWith('PACOTE_') ? "Pacote adicionado e registrado." : "Plano atualizado e registrado." });
+              carregarSolicitacoes();
+              dialog.showAlert({ type: 'success', title: 'Sucesso', description: pendingContractAction === 'pacote' ? "Pacote adicionado e registrado." : "Plano atualizado e registrado." });
           } else {
               const err = await res.json();
               dialog.showAlert({ type: 'danger', title: 'Erro', description: err.error || "Erro ao salvar." });
@@ -132,10 +158,42 @@ export default function GestaoClientes() {
   const abrirEdicao = (user: any) => {
       const ciclo = user.planoCiclo || 'MENSAL';
       const slug = user.plano === 'SEM_PLANO' ? 'SUSPENDED' : (user.plano || 'GRATUITO');
-      setEditingUser({ ...user, planoCombinado: `${slug}|${ciclo}` });
+      setEditingUser({ ...user, planoCombinado: `${slug}|${ciclo}`, pacoteCombinado: '' });
       setNovoCnpj(user.empresa ? user.empresa.documento : '');
-      setJustificativa(''); setAdminPassword('');
+      setJustificativa(''); setAdminPassword(''); setPendingContractAction(null);
   }
+
+  const abrirEdicaoPorSolicitacao = (pedido: any) => {
+      const cliente = clientes.find((item: any) => item.id === pedido.user?.id);
+      if (!cliente) {
+          return dialog.showAlert({ type: 'warning', description: 'Cliente nao encontrado na lista atual.' });
+      }
+
+      abrirEdicao(cliente);
+  };
+
+  const marcarSolicitacao = async (pedidoId: string) => {
+      try {
+          const res = await fetch('/api/admin/pedidos', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                  id: pedidoId,
+                  status: 'ATIVADO_MANUALMENTE'
+              })
+          });
+
+          const data = await res.json();
+          if (!res.ok) {
+              return dialog.showAlert({ type: 'danger', title: 'Erro', description: data.error || 'Nao foi possivel atualizar a solicitacao.' });
+          }
+
+          dialog.showAlert({ type: 'success', title: 'Sucesso', description: 'Solicitacao marcada como atendida.' });
+          carregarSolicitacoes();
+      } catch (error) {
+          dialog.showAlert("Erro de conexao.");
+      }
+  };
 
   // === 3. ABRIR HISTÓRICO ===
   const abrirHistorico = (user: any) => {
@@ -209,6 +267,7 @@ export default function GestaoClientes() {
   };
 
   const filtered = clientes.filter(c => c.nome.toLowerCase().includes(term.toLowerCase()) || c.email.includes(term));
+  const pacotesAtivosEdicao = (editingUser?.planHistories || []).filter((history: any) => history.plan?.tipo && history.plan.tipo !== 'PLANO');
 
   return (
     <div className="p-6">
@@ -221,6 +280,83 @@ export default function GestaoClientes() {
       </div>
 
       {/* === MODAL DE HISTÓRICO === */}
+      <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-5">
+        <div className="flex items-center justify-between gap-4 mb-4">
+          <div>
+            <h2 className="text-lg font-bold text-amber-900">Solicitacoes manuais pendentes</h2>
+            <p className="text-sm text-amber-800">
+              Pedidos feitos no checkout em desenvolvimento. Libere o plano e os pacotes no cadastro do cliente e depois marque a solicitacao como atendida.
+            </p>
+          </div>
+          <button
+            onClick={carregarSolicitacoes}
+            className="px-3 py-2 rounded-lg border border-amber-300 bg-white text-amber-800 text-sm font-bold hover:bg-amber-100 transition"
+          >
+            Atualizar
+          </button>
+        </div>
+
+        {loadingSolicitacoes ? (
+          <div className="text-sm text-amber-700">Carregando solicitacoes...</div>
+        ) : solicitacoesPendentes.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-amber-300 bg-white/70 p-4 text-sm text-amber-700">
+            Nenhuma solicitacao manual pendente no momento.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {solicitacoesPendentes.map((pedido: any) => (
+              <div key={pedido.id} className="rounded-lg border border-amber-200 bg-white p-4 shadow-sm">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <span className="rounded-full bg-amber-100 px-2 py-1 font-bold text-amber-800">Pedido manual</span>
+                      <span className="font-mono text-amber-700">{pedido.id.slice(0, 8)}</span>
+                      <span className="text-slate-500">{new Date(pedido.createdAt).toLocaleString()}</span>
+                    </div>
+                    <div>
+                      <p className="font-bold text-slate-800">{pedido.user?.nome}</p>
+                      <p className="text-sm text-slate-500">{pedido.user?.email}</p>
+                      <p className="text-xs text-slate-500">
+                        {pedido.user?.empresa?.razaoSocial || 'Sem empresa vinculada'}{pedido.user?.empresa?.documento ? ` • ${pedido.user.empresa.documento}` : ''}
+                      </p>
+                    </div>
+                    <div className="text-sm text-slate-700">
+                      <p><strong>Plano:</strong> {pedido.detalhes?.planoNome || pedido.planoSlug} ({pedido.ciclo})</p>
+                      <p><strong>Ciclos:</strong> {pedido.detalhes?.qtdCiclos || 1}</p>
+                      <p><strong>Pacotes:</strong> {pedido.detalhes?.pacotes?.length ? pedido.detalhes.pacotes.map((pacote: any) => `${pacote.quantidade}x ${pacote.nome}`).join(', ') : 'Nenhum pacote adicional'}</p>
+                      <p><strong>Valor estimado:</strong> {Number(pedido.valorTotal).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-2 lg:w-52">
+                    <button
+                      onClick={() => abrirEdicaoPorSolicitacao(pedido)}
+                      className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-bold text-white hover:bg-blue-700 transition"
+                    >
+                      Gerenciar cliente
+                    </button>
+                    {pedido.detalhes?.ticketId && (
+                      <button
+                        onClick={() => router.push(`/admin/suporte/${pedido.detalhes.ticketId}`)}
+                        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 transition"
+                      >
+                        Abrir ticket
+                      </button>
+                    )}
+                    <button
+                      onClick={() => marcarSolicitacao(pedido.id)}
+                      className="rounded-lg border border-green-300 bg-green-50 px-3 py-2 text-sm font-bold text-green-700 hover:bg-green-100 transition"
+                    >
+                      Marcar atendida
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {historyUser && (
         <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
             <div className="bg-white p-0 rounded-xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden">
@@ -335,7 +471,10 @@ export default function GestaoClientes() {
 
                   <div className="flex gap-2 mt-6">
                       <button 
-                          onClick={() => setShowConfirmModal(false)}
+                          onClick={() => {
+                              setShowConfirmModal(false);
+                              setPendingContractAction(null);
+                          }}
                           disabled={isProcessing}
                           className="flex-1 py-2 text-slate-600 font-bold hover:bg-slate-100 rounded transition"
                       >
@@ -421,7 +560,7 @@ export default function GestaoClientes() {
                     {/* PLANO */}
                     <div className="border-t pt-4">
                         <label className="block text-xs font-bold text-green-700 uppercase mb-2 flex items-center gap-2">
-                            <CreditCard size={16}/> Assinatura
+                            <CreditCard size={16}/> Plano base
                         </label>
                         <select 
                             className="w-full p-2 border rounded bg-white text-slate-800 focus:ring-2 focus:ring-green-500 text-sm"
@@ -429,19 +568,60 @@ export default function GestaoClientes() {
                             onChange={e => setEditingUser({...editingUser, planoCombinado: e.target.value})}
                         >
                             <option value="SUSPENDED|DEFAULT" className="text-red-600 font-bold bg-red-50">⛔ SUSPENDER ACESSO / SEM PLANO</option>
-                            <hr />
-                            {opcoesAssinatura.map((opcao: any) => (
+                            {opcoesPlanoBase.map((opcao: any) => (
                                 <option key={opcao.value} value={opcao.value}>{opcao.label}</option>
                             ))}
                         </select>
                         <p className="text-[11px] text-slate-500 mt-2">
-                            Pacotes avulsos somam ao contrato atual e nÃ£o substituem o plano base do cliente.
+                            Esta acao substitui o plano principal atual do cliente.
                         </p>
                     </div>
 
+                    <div className="rounded-lg border border-blue-100 bg-blue-50/60 p-4">
+                        <label className="block text-xs font-bold text-blue-700 uppercase mb-2 flex items-center gap-2">
+                            <PackagePlus size={16}/> Pacotes avulsos
+                        </label>
+                        <select
+                            className="w-full p-2 border rounded bg-white text-slate-800 focus:ring-2 focus:ring-blue-500 text-sm"
+                            value={editingUser.pacoteCombinado || ''}
+                            onChange={e => setEditingUser({ ...editingUser, pacoteCombinado: e.target.value })}
+                        >
+                            <option value="">Selecione um pacote para adicionar</option>
+                            {opcoesPacotes.map((opcao: any) => (
+                                <option key={opcao.value} value={opcao.value}>{opcao.label}</option>
+                            ))}
+                        </select>
+                        <p className="text-[11px] text-slate-500 mt-2">
+                            Pacotes avulsos somam ao contrato atual sem substituir o plano base. Para liberar mais de uma unidade, repita a operacao.
+                        </p>
+
+                        {pacotesAtivosEdicao.length > 0 && (
+                            <div className="mt-3">
+                                <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 mb-2">Pacotes ativos</p>
+                                <div className="flex flex-wrap gap-2">
+                                    {pacotesAtivosEdicao.map((history: any) => (
+                                        <span key={history.id} className="rounded-full border border-blue-200 bg-white px-2 py-1 text-[11px] font-bold text-blue-700">
+                                            {history.plan?.name || history.plan?.slug}
+                                        </span>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="flex justify-end mt-3">
+                            <button
+                                onClick={() => handlePreSaveUser('pacote')}
+                                disabled={!opcoesPacotes.length}
+                                className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 flex items-center gap-2 font-bold shadow-lg shadow-blue-100 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                <PackagePlus size={18}/> Adicionar pacote
+                            </button>
+                        </div>
+                    </div>
+
                     <div className="flex justify-end gap-2 mt-6 pt-4 border-t">
-                        <button onClick={handlePreSaveUser} className="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700 flex items-center gap-2 font-bold shadow-lg shadow-green-100 transition">
-                            <Save size={18}/> Salvar Tudo
+                        <button onClick={() => handlePreSaveUser('plano')} className="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700 flex items-center gap-2 font-bold shadow-lg shadow-green-100 transition">
+                            <Save size={18}/> Salvar plano
                         </button>
                     </div>
                 </div>

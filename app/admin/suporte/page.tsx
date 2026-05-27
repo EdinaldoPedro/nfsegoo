@@ -34,15 +34,7 @@ export default function AdminSuporte() {
   };
 
   const carregar = () => {
-      const userId = localStorage.getItem('userId');
-      const token = localStorage.getItem('token'); // <--- 1. Token
-      
-      fetch('/api/suporte/tickets', { 
-          headers: { 
-              'x-user-id': userId || '',
-              'Authorization': `Bearer ${token}` // <--- 2. Envio
-          } 
-      })
+      fetch('/api/admin/suporte', { cache: 'no-store' })
         .then(r => r.json())
         .then(data => setTickets(Array.isArray(data) ? data : []))
         .catch(() => setTickets([]))

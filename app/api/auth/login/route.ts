@@ -4,16 +4,25 @@ import { signJWT } from '@/app/utils/auth';
 import { cookies } from 'next/headers';
 import { checkRateLimit } from '@/app/utils/rate-limit';
 import { prisma } from '@/app/utils/prisma';
+import { validateJsonContentLength, validateSameOrigin } from '@/app/utils/request-guards';
 
 export async function POST(request: Request) {
   
   try {
+        const originError = validateSameOrigin(request);
+        if (originError) return originError;
+
+        const sizeError = validateJsonContentLength(request);
+        if (sizeError) return sizeError;
+
         const body = await request.json();
         const { login, senha } = body;
 
         if (!login || !senha) {
-            return NextResponse.json({ error: 'Credenciais inválidas' }, { status: 400 });
+            return NextResponse.json({ error: 'Credenciais invalidas' }, { status: 400 });
         }
+
+        const loginNormalizado = String(login).trim().toLowerCase();
 
         // === ESCUDO: RATE LIMITING ===
         // Captura o IP do usuário (funciona bem atrás de proxies/Vercel)
@@ -22,7 +31,7 @@ export async function POST(request: Request) {
         // Regra 1: Max 10 tentativas por IP a cada 15 minutos
         const ipAllowed = await checkRateLimit(`login_ip_${ip}`, 10, 15 * 60 * 1000);
         // Regra 2: Max 5 tentativas para o mesmo E-mail a cada 15 minutos
-        const emailAllowed = await checkRateLimit(`login_email_${login}`, 5, 15 * 60 * 1000);
+        const emailAllowed = await checkRateLimit(`login_email_${loginNormalizado}`, 5, 15 * 60 * 1000);
 
         if (!ipAllowed || !emailAllowed) {
             return NextResponse.json({ 
@@ -30,12 +39,12 @@ export async function POST(request: Request) {
             }, { status: 429 });
         }
 
-    const loginLimpo = login.replace(/\D/g, ''); 
+    const loginLimpo = loginNormalizado.replace(/\D/g, ''); 
 
     const user = await prisma.user.findFirst({
         where: {
             OR: [
-                { email: login },
+                { email: loginNormalizado },
                 { cpf: loginLimpo }
             ]
         },

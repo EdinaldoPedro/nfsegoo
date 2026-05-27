@@ -1,15 +1,23 @@
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
 import { getAuthenticatedUser, unauthorized } from '@/app/utils/api-middleware';
-
-const prisma = new PrismaClient();
+import { prisma } from '@/app/utils/prisma';
+import { checkRateLimit } from '@/app/utils/rate-limit';
+import { validateJsonContentLength } from '@/app/utils/request-guards';
 
 export async function POST(request: Request) {
     const userAuth = await getAuthenticatedUser(request);
     if (!userAuth) return unauthorized();
 
     try {
+        const sizeError = validateJsonContentLength(request);
+        if (sizeError) return sizeError;
+
         const { code } = await request.json();
+
+        const allowed = await checkRateLimit(`verify_email_confirm_${userAuth.id}`, 5, 15 * 60 * 1000);
+        if (!allowed) {
+            return NextResponse.json({ error: 'Muitas tentativas. Aguarde e tente novamente.' }, { status: 429 });
+        }
 
         const user = await prisma.user.findUnique({ where: { id: userAuth.id } });
         if (!user) return NextResponse.json({ error: "Usuário não encontrado." }, { status: 404 });

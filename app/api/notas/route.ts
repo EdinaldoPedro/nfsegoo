@@ -367,7 +367,7 @@ export async function GET(request: Request) {
               where: whereClause, take: limit, skip: skip, orderBy: { createdAt: 'desc' },
               include: {
                   cliente: { select: { nome: true, documento: true } },
-                  notas: { select: { id: true, numero: true, status: true, vendaId: true, valor: true, cnae: true, xmlBase64: true, pdfBase64: true } },
+                  notas: { select: { id: true, numero: true, status: true, vendaId: true, valor: true, cnae: true, dataEmissao: true, xmlBase64: true, pdfBase64: true } },
                   logs: { where: { level: 'ERRO' }, orderBy: { createdAt: 'desc' }, take: 1, select: { message: true } }
               }
           }),

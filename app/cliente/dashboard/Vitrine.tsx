@@ -7,6 +7,8 @@ import { Package, Globe, Lightbulb, ChevronRight, TrendingUp } from 'lucide-reac
 export default function Vitrine() {
     const [currentIndex, setCurrentIndex] = useState(0);
     const [isPaused, setIsPaused] = useState(false);
+    const [supportLink, setSupportLink] = useState('/cliente/suporte');
+    const [newTicketLink, setNewTicketLink] = useState('/cliente/suporte/novo');
     
     // Estado para guardar os números reais do banco
     const [stats, setStats] = useState({ totalNotas: 0, totalClientes: 0, municipios: 0, valorMes: 0 });
@@ -28,6 +30,17 @@ export default function Vitrine() {
                     if (data && !data.error) setStats(data);
                 })
                 .catch(console.error);
+        }
+    }, []);
+
+    useEffect(() => {
+        const userRole = localStorage.getItem('userRole') || '';
+        const isSupportMode = localStorage.getItem('isSupportMode') === 'true';
+        const isInternalSupport = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(userRole);
+
+        if (isInternalSupport && !isSupportMode) {
+            setSupportLink('/admin/suporte');
+            setNewTicketLink('/admin/suporte');
         }
     }, []);
 
@@ -60,7 +73,7 @@ export default function Vitrine() {
             descricao: "Sabia que o nosso sistema permite emitir faturas em Dólar e Euro de forma nativa e automática?",
             badge: "DICA",
             btnTexto: "Saber Mais",
-            btnLink: "/cliente/suporte",
+            btnLink: supportLink,
             bgClass: "bg-gradient-to-br from-emerald-500 to-teal-700",
             Icon: Globe
         },
@@ -70,7 +83,7 @@ export default function Vitrine() {
             descricao: "A nossa equipa de suporte está pronta para ajudar a configurar o seu certificado digital ou tirar dúvidas.",
             badge: "SUPORTE",
             btnTexto: "Abrir Ticket",
-            btnLink: "/cliente/suporte/novo",
+            btnLink: newTicketLink,
             bgClass: "bg-gradient-to-br from-amber-500 to-orange-600",
             Icon: Lightbulb
         }

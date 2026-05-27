@@ -48,6 +48,7 @@ function CheckoutContent() {
     const [, setStep] = useState<1 | 2>(1);
     const [, setCopiado] = useState(false);
     
+    
     const [ciclo, setCiclo] = useState<'MENSAL' | 'ANUAL'>((cycleParam as 'MENSAL'|'ANUAL') || 'MENSAL');
     const [qtdCiclos, setQtdCiclos] = useState(1);
     const [quantidadesPacotes, setQuantidadesPacotes] = useState<CartAddons>({});
@@ -266,7 +267,7 @@ function CheckoutContent() {
                 return;
             }
 
-            setRequestSent(data.mensagem || 'Solicitacao enviada com sucesso.');
+            setRequestSent('Solicitacao registrada. O checkout automatico esta em desenvolvimento. Para agilizar, fale com o administrador por um contato conhecido ou pelo suporte.');
             setLoadingText('Solicitacao enviada');
             setProcessing(false);
         } catch (error) {
@@ -531,9 +532,12 @@ function CheckoutContent() {
                             {processing ? <Loader2 className="animate-spin"/> : <ShieldCheck size={20}/>}
                             {processing ? loadingText : 'Solicitar Ativação Manual'}
                         </button>
-                        <p className="mt-3 text-xs text-slate-500 leading-relaxed">
-                            Nao ha cobranca automatica aqui. A equipe interna recebe a solicitacao e libera o plano ou pacote manualmente no painel administrativo.
-                        </p>
+                        <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
+                            <p className="text-[11px] font-bold uppercase tracking-wide text-amber-800">Em desenvolvimento</p>
+                            <p className="mt-1 text-xs leading-relaxed text-amber-900">
+                                O checkout automatico ainda esta em desenvolvimento. Para contratar ou ativar um plano ou pacote, entre em contato com o administrador por um canal conhecido ou abra um chamado no suporte.
+                            </p>
+                        </div>
                     </div>
                 </div>
             </div>

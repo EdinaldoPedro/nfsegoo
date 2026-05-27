@@ -44,6 +44,7 @@ export async function POST(request: Request) {
       nota.chaveAcesso,
       empresa.certificadoA1,
       empresa.senhaCertificado,
+      empresa.id,
     );
 
     const pdfGzip = zlib.gzipSync(pdfBuffer);

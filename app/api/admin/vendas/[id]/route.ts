@@ -2,12 +2,23 @@ import { NextResponse } from 'next/server';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 import { isSupportRole } from '@/app/utils/access-control';
 import { prisma } from '@/app/utils/prisma';
+import { sanitizeLogValue } from '@/app/services/logger';
+import { stripEmpresaSecrets } from '@/app/utils/safe-data';
 
 async function ensureSupport(request: Request) {
   const user = await getAuthenticatedUser(request);
   if (!user) return unauthorized();
   if (!isSupportRole(user.role)) return forbidden();
   return null;
+}
+
+function sanitizeStoredDetails(details: string | null) {
+  if (!details) return details;
+  try {
+    return JSON.stringify(sanitizeLogValue(JSON.parse(details)), null, 2);
+  } catch {
+    return sanitizeLogValue(details);
+  }
 }
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
@@ -29,11 +40,17 @@ export async function GET(request: Request, { params }: { params: { id: string }
 
     if (!venda) return NextResponse.json({ error: 'Venda nÃ£o encontrada' }, { status: 404 });
 
-    const logDps = venda.logs.find((l) => l.action === 'EMISSAO_INICIADA' || l.action === 'DPS_GERADA');
-    const logErro = venda.logs.find((l) => l.level === 'ERRO' && l.details?.includes('<'));
+    const logsSeguros = venda.logs.map((log) => ({
+      ...log,
+      details: sanitizeStoredDetails(log.details),
+    }));
+    const logDps = logsSeguros.find((l) => l.action === 'EMISSAO_INICIADA' || l.action === 'DPS_GERADA');
+    const logErro = logsSeguros.find((l) => l.level === 'ERRO' && l.details?.includes('<'));
 
     return NextResponse.json({
       ...venda,
+      empresa: stripEmpresaSecrets(venda.empresa),
+      logs: logsSeguros,
       payloadJson: logDps ? logDps.details : null,
       xmlErro: logErro ? logErro.details : null,
     });

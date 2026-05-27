@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { getAuthenticatedUser, forbidden } from '@/app/utils/api-middleware';
+import { stripUserSecrets } from '@/app/utils/safe-data';
 
 const prisma = new PrismaClient();
 
@@ -28,10 +29,10 @@ export async function GET(request: Request, { params }: { params: { id: string }
         if (!user) return NextResponse.json({ error: 'Usuário não encontrado' }, { status: 404 });
         
         // @ts-ignore
-        const { senha, historicoPlanos, ...safeUser } = user;
+        const { historicoPlanos, ...safeUser } = user;
         
         // Mapeamos de volta para planHistories para o seu Frontend não quebrar
-        return NextResponse.json({ ...safeUser, planHistories: historicoPlanos });
+        return NextResponse.json({ ...stripUserSecrets(safeUser), planHistories: historicoPlanos });
     } catch (error) {
         return NextResponse.json({ error: 'Erro ao buscar' }, { status: 500 });
     }
@@ -134,7 +135,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
             }
         }
 
-        return NextResponse.json(updated);
+        return NextResponse.json(stripUserSecrets(updated));
     } catch (error) {
         console.error("Erro no PATCH:", error);
         return NextResponse.json({ error: 'Erro ao atualizar' }, { status: 500 });
@@ -222,7 +223,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
             data: dataToUpdate
         });
 
-        return NextResponse.json(updatedUser);
+        return NextResponse.json(stripUserSecrets(updatedUser));
     } catch (error) {
         console.error("Erro no PUT User:", error);
         return NextResponse.json({ error: 'Erro ao atualizar' }, { status: 500 });

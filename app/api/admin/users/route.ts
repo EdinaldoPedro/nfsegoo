@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 import { registrarEventoCrm } from '@/app/services/crmService';
 import { prisma } from '@/app/utils/prisma';
+import { stripUserSecrets } from '@/app/utils/safe-data';
 
 export async function GET(request: Request) {
   const user = await getAuthenticatedUser(request);
@@ -20,8 +21,8 @@ export async function GET(request: Request) {
 
   const safeUsers = users.map((u) => {
     // @ts-ignore
-    const { senha, historicoPlanos, ...rest } = u;
-    return { ...rest, planHistories: historicoPlanos };
+    const { historicoPlanos, ...rest } = u;
+    return { ...stripUserSecrets(rest), planHistories: historicoPlanos };
   });
 
   return NextResponse.json(safeUsers);

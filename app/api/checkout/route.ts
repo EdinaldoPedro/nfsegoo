@@ -23,7 +23,7 @@ export async function POST(request: Request) {
     ]);
 
     if (planSlug && !planoBase) {
-      return NextResponse.json({ error: 'Plano informado nÃ£o foi encontrado.' }, { status: 404 });
+      return NextResponse.json({ error: 'Plano informado nao foi encontrado.' }, { status: 404 });
     }
 
     const valorPlanoUnitario = planoBase
@@ -59,6 +59,12 @@ export async function POST(request: Request) {
       .filter(Boolean);
 
     const valorTotal = valorPlano + valorAdicionais;
+    const gatewayMetadata = {
+      cupom: body.cupom || null,
+      qtdCiclos,
+      planoNome: planoBase?.name || null,
+      pacotes: resumoPacotes,
+    };
 
     const pedido = await prisma.pedido.create({
       data: {
@@ -71,10 +77,52 @@ export async function POST(request: Request) {
         valorTotal,
         formaPagamento: 'ATIVACAO_MANUAL',
         status: 'AGUARDANDO_ATIVACAO_MANUAL',
+        gatewayId: JSON.stringify(gatewayMetadata),
+      },
+    });
+
+    const resumoPacotesTexto =
+      resumoPacotes.length > 0
+        ? resumoPacotes.map((pacote: any) => `${pacote.quantidade}x ${pacote.nome}`).join(', ')
+        : 'Nenhum pacote adicional';
+
+    const descricaoTicket = [
+      `Pedido: ${pedido.id}`,
+      `Plano solicitado: ${planoBase?.name || 'Sem plano base'}`,
+      `Ciclo: ${ciclo}`,
+      `Quantidade de ciclos: ${qtdCiclos}`,
+      `Pacotes: ${resumoPacotesTexto}`,
+      `Valor estimado: R$ ${valorTotal.toFixed(2).replace('.', ',')}`,
+      '',
+      'Solicitacao criada automaticamente pelo checkout manual.',
+    ].join('\n');
+
+    const ticket = await prisma.ticket.create({
+      data: {
+        assunto: 'Solicitacao de ativacao manual',
+        categoria: 'Comercial / Ativacao Manual',
+        prioridade: 'MEDIA',
+        descricao: descricaoTicket,
+        status: 'ABERTO',
+        solicitanteId: user.id,
+      },
+    });
+
+    await prisma.ticketMensagem.create({
+      data: {
+        ticketId: ticket.id,
+        usuarioId: user.id,
+        mensagem: descricaoTicket,
+      },
+    });
+
+    await prisma.pedido.update({
+      where: { id: pedido.id },
+      data: {
         gatewayId: JSON.stringify({
-          cupom: body.cupom || null,
-          qtdCiclos,
-          pacotes: resumoPacotes,
+          ...gatewayMetadata,
+          ticketId: ticket.id,
+          ticketProtocolo: ticket.protocolo,
         }),
       },
     });
@@ -82,10 +130,11 @@ export async function POST(request: Request) {
     return NextResponse.json({
       success: true,
       pedidoId: pedido.id,
-      mensagem: 'SolicitaÃ§Ã£o registrada. A liberaÃ§Ã£o do plano/pacote serÃ¡ feita manualmente pela equipe no painel administrativo.',
+      ticketId: ticket.id,
+      mensagem: 'Solicitacao registrada. A equipe interna recebeu um ticket e fara a liberacao manualmente.',
     });
   } catch (error) {
     console.error('Erro no checkout manual:', error);
-    return NextResponse.json({ error: 'Erro interno ao registrar solicitaÃ§Ã£o' }, { status: 500 });
+    return NextResponse.json({ error: 'Erro interno ao registrar solicitacao' }, { status: 500 });
   }
 }
