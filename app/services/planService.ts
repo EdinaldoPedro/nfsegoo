@@ -105,6 +105,7 @@ export async function checkPlanLimits(userId: string, acao: TipoAcao = 'EMITIR')
         // Conta a quantidade real de clientes nas carteiras que pertencem a este utilizador
         const countClientes = await prisma.vinculoCarteira.count({
             where: {
+                arquivadoEm: null,
                 empresa: {
                     OR: [
                         { donoFaturamentoId: userId },

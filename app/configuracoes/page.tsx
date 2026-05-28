@@ -3,13 +3,16 @@
 import { useState, useEffect } from 'react';
 import { 
   Building2, Save, ArrowLeft, Search, MapPin, Briefcase, 
-  Lock, CheckCircle, Trash2, Info, Upload, FileKey, Settings 
+  Lock, CheckCircle, Trash2, Info, Upload, FileKey, Settings, Loader2, AlertCircle
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import AppHeader from '@/components/AppHeader';
 
 export default function ConfiguracoesEmpresa() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [carregandoPerfil, setCarregandoPerfil] = useState(true);
+  const [erroCarregamento, setErroCarregamento] = useState('');
   const [buscando, setBuscando] = useState(false);
   const [msg, setMsg] = useState<{texto: string, tipo: 'sucesso' | 'erro'} | null>(null);
   
@@ -20,6 +23,12 @@ export default function ConfiguracoesEmpresa() {
 
   const [certFile, setCertFile] = useState<string | null>(null);
   const [certSenha, setCertSenha] = useState('');
+  const [validandoCertificado, setValidandoCertificado] = useState(false);
+  const [certificadoCheck, setCertificadoCheck] = useState<{
+    status: 'idle' | 'ok' | 'erro';
+    mensagem: string;
+    vencimento?: string | null;
+  }>({ status: 'idle', mensagem: '' });
   const [dadosCertificado, setDadosCertificado] = useState<{ativo: boolean, vencimento: string | null}>({ ativo: false, vencimento: null });
   const [modoEdicaoCertificado, setModoEdicaoCertificado] = useState(false);
 
@@ -49,17 +58,25 @@ export default function ConfiguracoesEmpresa() {
       setTimeout(() => setMsg(null), 3000);
   };
 
+  const manterIbgeSeConsultaVierVazia = (codigoNovo: string | null | undefined, codigoAtual: string | null | undefined) => {
+      const novoLimpo = String(codigoNovo || '').replace(/\D/g, '');
+      return novoLimpo.length >= 7 ? novoLimpo : (codigoAtual || '');
+  };
+
   useEffect(() => {
     const userId = localStorage.getItem('userId');
 
     if (!userId) { router.push('/login'); return; }
 
     async function carregarDados() {
+      setCarregandoPerfil(true);
+      setErroCarregamento('');
       try {
         const contextId = localStorage.getItem('empresaContextId');
         if (contextId) setIsContador(true);
 
-        const res = await fetch('/api/perfil', { 
+        const res = await fetch(`/api/perfil?t=${Date.now()}`, {
+            cache: 'no-store',
             headers: { 
                 'x-user-id': userId || '',
                 'x-empresa-id': contextId || ''
@@ -89,8 +106,16 @@ export default function ConfiguracoesEmpresa() {
           if (dados.cadastroCompleto) setIsLocked(true);
         } else if (res.status === 401) {
             router.push('/login');
+        } else {
+            const resposta = await res.json().catch(() => ({}));
+            setErroCarregamento(resposta.error || 'Não foi possível carregar os dados desta empresa.');
         }
-      } catch (error) { console.error("Erro ao carregar perfil"); }
+      } catch (error) {
+        console.error("Erro ao carregar perfil");
+        setErroCarregamento('Falha de conexão ao carregar os dados da empresa.');
+      } finally {
+        setCarregandoPerfil(false);
+      }
     }
     carregarDados();
   }, [router]);
@@ -125,7 +150,7 @@ export default function ConfiguracoesEmpresa() {
           bairro: dados.bairro,
           cidade: dados.cidade,
           uf: dados.uf,
-          codigoIbge: dados.codigoIbge, // Atualiza o IBGE se a API retornar
+          codigoIbge: manterIbgeSeConsultaVierVazia(dados.codigoIbge, prev.codigoIbge),
           email: dados.email || prev.email 
         }));
         setAtividades(dados.cnaes || []);
@@ -138,12 +163,63 @@ export default function ConfiguracoesEmpresa() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (file) {
+          setCertificadoCheck({ status: 'idle', mensagem: '' });
           const reader = new FileReader();
           reader.onloadend = () => {
               const base64String = (reader.result as string).split(',')[1];
               setCertFile(base64String);
           };
           reader.readAsDataURL(file);
+      }
+  };
+
+  const validarCertificadoAntesDeSalvar = async () => {
+      if (!certFile || !certSenha) return;
+
+      const cnpjLimpo = empresa.documento.replace(/\D/g, '');
+      if (cnpjLimpo.length !== 14) {
+          setCertificadoCheck({ status: 'erro', mensagem: 'Informe o CNPJ da empresa antes de validar o certificado.' });
+          return;
+      }
+
+      setValidandoCertificado(true);
+      setCertificadoCheck({ status: 'idle', mensagem: 'Validando certificado...' });
+
+      const userId = localStorage.getItem('userId');
+      const contextId = localStorage.getItem('empresaContextId');
+
+      try {
+          const res = await fetch('/api/perfil/validar-certificado', {
+              method: 'POST',
+              headers: {
+                  'Content-Type': 'application/json',
+                  'x-user-id': userId || '',
+                  'x-empresa-id': contextId || ''
+              },
+              body: JSON.stringify({
+                  documento: empresa.documento,
+                  certificadoArquivo: certFile,
+                  certificadoSenha: certSenha
+              })
+          });
+
+          const resposta = await res.json();
+          if (!res.ok) {
+              setCertificadoCheck({ status: 'erro', mensagem: resposta.error || 'Nao foi possivel validar o certificado.' });
+              showMessage(`Erro no certificado: ${resposta.error || 'verifique o arquivo e a senha.'}`, 'erro');
+              return;
+          }
+
+          setCertificadoCheck({
+              status: 'ok',
+              mensagem: 'Senha, validade e CNPJ conferidos com sucesso.',
+              vencimento: resposta.vencimento || null
+          });
+      } catch {
+          setCertificadoCheck({ status: 'erro', mensagem: 'Erro de conexao ao validar o certificado.' });
+          showMessage('Erro de conexao ao validar o certificado.', 'erro');
+      } finally {
+          setValidandoCertificado(false);
       }
   };
 
@@ -159,6 +235,11 @@ export default function ConfiguracoesEmpresa() {
     // Trava que obriga a seleção do regime
     if (!empresa.regimeTributario) {
         showMessage('❌ É obrigatório selecionar o Regime Tributário.', 'erro');
+        return;
+    }
+
+    if (certFile && certificadoCheck.status !== 'ok') {
+        showMessage('Valide o certificado digital antes de salvar.', 'erro');
         return;
     }
 
@@ -195,10 +276,20 @@ export default function ConfiguracoesEmpresa() {
     finally { setLoading(false); }
   };
 
+  const codigoIbgeLimpo = String(empresa.codigoIbge || '').replace(/\D/g, '');
+  const ibgeValido = codigoIbgeLimpo.length >= 7;
+
   return (
-    <div className="min-h-screen bg-gray-50 p-6 md:p-12">
-      <div className="max-w-4xl mx-auto">
+    <div className="saas-shell">
+      <AppHeader
+        title={isContador ? 'Dados da empresa cliente' : 'Cadastro da empresa'}
+        subtitle="Dados obrigatórios para emissão de Nota Fiscal (NFS-e)."
+        eyebrow="Configurações"
+        backHref="/cliente/dashboard"
+      />
+      <div className="saas-container max-w-4xl">
         
+        <div className="hidden">
         <div className="flex justify-between items-center mb-8">
             <div className="flex items-center gap-4">
                 <button onClick={() => router.back()} className="p-2 hover:bg-gray-200 rounded-full transition">
@@ -212,8 +303,9 @@ export default function ConfiguracoesEmpresa() {
                 </div>
             </div>
         </div>
+        </div>
 
-        {isLocked ? (
+        {!carregandoPerfil && !erroCarregamento && (isLocked ? (
             <div className="bg-orange-50 border-l-4 border-orange-400 p-4 mb-8 rounded-r shadow-sm flex flex-col md:flex-row items-start gap-4">
                 <div className="flex items-start gap-3 flex-1">
                     <div className="text-orange-500 mt-1"><Info size={24} /></div>
@@ -236,9 +328,25 @@ export default function ConfiguracoesEmpresa() {
                     <p className="text-sm text-blue-800 mt-1">Informe o <strong>CNPJ</strong> abaixo e clique em buscar.</p>
                 </div>
             </div>
-        )}
-
-        <form onSubmit={(e) => handleSalvar(e)} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+        ))}
+        {carregandoPerfil ? (
+          <div className="saas-card p-8 text-center text-slate-600">
+            Carregando dados da empresa...
+          </div>
+        ) : erroCarregamento ? (
+          <div className="saas-card border-red-100 bg-red-50 p-8 text-center">
+            <h2 className="text-lg font-bold text-red-700">Não foi possível carregar esta empresa</h2>
+            <p className="mt-2 text-sm text-red-600">{erroCarregamento}</p>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="mt-5 rounded-xl bg-red-600 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-red-700"
+            >
+              Tentar novamente
+            </button>
+          </div>
+        ) : (
+        <form onSubmit={(e) => handleSalvar(e)} className="saas-card overflow-hidden">
           
           <div className="p-8 border-b border-gray-100">
             <h3 className="text-lg font-semibold text-blue-600 mb-6 flex items-center gap-2">
@@ -311,9 +419,12 @@ export default function ConfiguracoesEmpresa() {
           </div>
 
           <div className="p-8 border-b border-gray-100 bg-blue-50/30 tour-dps-config">
-            <h3 className="text-lg font-semibold text-blue-800 mb-6 flex items-center gap-2">
-              <Settings size={20} /> Numeração e Ambiente (DPS)
-            </h3>
+            <div className="mb-6">
+              <h3 className="text-lg font-semibold text-blue-800 flex items-center gap-2">
+                <Settings size={20} /> Numeração e Ambiente (DPS)
+              </h3>
+              <p className="text-sm text-slate-500 mt-1">Esses dados controlam a sequência da DPS enviada ao ambiente nacional. Altere com cuidado para evitar duplicidade de numeração.</p>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">Ambiente de Emissão</label>
@@ -321,38 +432,73 @@ export default function ConfiguracoesEmpresa() {
                         <option value="HOMOLOGACAO">Homologação (Teste)</option>
                         <option value="PRODUCAO">Produção (Valendo)</option>
                     </select>
-                    <p className="text-xs text-slate-500 mt-1">Use "Homologação" para testar sem valor fiscal.</p>
+                    <p className={`text-xs mt-1 font-medium ${empresa.ambiente === 'PRODUCAO' ? 'text-emerald-700' : 'text-amber-700'}`}>
+                      {empresa.ambiente === 'PRODUCAO' ? 'Notas emitidas terão valor fiscal.' : 'Ambiente de testes, sem valor fiscal.'}
+                    </p>
                 </div>
                 <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">Série do DPS</label>
                     <input type="text" className="w-full p-3 border rounded-lg bg-white text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none" value={empresa.serieDPS} onChange={e => setEmpresa({...empresa, serieDPS: e.target.value})} placeholder="Ex: 900"/>
-                    <p className="text-xs text-slate-500 mt-1">Geralmente "900" para testes ou "1" para produção.</p>
+                    <p className="text-xs text-slate-500 mt-1">Série usada na numeração da DPS. Geralmente "900" para testes ou "1" para produção.</p>
                 </div>
                 <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">Último Número Usado</label>
                     <input type="number" className="w-full p-3 border rounded-lg bg-white text-blue-700 font-bold focus:ring-2 focus:ring-blue-500 outline-none" value={empresa.ultimoDPS} onChange={e => setEmpresa({...empresa, ultimoDPS: parseInt(e.target.value)})}/>
-                    <p className="text-xs text-slate-500 mt-1">O sistema usará o Próximo (Ex: se 0, emite 1).</p>
+                    <p className="text-xs text-slate-500 mt-1">O sistema sempre usará o próximo número. Ex.: se está 0, a próxima emissão será 1.</p>
                 </div>
             </div>
           </div>
 
           <div className="p-8 border-b border-gray-100">
-            <h3 className="text-lg font-semibold text-blue-600 mb-6 flex items-center gap-2"><MapPin size={20} /> Endereço da Empresa</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <input className="p-3 border rounded-lg" placeholder="CEP" value={empresa.cep || ''} onChange={e => setEmpresa({...empresa, cep: e.target.value})}/>
-                <input className="md:col-span-2 p-3 border rounded-lg" placeholder="Logradouro" value={empresa.logradouro || ''} onChange={e => setEmpresa({...empresa, logradouro: e.target.value})}/>
-                <input className="p-3 border rounded-lg" placeholder="Número" value={empresa.numero || ''} onChange={e => setEmpresa({...empresa, numero: e.target.value})}/>
-                <input className="p-3 border rounded-lg" placeholder="Bairro" value={empresa.bairro || ''} onChange={e => setEmpresa({...empresa, bairro: e.target.value})}/>
-                <input className="p-3 border rounded-lg" placeholder="Cidade" value={empresa.cidade || ''} onChange={e => setEmpresa({...empresa, cidade: e.target.value})}/>
-                <input className="p-3 border rounded-lg" placeholder="UF" value={empresa.uf || ''} onChange={e => setEmpresa({...empresa, uf: e.target.value})}/>
+            <div className="mb-6">
+                <h3 className="text-lg font-semibold text-blue-600 flex items-center gap-2"><MapPin size={20} /> Endereço da Empresa</h3>
+                <p className="text-sm text-slate-500 mt-1">Endereço fiscal usado pelo Portal Nacional para validar município, tributação e emissão da NFS-e.</p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-6 gap-x-8 gap-y-7">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">CEP</label>
+                  <input className="saas-input" placeholder="00000-000" value={empresa.cep || ''} onChange={e => setEmpresa({...empresa, cep: e.target.value})}/>
+                </div>
+                <div className="md:col-span-5">
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Logradouro</label>
+                  <input className="saas-input" placeholder="Rua, avenida, travessa..." value={empresa.logradouro || ''} onChange={e => setEmpresa({...empresa, logradouro: e.target.value})}/>
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Número</label>
+                  <input className="saas-input" placeholder="Número" value={empresa.numero || ''} onChange={e => setEmpresa({...empresa, numero: e.target.value})}/>
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Bairro</label>
+                  <input className="saas-input" placeholder="Bairro" value={empresa.bairro || ''} onChange={e => setEmpresa({...empresa, bairro: e.target.value})}/>
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Cidade</label>
+                  <input className="saas-input" placeholder="Cidade" value={empresa.cidade || ''} onChange={e => setEmpresa({...empresa, cidade: e.target.value})}/>
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-slate-700 mb-2">UF</label>
+                  <input className="saas-input" placeholder="UF" value={empresa.uf || ''} onChange={e => setEmpresa({...empresa, uf: e.target.value})}/>
+                </div>
                 
-                {/* Visual discreto (original) restaurado */}
-                <input 
-                    className="p-3 border rounded-lg bg-gray-50" 
-                    placeholder="IBGE" 
-                    readOnly 
-                    value={empresa.codigoIbge || ''}
-                />
+                <div className="md:col-span-2">
+                  <label className="mb-2 flex items-center gap-1.5 text-sm font-medium text-slate-700">
+                    Código IBGE
+                    <span className="group relative inline-flex">
+                      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-slate-100 text-[10px] font-black leading-none text-slate-500 ring-1 ring-slate-200">
+                        *
+                      </span>
+                      <span className="pointer-events-none absolute left-1/2 top-6 z-30 w-72 -translate-x-1/2 rounded-xl bg-slate-900 px-3 py-2 text-xs font-medium leading-relaxed text-white opacity-0 shadow-xl transition-opacity duration-150 delay-[1500ms] group-hover:opacity-100">
+                        Caso a consulta automática não preencha o código do IBGE, solicite ao suporte a inclusão manual para este município.
+                      </span>
+                    </span>
+                  </label>
+                  <input
+                    className="saas-input bg-slate-50 font-mono"
+                    placeholder="Não informado"
+                    readOnly
+                    value={ibgeValido ? codigoIbgeLimpo : ''}
+                  />
+                </div>
                 
             </div>
           </div>
@@ -396,9 +542,42 @@ export default function ConfiguracoesEmpresa() {
                         </label>
                         <div className="relative w-full md:w-64">
                             <Lock className="absolute left-3 top-3 text-gray-400" size={16} />
-                            <input type="password" placeholder="Senha do Certificado" value={certSenha} onChange={e => setCertSenha(e.target.value)} className="pl-10 p-3 border rounded-lg w-full text-sm focus:ring-2 focus:ring-blue-500 outline-none"/>
+                            <input
+                              type="password"
+                              placeholder="Senha do Certificado"
+                              value={certSenha}
+                              onChange={e => {
+                                setCertSenha(e.target.value);
+                                setCertificadoCheck({ status: 'idle', mensagem: '' });
+                              }}
+                              onBlur={validarCertificadoAntesDeSalvar}
+                              className="pl-10 pr-10 p-3 border rounded-lg w-full text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                            />
+                            {validandoCertificado && <Loader2 className="absolute right-3 top-3 text-blue-500 animate-spin" size={18} />}
                         </div>
                     </div>
+                    {certFile && !certificadoCheck.mensagem && (
+                        <p className="mt-3 text-xs font-medium text-slate-500">
+                            Digite a senha e clique fora do campo para validar antes de salvar.
+                        </p>
+                    )}
+                    {certificadoCheck.mensagem && (
+                        <div className={`mt-4 flex items-start gap-2 rounded-lg border p-3 text-sm font-medium ${
+                          certificadoCheck.status === 'ok'
+                            ? 'border-green-200 bg-green-50 text-green-800'
+                            : certificadoCheck.status === 'erro'
+                              ? 'border-red-200 bg-red-50 text-red-700'
+                              : 'border-blue-200 bg-blue-50 text-blue-700'
+                        }`}>
+                            {certificadoCheck.status === 'ok' ? <CheckCircle size={18} /> : certificadoCheck.status === 'erro' ? <AlertCircle size={18} /> : <Loader2 className="animate-spin" size={18} />}
+                            <div>
+                                <p>{certificadoCheck.mensagem}</p>
+                                {certificadoCheck.status === 'ok' && certificadoCheck.vencimento && (
+                                    <p className="mt-1 text-xs opacity-80">Vencimento: {new Date(certificadoCheck.vencimento).toLocaleDateString()}</p>
+                                )}
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
           </div>
@@ -409,12 +588,13 @@ export default function ConfiguracoesEmpresa() {
                 {msg.texto}
               </div>
             )}
-            <button type="submit" disabled={loading} className="tour-save-btn w-full md:w-auto px-12 py-4 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 transition flex items-center justify-center gap-2 disabled:opacity-50 shadow-lg shadow-green-200 transform hover:scale-[1.02]">
+            <button type="submit" disabled={loading || validandoCertificado || (!!certFile && certificadoCheck.status !== 'ok')} className="tour-save-btn w-full md:w-auto px-12 py-4 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 transition flex items-center justify-center gap-2 disabled:opacity-50 shadow-lg shadow-green-200 transform hover:scale-[1.02]">
               {loading ? 'Processando...' : <><Save size={20} /> Salvar Configurações</>}
             </button>
           </div>
 
         </form>
+        )}
       </div>
     </div>
   );

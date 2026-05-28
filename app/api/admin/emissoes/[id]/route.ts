@@ -26,7 +26,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
     if (!empresa) return NextResponse.json({ error: 'Empresa nÃ£o encontrada' }, { status: 404 });
 
     const vendas = await prisma.venda.findMany({
-      where: { empresaId: id },
+      where: { empresaId: id, arquivadoEm: null } as any,
       include: {
         cliente: { select: { nome: true, documento: true } },
         notas: true,

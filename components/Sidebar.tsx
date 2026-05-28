@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Menu, X, User, Briefcase, FileText, Settings, LogOut, Phone, Shield, ArrowLeft, Building2 } from 'lucide-react';
+import { Menu, X, User, Briefcase, FileText, Settings, LogOut, Phone, Shield, ArrowLeft, Building2, Search, ChevronDown } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { checkIsStaff } from '@/app/utils/permissions';
@@ -14,6 +14,8 @@ export default function Sidebar() {
   const [isContador, setIsContador] = useState(false);
   const [notificacoes, setNotificacoes] = useState(0);
   const [isSupportMode, setIsSupportMode] = useState(false);
+  const [empresaSearch, setEmpresaSearch] = useState('');
+  const [empresaSwitcherOpen, setEmpresaSwitcherOpen] = useState(false);
 
   const { t } = useAppConfig();
   const router = useRouter();
@@ -86,6 +88,17 @@ export default function Sidebar() {
 
   }, [isOpen, pathname]); 
 
+  useEffect(() => {
+    setIsOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setEmpresaSearch('');
+      setEmpresaSwitcherOpen(false);
+    }
+  }, [isOpen]);
+
   const handleLogoutOrReturn = async () => { // <--- Adicione async aqui
     const isSupportActive = localStorage.getItem('isSupportMode') === 'true';
     let adminBackUpId = localStorage.getItem('adminBackUpId');
@@ -130,6 +143,11 @@ export default function Sidebar() {
       window.location.reload(); 
   };
 
+  const abrirSwitcherEmpresa = () => {
+      setEmpresaSwitcherOpen(true);
+      setEmpresaSearch('');
+  };
+
   const getStatusCertificado = () => {
     if (!userData?.temCertificado) return { label: 'Pendente', classes: 'text-red-500' };
     if (!userData.vencimentoCertificado) return { label: 'Ativo', classes: 'text-green-600' };
@@ -147,19 +165,38 @@ export default function Sidebar() {
     !isSupportMode && ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(userRole)
       ? '/admin/suporte'
       : '/cliente/suporte';
+  const empresasDisponiveis = userData?.listaEmpresas || [];
+  const empresaAtualId =
+    typeof window !== 'undefined'
+      ? localStorage.getItem('empresaContextId') || userData?.empresaPrimariaId
+      : userData?.empresaPrimariaId;
+  const empresasFiltradas = empresasDisponiveis
+    .filter((emp: any) => {
+      const termo = empresaSearch.trim().toLowerCase();
+      if (!termo) return true;
+      return `${emp.razaoSocial || ''} ${emp.cnpj || ''}`.toLowerCase().includes(termo);
+    })
+    .slice(0, 7);
+  const empresaAtual = empresasDisponiveis.find((emp: any) => emp.id === empresaAtualId);
 
   return (
     <>
-      <button onClick={abrirMenu} className="tour-menu-btn p-2 hover:bg-gray-100 rounded-lg transition relative dark:hover:bg-slate-800">
-        <Menu size={28} className="text-gray-700 dark:text-gray-200" />
-        {notificacoes > 0 && <span className="absolute top-1 right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white animate-pulse"></span>}
+      <button
+        onClick={abrirMenu}
+        className="tour-menu-btn relative inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 dark:border-slate-700 dark:bg-slate-900 dark:text-gray-200"
+        aria-label="Abrir menu"
+      >
+        <Menu size={20} />
+        {notificacoes > 0 && <span className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border-2 border-white bg-red-500 animate-pulse"></span>}
       </button>
 
-      {isOpen && <div className="fixed inset-0 bg-black/50 z-40 transition-opacity" onClick={() => setIsOpen(false)} />}
+      {isOpen && (
+      <>
+      <div className="fixed inset-0 z-[90] bg-slate-950/45 backdrop-blur-[2px] transition-opacity" onClick={() => setIsOpen(false)} />
 
-      <div className={`fixed top-0 right-0 h-full w-80 bg-white shadow-2xl z-50 transform transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : 'translate-x-full'} flex flex-col dark:bg-slate-900`}>
+      <div className="fixed right-0 top-0 z-[100] flex h-[100dvh] w-[340px] max-w-[92vw] flex-col overflow-hidden border-l border-slate-200 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.24)] animate-in slide-in-from-right duration-200 dark:border-slate-800 dark:bg-slate-900">
         
-        <div className={`p-6 border-b flex justify-between items-center text-white shrink-0 border-gray-100 dark:border-slate-800 ${isSupportMode ? 'bg-orange-500' : 'bg-blue-600'}`}>
+        <div className={`p-5 border-b flex justify-between items-center text-white shrink-0 border-gray-100 dark:border-slate-800 ${isSupportMode ? 'bg-orange-500' : 'bg-gradient-to-br from-blue-700 to-blue-600'}`}>
           <h2 className="font-bold text-lg flex items-center gap-2">
               {isSupportMode ? <><Shield size={20}/> Modo Suporte</> : 'Menu'}
           </h2>
@@ -168,9 +205,9 @@ export default function Sidebar() {
           </button>
         </div>
 
-        <div className="p-6 space-y-8 flex-1 overflow-y-auto">
+        <div className="flex-1 space-y-4 overflow-y-auto bg-slate-50/70 p-4 dark:bg-slate-950">
           
-          <section className="tour-sidebar-perfil">
+          <section className="tour-sidebar-perfil rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             <h3 className="text-xs font-bold text-gray-400 uppercase mb-4 flex items-center gap-2">
               <User size={14} /> {t('menu', 'settings')}
             </h3>
@@ -188,28 +225,78 @@ export default function Sidebar() {
             </div>
           </section>
 
-          <hr className="dark:border-slate-800" />
-
-          <section className="tour-sidebar-empresa">
+          <section className="tour-sidebar-empresa rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             <h3 className="text-xs font-bold text-gray-400 uppercase mb-4 flex items-center gap-2">
               <Briefcase size={14} /> Minha Empresa
             </h3>
             
             {/* === NOVO: SELETOR DE MÚLTIPLAS EMPRESAS === */}
-            {userData?.listaEmpresas && userData.listaEmpresas.length > 1 && (
-                <div className="mb-4 bg-blue-50 p-3 rounded-lg border border-blue-100 dark:bg-slate-800 dark:border-slate-700">
-                    <label className="text-xs font-bold text-blue-700 dark:text-blue-400 mb-1 flex items-center gap-1"><Building2 size={12}/> Alternar CNPJ:</label>
-                    <select 
-                        className="w-full p-2 text-sm font-bold border-none rounded bg-white text-slate-700 shadow-sm cursor-pointer outline-none focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
-                        value={localStorage.getItem('empresaContextId') || userData.empresaPrimariaId}
-                        onChange={(e) => handleEmpresaChange(e.target.value)}
-                    >
-                        {userData.listaEmpresas.map((emp: any) => (
-                            <option key={emp.id} value={emp.id}>
-                                {emp.razaoSocial.length > 20 ? emp.razaoSocial.substring(0,20)+'...' : emp.razaoSocial}
-                            </option>
-                        ))}
-                    </select>
+            {empresasDisponiveis.length > 1 && (
+                <div className="relative mb-4 rounded-2xl border border-blue-100 bg-blue-50 p-3 dark:border-slate-700 dark:bg-slate-800">
+                    <label className="mb-1 flex items-center gap-1 text-xs font-bold text-blue-700 dark:text-blue-400">
+                      <Building2 size={12}/> Alternar CNPJ:
+                    </label>
+
+                    {!empresaSwitcherOpen ? (
+                      <button
+                        type="button"
+                        onClick={abrirSwitcherEmpresa}
+                        className="flex w-full items-center justify-between gap-2 rounded-xl bg-white px-3 py-2.5 text-left text-sm font-bold text-slate-800 shadow-sm ring-1 ring-blue-100 transition hover:ring-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white dark:ring-slate-700"
+                      >
+                        <span className="truncate">{empresaAtual?.razaoSocial || 'Empresa atual'}</span>
+                        <ChevronDown size={16} className="shrink-0 text-slate-400" />
+                      </button>
+                    ) : (
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
+                        <input
+                          autoFocus
+                          value={empresaSearch}
+                          onChange={(e) => setEmpresaSearch(e.target.value)}
+                          placeholder="Pesquisar empresa..."
+                          className="w-full rounded-xl border border-blue-200 bg-white py-2.5 pl-9 pr-9 text-sm font-medium text-slate-700 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus:ring-slate-700"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setEmpresaSwitcherOpen(false)}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-white"
+                          aria-label="Fechar pesquisa de empresas"
+                        >
+                          <X size={15} />
+                        </button>
+                      </div>
+                    )}
+
+                    {empresaSwitcherOpen && (
+                      <div className="absolute left-3 right-3 top-[calc(100%-12px)] z-50 max-h-[360px] space-y-1 overflow-y-auto rounded-2xl border border-blue-100 bg-white p-2 shadow-2xl shadow-slate-900/15 dark:border-slate-700 dark:bg-slate-900">
+                        {empresasFiltradas.length > 0 ? (
+                          empresasFiltradas.map((emp: any) => {
+                            const selecionada = emp.id === empresaAtualId;
+                            return (
+                              <button
+                                key={emp.id}
+                                type="button"
+                                onClick={() => handleEmpresaChange(emp.id)}
+                                className={`w-full rounded-xl px-3 py-2 text-left text-sm transition ${
+                                  selecionada
+                                    ? 'bg-blue-600 font-bold text-white shadow-sm'
+                                    : 'font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-800 dark:text-slate-200 dark:hover:bg-slate-800'
+                                }`}
+                              >
+                                <span className="block truncate">{emp.razaoSocial}</span>
+                                <span className={`block truncate text-[11px] ${selecionada ? 'text-blue-100' : 'text-slate-400'}`}>
+                                  {emp.cnpj || 'CNPJ não informado'}
+                                </span>
+                              </button>
+                            );
+                          })
+                        ) : (
+                          <div className="rounded-xl px-3 py-3 text-sm font-medium text-slate-500 dark:text-slate-400">
+                            Nenhuma empresa encontrada.
+                          </div>
+                        )}
+                      </div>
+                    )}
                 </div>
             )}
 
@@ -232,17 +319,15 @@ export default function Sidebar() {
             </div>
           </section>
 
-          <hr className="dark:border-slate-800" />
-
-          <section className="tour-sidebar-gestao">
+          <section className="tour-sidebar-gestao rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             <h3 className="text-xs font-bold text-gray-400 uppercase mb-4 flex items-center gap-2">
               <Settings size={14} /> Gestão
             </h3>
             <div className="flex flex-col gap-3">
-                <Link href="/cliente" onClick={() => setIsOpen(false)} className="flex items-center gap-2 text-gray-700 hover:bg-gray-50 p-2 rounded dark:text-gray-300 dark:hover:bg-slate-800">
+                <Link href="/cliente" onClick={() => setIsOpen(false)} className="flex items-center gap-2 rounded-xl p-3 font-semibold text-gray-700 transition hover:bg-blue-50 hover:text-blue-700 dark:text-gray-300 dark:hover:bg-slate-800">
                     <FileText size={18} /> {t('menu', 'clients')}
                 </Link>
-                <Link href="/relatorios" onClick={() => setIsOpen(false)} className="flex items-center gap-2 text-gray-700 hover:bg-gray-50 p-2 rounded dark:text-gray-300 dark:hover:bg-slate-800">
+                <Link href="/relatorios" onClick={() => setIsOpen(false)} className="flex items-center gap-2 rounded-xl p-3 font-semibold text-gray-700 transition hover:bg-blue-50 hover:text-blue-700 dark:text-gray-300 dark:hover:bg-slate-800">
                     <FileText size={18} /> Relatórios
                 </Link>
             </div>
@@ -262,8 +347,8 @@ export default function Sidebar() {
 
         </div>
 
-        <div className="bg-gray-50 p-4 border-t space-y-2 shrink-0 dark:bg-slate-950 dark:border-slate-800">
-            <Link href={supportHref} onClick={() => setIsOpen(false)} className="tour-sidebar-suporte flex items-center justify-between text-gray-600 hover:text-blue-600 w-full p-2 text-sm transition dark:text-gray-400">
+        <div className="bg-white p-4 border-t space-y-2 shrink-0 dark:bg-slate-950 dark:border-slate-800">
+            <Link href={supportHref} onClick={() => setIsOpen(false)} className="tour-sidebar-suporte flex items-center justify-between text-gray-600 hover:text-blue-600 hover:bg-blue-50 w-full p-3 rounded-xl text-sm font-semibold transition dark:text-gray-400">
                 <div className="flex items-center gap-2">
                     <Phone size={16} /> {t('menu', 'support')}
                 </div>
@@ -276,7 +361,7 @@ export default function Sidebar() {
             
             <button 
                 onClick={handleLogoutOrReturn} 
-                className={`flex items-center gap-2 w-full p-2 text-sm font-medium transition ${isSupportMode ? 'text-orange-600 hover:text-orange-800 bg-orange-50 rounded font-bold' : 'text-red-500 hover:text-red-700'}`}
+                className={`flex items-center gap-2 w-full p-3 rounded-xl text-sm font-bold transition ${isSupportMode ? 'text-orange-600 hover:text-orange-800 bg-orange-50' : 'text-red-500 hover:text-red-700 hover:bg-red-50'}`}
             >
                 {isSupportMode ? <ArrowLeft size={16} /> : <LogOut size={16} />} 
                 {isSupportMode ? 'Voltar para Admin' : t('menu', 'logout')}
@@ -284,6 +369,8 @@ export default function Sidebar() {
         </div>
 
       </div>
+      </>
+      )}
     </>
   );
 }

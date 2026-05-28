@@ -26,7 +26,8 @@ export async function processarRetornoNota(notaId: string, empresaId: string, ve
             
             // === AQUI ESTAVA FALTANDO: ATUALIZAR O NÚMERO ===
             const dadosUpdate: any = { 
-                xmlBase64: consultaRes.xmlDistribuicao 
+                xmlBase64: consultaRes.xmlDistribuicao,
+                xmlAutorizadoBase64: consultaRes.xmlDistribuicao
             };
 
             // Se a consulta retornou um número válido (diferente de 0), atualiza no banco
@@ -108,10 +109,12 @@ export async function processarCancelamentoNota(notaId: string, empresaId: strin
         const consultaRes = await strategy.consultar(nota.chaveAcesso, nota.empresa);
 
         if (consultaRes.sucesso && consultaRes.xmlDistribuicao) {
-            // SUBSTITUI O XML ANTIGO PELO NOVO
             await prisma.notaFiscal.update({
                 where: { id: notaId },
-                data: { xmlBase64: consultaRes.xmlDistribuicao }
+                data: {
+                    xmlBase64: consultaRes.xmlDistribuicao,
+                    xmlAutorizadoBase64: (nota as any).xmlAutorizadoBase64 || nota.xmlBase64 || consultaRes.xmlDistribuicao
+                } as any
             });
 
             await createLog({

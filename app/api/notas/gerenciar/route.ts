@@ -60,7 +60,14 @@ export async function POST(request: Request) {
       }
 
       if (consulta.sucesso && consulta.situacao === 'CANCELADA') {
-        await prisma.notaFiscal.update({ where: { id: notaAtiva.id }, data: { status: 'CANCELADA' } });
+        const notaAtivaComXml = notaAtiva as any;
+        await prisma.notaFiscal.update({
+          where: { id: notaAtiva.id },
+          data: {
+            status: 'CANCELADA',
+            xmlAutorizadoBase64: notaAtivaComXml.xmlAutorizadoBase64 || notaAtiva.xmlBase64,
+          } as any,
+        });
         await prisma.venda.update({ where: { id: vendaId }, data: { status: 'CANCELADA' } });
         await processarCancelamentoNota(notaAtiva.id, venda.empresaId, venda.id);
         return NextResponse.json({ success: true, message: 'Nota sincronizada! Status atualizado para Cancelada.' });
@@ -85,7 +92,15 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: `Erro Sefaz: ${resultado.motivo}` }, { status: 400 });
       }
 
-      await prisma.notaFiscal.update({ where: { id: notaAtiva.id }, data: { status: 'CANCELADA' } });
+      const notaAtivaComXml = notaAtiva as any;
+      await prisma.notaFiscal.update({
+        where: { id: notaAtiva.id },
+        data: {
+          status: 'CANCELADA',
+          xmlAutorizadoBase64: notaAtivaComXml.xmlAutorizadoBase64 || notaAtiva.xmlBase64,
+          xmlCancelamentoEventoBase64: resultado.xmlEvento || undefined,
+        } as any,
+      });
       await prisma.venda.update({ where: { id: vendaId }, data: { status: 'CANCELADA' } });
       await processarCancelamentoNota(notaAtiva.id, venda.empresaId, venda.id);
 

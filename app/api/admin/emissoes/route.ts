@@ -14,8 +14,9 @@ export async function GET(request: Request) {
   try {
     const emissores = await prisma.empresa.findMany({
       where: {
+        arquivadoEm: null,
         OR: [{ certificadoA1: { not: null } }, { notasEmitidas: { some: {} } }, { logs: { some: {} } }],
-      },
+      } as any,
       include: {
         _count: {
           select: { notasEmitidas: true },

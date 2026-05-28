@@ -6,6 +6,13 @@ import { validateRequest } from '@/app/utils/api-security';
 import { getAccessibleEmpresaIds } from '@/app/utils/access-control';
 import { prisma } from '@/app/utils/prisma';
 
+function decodeBase64Xml(base64: string) {
+  const buffer = Buffer.from(base64, 'base64');
+  return buffer[0] === 0x1f && buffer[1] === 0x8b
+    ? zlib.gunzipSync(buffer).toString('utf-8')
+    : buffer.toString('utf-8');
+}
+
 export async function POST(request: Request) {
   const { user, targetId, errorResponse } = await validateRequest(request);
   if (errorResponse) return errorResponse;
@@ -25,7 +32,7 @@ export async function POST(request: Request) {
     }
 
     const accessibleEmpresaIds = await getAccessibleEmpresaIds(user);
-    const whereClause: any = { id: { in: ids } };
+    const whereClause: any = { id: { in: ids }, arquivadoEm: null };
 
     if (accessibleEmpresaIds !== null) {
       whereClause.empresaId = { in: accessibleEmpresaIds.length > 0 ? accessibleEmpresaIds : ['__sem_acesso__'] };
@@ -51,12 +58,18 @@ export async function POST(request: Request) {
 
       if ((formato === 'XML' || formato === 'AMBOS') && nota.xmlBase64) {
         try {
-          const buffer = Buffer.from(nota.xmlBase64, 'base64');
-          const xmlContent =
-            buffer[0] === 0x1f && buffer[1] === 0x8b
-              ? zlib.gunzipSync(buffer).toString('utf-8')
-              : buffer.toString('utf-8');
+          const notaComXmlCancelamento = nota as any;
+          const xmlPrincipalBase64 =
+            nota.status === 'CANCELADA'
+              ? notaComXmlCancelamento.xmlAutorizadoBase64 || nota.xmlBase64
+              : nota.xmlBase64;
+          const xmlContent = decodeBase64Xml(xmlPrincipalBase64);
           folder.file(`${safeName}.xml`, xmlContent);
+
+          if (nota.status === 'CANCELADA' && notaComXmlCancelamento.xmlCancelamentoEventoBase64) {
+            const xmlEvento = decodeBase64Xml(notaComXmlCancelamento.xmlCancelamentoEventoBase64);
+            folder.file(`${safeName}_evento_cancelamento.xml`, xmlEvento);
+          }
         } catch (e) {
           console.error(`Erro XML nota ${nota.numero}`, e);
         }

@@ -37,11 +37,11 @@ export async function getAccessibleEmpresaIds(user: AccessUser): Promise<string[
       select: { empresaId: true },
     }),
     prisma.contadorVinculo.findMany({
-      where: { contadorId: user.id, status: 'APROVADO' },
+      where: { contadorId: user.id, status: 'APROVADO', arquivadoEm: null } as any,
       select: { empresaId: true },
     }),
     prisma.empresa.findMany({
-      where: { donoFaturamentoId: user.id },
+      where: { donoFaturamentoId: user.id, arquivadoEm: null } as any,
       select: { id: true },
     }),
   ]);
@@ -61,4 +61,3 @@ export async function hasEmpresaAccess(user: AccessUser, empresaId: string | nul
   const accessibleEmpresaIds = await getAccessibleEmpresaIds(user);
   return accessibleEmpresaIds === null || accessibleEmpresaIds.includes(empresaId);
 }
-

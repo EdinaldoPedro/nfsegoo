@@ -18,19 +18,56 @@ export async function GET(request: Request) {
     if (mode === 'contador') {
         if (!['CONTADOR', 'MASTER', 'ADMIN'].includes(user.role)) return forbidden();
         const vinculos = await prisma.contadorVinculo.findMany({
-            where: { contadorId: user.id },
+            where: { contadorId: user.id, arquivadoEm: null } as any,
             include: { empresa: true },
             orderBy: { updatedAt: 'desc' }
         });
-        return NextResponse.json(vinculos.map((vinculo) => ({
-            ...vinculo,
-            empresa: stripEmpresaSecrets(vinculo.empresa)
-        })));
+
+        const inicioMes = new Date();
+        inicioMes.setDate(1);
+        inicioMes.setHours(0, 0, 0, 0);
+
+        const vinculosComResumo = await Promise.all(vinculos.map(async (vinculo) => {
+            const [notasMes, ultimaNota, clientesCarteira] = await Promise.all([
+                prisma.notaFiscal.count({
+                    where: {
+                        empresaId: vinculo.empresaId,
+                        status: 'AUTORIZADA',
+                        arquivadoEm: null,
+                        OR: [
+                            { dataEmissao: { gte: inicioMes } },
+                            { dataEmissao: null, createdAt: { gte: inicioMes } }
+                        ]
+                    } as any
+                }),
+                prisma.notaFiscal.findFirst({
+                    where: { empresaId: vinculo.empresaId, status: 'AUTORIZADA', arquivadoEm: null } as any,
+                    orderBy: [{ dataEmissao: 'desc' }, { createdAt: 'desc' }],
+                    select: { dataEmissao: true, createdAt: true, valor: true }
+                }),
+                prisma.vinculoCarteira.count({
+                    where: { empresaId: vinculo.empresaId, arquivadoEm: null } as any
+                })
+            ]);
+
+            return {
+                ...vinculo,
+                empresa: stripEmpresaSecrets(vinculo.empresa),
+                resumo: {
+                    notasMes,
+                    clientesCarteira,
+                    ultimaEmissao: ultimaNota?.dataEmissao || ultimaNota?.createdAt || null,
+                    valorUltimaNota: ultimaNota?.valor || null
+                }
+            };
+        }));
+
+        return NextResponse.json(vinculosComResumo);
     }
     if (mode === 'cliente') {
         if (!user.empresaId) return NextResponse.json([]);
         const solicitacoes = await prisma.contadorVinculo.findMany({
-            where: { empresaId: user.empresaId, status: 'PENDENTE' },
+            where: { empresaId: user.empresaId, status: 'PENDENTE', arquivadoEm: null } as any,
             include: { contador: { select: { nome: true, email: true } } }
         });
         return NextResponse.json(solicitacoes);
@@ -90,7 +127,10 @@ export async function PUT(request: Request) {
         if (!vinculo || vinculo.empresaId !== user.empresaId) return forbidden();
         
         if (acao === 'REJEITAR') {
-            await prisma.contadorVinculo.delete({ where: { id: vinculoId } });
+            await prisma.contadorVinculo.update({
+                where: { id: vinculoId },
+                data: { status: 'REJEITADO', arquivadoEm: new Date(), arquivadoPor: user.id, motivoArquivamento: 'Solicitacao rejeitada pelo cliente.' } as any
+            });
             return NextResponse.json({ success: true, message: 'Recusado.' });
         }
         await prisma.contadorVinculo.update({ where: { id: vinculoId }, data: { status: 'APROVADO' } });
@@ -109,7 +149,10 @@ export async function DELETE(request: Request) {
         const vinculo = await prisma.contadorVinculo.findUnique({ where: { id } });
         if (!vinculo) return NextResponse.json({ error: 'Vínculo não encontrado' }, { status: 404 });
         if (vinculo.contadorId !== user.id && !['MASTER', 'ADMIN'].includes(user.role)) return forbidden();
-        await prisma.contadorVinculo.delete({ where: { id } });
+        await prisma.contadorVinculo.update({
+            where: { id },
+            data: { status: 'DESVINCULADO', arquivadoEm: new Date(), arquivadoPor: user.id, motivoArquivamento: 'Desvinculo solicitado pelo usuario.' } as any
+        });
         return NextResponse.json({ success: true });
     } catch (e) { return NextResponse.json({ error: 'Erro ao desvincular.' }, { status: 500 }); }
 }

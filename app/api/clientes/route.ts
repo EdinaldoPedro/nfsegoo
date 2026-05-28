@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { createLog } from '@/app/services/logger';
 import { checkPlanLimits } from '@/app/services/planService';
 import { validateRequest } from "@/app/utils/api-security";
+import { validarCPF } from '@/app/utils/cpf';
 
 const prisma = new PrismaClient();
 
@@ -34,10 +35,10 @@ async function getEmpresaContexto(user: any, contextId: string | null) {
         const vinculo = await prisma.contadorVinculo.findUnique({
             where: { contadorId_empresaId: { contadorId: user.id, empresaId: contextId } }
         });
-        if (vinculo && vinculo.status === 'APROVADO') return contextId;
+        if (vinculo && vinculo.status === 'APROVADO' && !(vinculo as any).arquivadoEm) return contextId;
         
         const empresaAdicional = await prisma.empresa.findFirst({
-            where: { id: contextId, donoFaturamentoId: user.id }
+            where: { id: contextId, donoFaturamentoId: user.id, arquivadoEm: null } as any
         });
         if (empresaAdicional) return contextId;
 
@@ -64,7 +65,8 @@ export async function GET(request: Request) {
         if (!empresaIdAlvo) return NextResponse.json({ data: [], meta: { total: 0 } });
 
         const whereClause = {
-            vinculos: { some: { empresaId: empresaIdAlvo } },
+            arquivadoEm: null,
+            vinculos: { some: { empresaId: empresaIdAlvo, arquivadoEm: null } },
             ...(search && {
                 OR: [
                     { nome: { contains: search, mode: 'insensitive' as const } },
@@ -150,6 +152,10 @@ export async function POST(request: Request) {
             tipoFinal = (docLimpo && docLimpo.length === 11) ? 'PF' : (docLimpo && docLimpo.length === 14 ? 'PJ' : 'EXT');
         }
 
+        if (tipoFinal === 'PF' && (!docLimpo || !validarCPF(docLimpo))) {
+            return NextResponse.json({ error: 'CPF invalido.' }, { status: 400 });
+        }
+
         const cepLimpo = body.cep ? body.cep.replace(/\D/g, '') : null;
 
         // === 2. RECUPERA IBGE FALTANTE ===
@@ -169,7 +175,8 @@ export async function POST(request: Request) {
         }
 
         if (clienteGlobal) {
-            if (clienteGlobal.vinculos && clienteGlobal.vinculos.length > 0) {
+            const vinculoExistente = clienteGlobal.vinculos?.[0];
+            if (vinculoExistente && !(vinculoExistente as any).arquivadoEm) {
                 return NextResponse.json({ error: 'Já existe um cliente com este CPF/CNPJ na sua carteira.' }, { status: 400 });
             }
 
@@ -178,9 +185,14 @@ export async function POST(request: Request) {
                 where: { id: clienteGlobal.id },
                 data: {
                     tipo: tipoFinal,
+                    arquivadoEm: null,
+                    arquivadoPor: null,
+                    motivoArquivamento: null,
                     ...(codigoIbgeFinal && (!clienteGlobal.codigoIbge || clienteGlobal.codigoIbge.length < 7) ? { codigoIbge: codigoIbgeFinal } : {}),
-                    vinculos: { create: { empresaId: empresaIdAlvo } }
-                }
+                    vinculos: vinculoExistente
+                        ? { update: { where: { id: vinculoExistente.id }, data: { arquivadoEm: null, arquivadoPor: null, motivoArquivamento: null } as any } }
+                        : { create: { empresaId: empresaIdAlvo } }
+                } as any
             });
 
             await createLog({ level: 'INFO', action: 'CLIENTE_VINCULADO', message: `Cliente ${clienteVinculado.nome} vinculado à sua carteira.`, empresaId: empresaIdAlvo });
@@ -235,7 +247,7 @@ export async function PUT(request: Request) {
         if (!empresaIdAlvo) return NextResponse.json({ error: 'Acesso negado' }, { status: 403 });
 
         const clienteAtual = await prisma.cliente.findFirst({
-            where: { id: id, vinculos: { some: { empresaId: empresaIdAlvo } } }
+            where: { id: id, arquivadoEm: null, vinculos: { some: { empresaId: empresaIdAlvo, arquivadoEm: null } } } as any
         });
 
         if (!clienteAtual) return NextResponse.json({ error: 'Cliente não encontrado.' }, { status: 404 });
@@ -275,6 +287,11 @@ export async function PUT(request: Request) {
         if ('createdAt' in dadosAtualizacao) delete dadosAtualizacao.createdAt;
         if ('updatedAt' in dadosAtualizacao) delete dadosAtualizacao.updatedAt;
         if ('_count' in dadosAtualizacao) delete dadosAtualizacao._count;
+        if ('nomeValidadoPortal' in dadosAtualizacao) delete dadosAtualizacao.nomeValidadoPortal;
+
+        if ((dadosAtualizacao.tipo === 'PF' || clienteAtual.tipo === 'PF') && dadosAtualizacao.documento && !validarCPF(dadosAtualizacao.documento)) {
+            return NextResponse.json({ error: 'CPF invalido.' }, { status: 400 });
+        }
 
         // Só verifica duplicidade se o documento NÃO for nulo
         if (dadosAtualizacao.documento && dadosAtualizacao.documento !== clienteAtual.documento) {

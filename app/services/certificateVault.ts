@@ -11,6 +11,7 @@ type CertificatePurpose =
   | 'CANCEL_NFSE'
   | 'SIGN_CANCEL'
   | 'DOWNLOAD_PDF'
+  | 'CONSULT_CPF_INSCRICAO'
   | 'VALIDATE_CERT';
 
 interface CertificateSource {

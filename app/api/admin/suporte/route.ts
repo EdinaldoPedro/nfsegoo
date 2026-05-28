@@ -10,6 +10,7 @@ export async function GET(request: Request) {
 
   try {
     const tickets = await prisma.ticket.findMany({
+      where: { arquivadoEm: null } as any,
       include: {
         solicitante: { select: { nome: true, email: true } },
         atendente: { select: { nome: true, id: true } },

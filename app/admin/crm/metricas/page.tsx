@@ -19,7 +19,7 @@ export default function MetricasCrm() {
                     setMetrics(await res.json());
                 }
             } catch (error) {
-                dialog.showAlert('Erro ao carregar mÃ©tricas.');
+                dialog.showAlert('Erro ao carregar métricas.');
             } finally {
                 setLoading(false);
             }
@@ -38,8 +38,8 @@ export default function MetricasCrm() {
                         <ArrowLeft size={20} />
                     </button>
                     <div>
-                        <h1 className="text-2xl font-bold text-slate-800">MÃ©tricas e Receita</h1>
-                        <p className="text-sm text-slate-500">SaÃºde financeira e retenÃ§Ã£o do seu SaaS (Ãšltimos 30 dias).</p>
+                        <h1 className="text-2xl font-bold text-slate-800">Métricas e Receita</h1>
+                        <p className="text-sm text-slate-500">Saúde financeira e retenção do seu SaaS (últimos 30 dias).</p>
                     </div>
                 </div>
             </div>
@@ -50,7 +50,7 @@ export default function MetricasCrm() {
                     <div className="relative z-10">
                         <p className="text-emerald-100 font-bold uppercase tracking-wider mb-2 text-sm flex items-center gap-2"><TrendingUp size={18}/> Receita Recorrente Mensal (MRR)</p>
                         <h2 className="text-5xl font-black mb-2">R$ {metrics.mrrTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</h2>
-                        <p className="text-emerald-200 text-sm">Previsto para faturar todo o mÃªs passivamente.</p>
+                        <p className="text-emerald-200 text-sm">Previsto para faturar todo o mês passivamente.</p>
                     </div>
                 </div>
 
@@ -59,12 +59,12 @@ export default function MetricasCrm() {
                     <div className="relative z-10">
                         <p className="text-blue-100 font-bold uppercase tracking-wider mb-2 text-sm flex items-center gap-2"><Activity size={18}/> Receita Anual Estimada (ARR)</p>
                         <h2 className="text-5xl font-black mb-2">R$ {metrics.arrTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</h2>
-                        <p className="text-blue-200 text-sm">O valor do seu SaaS num ano de operaÃ§Ã£o.</p>
+                        <p className="text-blue-200 text-sm">O valor do seu SaaS num ano de operação.</p>
                     </div>
                 </div>
             </div>
 
-            <h3 className="font-bold text-lg text-slate-700 pt-4 border-t">SaÃºde da Carteira</h3>
+            <h3 className="font-bold text-lg text-slate-700 pt-4 border-t">Saúde da Carteira</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                     <div className="flex items-center gap-3 mb-2">
@@ -81,7 +81,7 @@ export default function MetricasCrm() {
                         <p className="text-sm font-bold text-slate-500 uppercase">Em Trial (Teste)</p>
                     </div>
                     <h3 className="text-3xl font-black text-slate-800">{metrics.clientesTrial}</h3>
-                    <p className="text-xs text-slate-400 mt-1">Potenciais conversÃµes pendentes</p>
+                    <p className="text-xs text-slate-400 mt-1">Potenciais conversões pendentes</p>
                 </div>
 
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
@@ -90,7 +90,7 @@ export default function MetricasCrm() {
                         <p className="text-sm font-bold text-slate-500 uppercase">Novos (30d)</p>
                     </div>
                     <h3 className="text-3xl font-black text-slate-800">+{metrics.novosClientes30d}</h3>
-                    <p className="text-xs text-slate-400 mt-1">Contas criadas no Ãºltimo mÃªs</p>
+                    <p className="text-xs text-slate-400 mt-1">Contas criadas no último mês</p>
                 </div>
 
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-red-100">

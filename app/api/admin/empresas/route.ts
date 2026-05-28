@@ -26,13 +26,14 @@ export async function GET(request: Request) {
     if (type === 'TOMADOR') {
         // === MODO TOMADOR: Busca Global na Tabela CLIENTE ===
         // Agora buscamos DIRETO na tabela Cliente, pois ela é global
-        const whereClause: any = search ? {
-            OR: [
+        const whereClause: any = {
+            arquivadoEm: null,
+            ...(search ? { OR: [
                 { nome: { contains: search, mode: 'insensitive' } },
                 { documento: { contains: search } },
                 { email: { contains: search, mode: 'insensitive' } }
-            ]
-        } : {};
+            ] } : {})
+        };
 
         const [clientes, count] = await prisma.$transaction([
             prisma.cliente.findMany({
@@ -44,6 +45,7 @@ export async function GET(request: Request) {
                     _count: { select: { vinculos: true } },
                     // Opcional: Traz o primeiro vínculo para exibir "Ex: Vinculado a X"
                     vinculos: {
+                        where: { arquivadoEm: null },
                         take: 1,
                         include: { empresa: { select: { razaoSocial: true, documento: true } } }
                     }
@@ -67,14 +69,15 @@ export async function GET(request: Request) {
 
     } else {
         // === MODO PRESTADOR: Busca na tabela EMPRESA (Seus Assinantes) ===
-        const whereClause: any = search ? {
-            OR: [
+        const whereClause: any = {
+            arquivadoEm: null,
+            ...(search ? { OR: [
                 { razaoSocial: { contains: search, mode: 'insensitive' } }, 
                 { documento: { contains: search } },
                 { donoUser: { nome: { contains: search, mode: 'insensitive' } } },
                 { donoUser: { email: { contains: search, mode: 'insensitive' } } }
-            ]
-        } : {};
+            ] } : {})
+        };
 
         const [empresas, count] = await prisma.$transaction([
             prisma.empresa.findMany({
@@ -85,12 +88,13 @@ export async function GET(request: Request) {
                     donoUser: { select: { nome: true, email: true } },
                     // ADICIONE ESTA PARTE:
                     minhaCarteira: {
+                        where: { arquivadoEm: null },
                         include: { cliente: { select: { id: true, nome: true, documento: true } } }
                     }
                 },
                 orderBy: { updatedAt: 'desc' }
             }),
-            prisma.cliente.count({ where: whereClause }) // Corrija aqui para contar empresas se necessário
+            prisma.empresa.count({ where: whereClause })
         ]);
 
         data = empresas.map(emp => {
@@ -130,22 +134,21 @@ export async function PUT(request: Request) {
     const body = await request.json();
     const { id, origem, ...dados } = body; 
 
-    // Limpeza de campos relacionais/virtuais
-    const cleanData = { ...dados };
-    delete cleanData.vinculo;
-    delete cleanData.vinculos;
-    delete cleanData.totalVinculos;
-    delete cleanData.donos;
-    delete cleanData.donoUser;
-    delete cleanData._count;
-    delete cleanData.qtdNotas;
+    const pick = (source: any, fields: string[]) => {
+        return fields.reduce((acc, field) => {
+            if (source[field] !== undefined) acc[field] = source[field];
+            return acc;
+        }, {} as any);
+    };
 
     if (origem === 'TOMADOR') {
-        if (cleanData.razaoSocial) {
-            cleanData.nome = cleanData.razaoSocial;
-            delete cleanData.razaoSocial;
-        }
-        delete cleanData.nomeFantasia; 
+        const cleanData = pick(dados, [
+            'tipo', 'documento', 'nome', 'nomeFantasia', 'email', 'telefone',
+            'inscricaoMunicipal', 'inscricaoEstadual', 'cep', 'logradouro',
+            'numero', 'complemento', 'bairro', 'cidade', 'uf', 'pais',
+            'codigoIbge', 'moeda', 'nif'
+        ]);
+        if (dados.razaoSocial) cleanData.nome = dados.razaoSocial;
         
         const updated = await prisma.cliente.update({
             where: { id },
@@ -153,6 +156,14 @@ export async function PUT(request: Request) {
         });
         return NextResponse.json(updated);
     } else {
+        const cleanData = pick(dados, [
+            'documento', 'ambiente', 'cadastroCompleto', 'serieDPS', 'ultimoDPS',
+            'email', 'razaoSocial', 'nomeFantasia', 'cep', 'logradouro',
+            'numero', 'complemento', 'bairro', 'cidade', 'uf', 'codigoIbge',
+            'aliquotaPadrao', 'issRetidoPadrao', 'tipoTributacaoPadrao',
+            'regimeEspecialTributacao', 'inscricaoMunicipal', 'regimeTributario'
+        ]);
+
         const updated = await prisma.empresa.update({
             where: { id },
             data: cleanData
@@ -180,13 +191,14 @@ export async function DELETE(request: Request) {
     try {
         // === CASO 1: APENAS DESVINCULAR UM CLIENTE DE UMA EMPRESA ===
         if (action === 'UNBIND' && clienteId) {
-            await prisma.vinculoCarteira.delete({
+            await prisma.vinculoCarteira.update({
                 where: {
                     empresaId_clienteId: {
                         empresaId: id,
                         clienteId: clienteId
                     }
-                }
+                },
+                data: { arquivadoEm: new Date(), arquivadoPor: user.id, motivoArquivamento: 'Desvinculo solicitado no painel admin.' } as any
             });
             return NextResponse.json({ success: true, message: 'Vínculo removido com sucesso.' });
         }
@@ -194,22 +206,30 @@ export async function DELETE(request: Request) {
         // === CASO 2: EXCLUSÃO TOTAL (TOMADOR OU PRESTADOR) ===
         if (type === 'TOMADOR') {
             // Apaga Cliente Global e todos os seus vínculos/históricos
-            await prisma.notaFiscal.deleteMany({ where: { clienteId: id } });
-            await prisma.venda.deleteMany({ where: { clienteId: id } });
-            await prisma.vinculoCarteira.deleteMany({ where: { clienteId: id } });
-            await prisma.cliente.delete({ where: { id } });
+            await prisma.vinculoCarteira.updateMany({
+                where: { clienteId: id },
+                data: { arquivadoEm: new Date(), arquivadoPor: user.id, motivoArquivamento: 'Cliente excluido no painel admin.' } as any
+            });
+            await prisma.cliente.update({
+                where: { id },
+                data: { arquivadoEm: new Date(), arquivadoPor: user.id, motivoArquivamento: 'Cliente excluido no painel admin.' } as any
+            });
         } else {
             // Apaga Prestador (Empresa Assinante) e limpa relações
             await prisma.user.updateMany({ where: { empresaId: id }, data: { empresaId: null } });
-            await prisma.userCliente.deleteMany({ where: { empresaId: id } });
-            await prisma.contadorVinculo.deleteMany({ where: { empresaId: id } });
-            await prisma.systemLog.deleteMany({ where: { empresaId: id } });
-            await prisma.cnae.deleteMany({ where: { empresaId: id } });
-            await prisma.notaFiscal.deleteMany({ where: { empresaId: id } });
-            await prisma.venda.deleteMany({ where: { empresaId: id } });
-            await prisma.vinculoCarteira.deleteMany({ where: { empresaId: id } });
+            await prisma.contadorVinculo.updateMany({
+                where: { empresaId: id },
+                data: { arquivadoEm: new Date(), arquivadoPor: user.id, motivoArquivamento: 'Empresa excluida no painel admin.' } as any
+            });
+            await prisma.vinculoCarteira.updateMany({
+                where: { empresaId: id },
+                data: { arquivadoEm: new Date(), arquivadoPor: user.id, motivoArquivamento: 'Empresa excluida no painel admin.' } as any
+            });
             
-            await prisma.empresa.delete({ where: { id } });
+            await prisma.empresa.update({
+                where: { id },
+                data: { arquivadoEm: new Date(), arquivadoPor: user.id, motivoArquivamento: 'Empresa excluida no painel admin.' } as any
+            });
         }
 
         return NextResponse.json({ success: true });

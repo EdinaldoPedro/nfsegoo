@@ -49,6 +49,7 @@ export async function GET(request: Request) {
     // Filtros
     const whereClause: any = {
       empresaId,
+      arquivadoEm: null,
       status: incluirCanceladas 
         ? { in: ['AUTORIZADA', 'CANCELADA'] } 
         : 'AUTORIZADA',

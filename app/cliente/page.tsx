@@ -9,6 +9,7 @@ import {
 import { useRouter } from 'next/navigation';
 import { useDialog } from '@/app/contexts/DialogContext';
 import { validarCPF } from '@/app/utils/cpf';
+import AppHeader from '@/components/AppHeader';
 
 // Lista de Países para Padronização (ISO 3166 / BACEN simplificado) - SEM ACENTOS PARA SEGURANÇA
 const LISTA_PAISES = [
@@ -55,6 +56,7 @@ export default function MeusClientes() {
   
   const [salvando, setSalvando] = useState(false);
   const [buscandoDados, setBuscandoDados] = useState(false);
+  const [nomePfBloqueado, setNomePfBloqueado] = useState(false);
   const [termoBusca, setTermoBusca] = useState('');
   
   // === ESTADO DO FORMULÁRIO ===
@@ -111,6 +113,7 @@ export default function MeusClientes() {
 
   // --- LÓGICA DO WIZARD ---
   const abrirNovoCadastro = () => {
+    setNomePfBloqueado(false);
     setClienteAtual({ 
         id: '', nome: '', nomeFantasia: '', inscricaoMunicipal: '', email: '', 
         documento: '', cidade: '', uf: '', cep: '', logradouro: '', 
@@ -121,16 +124,24 @@ export default function MeusClientes() {
   }
 
   const selecionarTipo = (tipo: 'PJ' | 'PF' | 'EXT') => {
+      setNomePfBloqueado(false);
       setClienteAtual(prev => ({ 
           ...prev, 
           tipo,
           pais: tipo === 'EXT' ? '' : 'Brasil',
-          documento: '' 
+          documento: '',
+          nome: tipo === 'PF' ? '' : prev.nome,
       }));
       setModalStep('FORMULARIO');
   };
 
+  const manterIbgeSeConsultaVierVazia = (codigoNovo: string | null | undefined, codigoAtual: string | null | undefined) => {
+      const novoLimpo = String(codigoNovo || '').replace(/\D/g, '');
+      return novoLimpo.length >= 7 ? novoLimpo : (codigoAtual || '');
+  };
+
   const abrirEdicao = (cliente: Cliente) => {
+    setNomePfBloqueado(false);
     setClienteAtual({ ...cliente, pais: cliente.pais || 'Brasil' });
     setModalStep('FORMULARIO'); 
     setIsFormOpen(true);
@@ -160,6 +171,7 @@ export default function MeusClientes() {
             if (res.ok) {
                 const dados = await res.json();
                 if (dados) {
+                    setNomePfBloqueado(false);
                     setClienteAtual(prev => ({ ...prev, ...dados }));
                     dialog.showAlert({ type: 'info', title: 'Cliente Encontrado', description: 'Dados carregados da sua base.' });
                     return true;
@@ -169,6 +181,60 @@ export default function MeusClientes() {
         finally { setBuscandoDados(false); }
         return false;
     };
+
+  const consultarCpfNoPortal = async (cpfLimpo: string) => {
+      setBuscandoDados(true);
+      const userId = localStorage.getItem('userId');
+      const contextId = localStorage.getItem('empresaContextId');
+
+      try {
+          const res = await fetch('/api/clientes/pf-portal', {
+              method: 'POST',
+              headers: {
+                  'Content-Type': 'application/json',
+                  'x-user-id': userId || '',
+                  'x-empresa-id': contextId || '',
+              },
+              body: JSON.stringify({ cpf: cpfLimpo }),
+          });
+
+          const dados = await res.json();
+          if (!res.ok) {
+              setNomePfBloqueado(false);
+              dialog.showAlert({
+                  type: 'warning',
+                  title: 'Consulta oficial nao concluida',
+                  description: dados.error || 'Nao foi possivel validar o CPF no Portal Nacional agora.',
+              });
+              return false;
+          }
+
+          if (dados?.nome) {
+              setClienteAtual(prev => ({
+                  ...prev,
+                  tipo: 'PF',
+                  nome: dados.nome,
+              }));
+              setNomePfBloqueado(dados.origem === 'PORTAL_NACIONAL');
+              dialog.showAlert({
+                  type: 'success',
+                  title: 'CPF validado no Portal Nacional',
+                  description: 'Nome oficial carregado automaticamente.',
+              });
+              return true;
+          }
+      } catch {
+          setNomePfBloqueado(false);
+          dialog.showAlert({
+              type: 'danger',
+              description: 'Erro de conexao ao consultar CPF no Portal Nacional.',
+          });
+      } finally {
+          setBuscandoDados(false);
+      }
+
+      return false;
+  };
 
   // Busca CNPJ na API Externa
   const executarBuscaCNPJ = async (cnpjLimpo: string) => {
@@ -187,7 +253,7 @@ export default function MeusClientes() {
                   email: dados.email, cep: dados.cep,
                   logradouro: dados.logradouro, numero: dados.numero,
                   bairro: dados.bairro, cidade: dados.cidade, uf: dados.uf,
-                  codigoIbge: dados.codigoIbge
+                  codigoIbge: manterIbgeSeConsultaVierVazia(dados.codigoIbge, prev.codigoIbge)
               }));
               dialog.showAlert({ type: 'success', description: 'Dados carregados da Receita!' });
           } else { 
@@ -232,7 +298,7 @@ export default function MeusClientes() {
               bairro: dados.bairro,
               cidade: dados.cidade,
               uf: dados.uf,
-              codigoIbge: dados.codigoIbge
+              codigoIbge: manterIbgeSeConsultaVierVazia(dados.codigoIbge, prev.codigoIbge)
           }));
 
           dialog.showAlert({ type: 'success', description: 'Dados oficiais carregados. Clique em Salvar para confirmar.' });
@@ -276,14 +342,22 @@ export default function MeusClientes() {
       }
 
       setClienteAtual(prev => ({ ...prev, documento: documentoFormatado }));
+      if (clienteAtual.tipo === 'PF' && rawLength < 11) {
+          setNomePfBloqueado(false);
+          setClienteAtual(prev => ({ ...prev, documento: documentoFormatado, nome: '' }));
+      }
 
       // === AUTOMAÇÃO PF (11 Dígitos) ===
       if (clienteAtual.tipo === 'PF' && rawLength === 11) {
           if (!validarCPF(documentoFormatado)) {
+               setNomePfBloqueado(false);
                dialog.showAlert({ type: 'warning', title: 'CPF Inválido', description: 'Verifique os números digitados.' });
                return;
           }
-          await verificarClienteExistente(v);
+          const achouInterno = await verificarClienteExistente(v);
+          if (!achouInterno) {
+              await consultarCpfNoPortal(v);
+          }
       }
 
       // === AUTOMAÇÃO PJ (14 Dígitos) ===
@@ -309,7 +383,7 @@ export default function MeusClientes() {
                   ...prev,
                   logradouro: dados.logradouro, bairro: dados.bairro,
                   cidade: dados.cidade || dados.localidade, uf: dados.uf,
-                  codigoIbge: dados.codigoIbge
+                  codigoIbge: manterIbgeSeConsultaVierVazia(dados.codigoIbge, prev.codigoIbge)
               }));
           }
       } catch (e) { } finally { setBuscandoDados(false); }
@@ -317,6 +391,12 @@ export default function MeusClientes() {
 
   const handleSalvar = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (buscandoDados) {
+      return dialog.showAlert({ type: 'info', title: 'Aguarde a consulta', description: 'O SaaS ainda esta buscando os dados oficiais deste cliente.' });
+    }
+    if (clienteAtual.tipo === 'PF' && !validarCPF(clienteAtual.documento || '')) {
+      return dialog.showAlert({ type: 'warning', title: 'CPF invalido', description: 'Verifique o CPF antes de salvar.' });
+    }
     if (!clienteAtual.nome) return dialog.showAlert("Nome é obrigatório.");
     
     setSalvando(true);
@@ -333,7 +413,10 @@ export default function MeusClientes() {
             'x-user-id': userId || '', 
             'x-empresa-id': contextId || ''
         },
-        body: JSON.stringify(clienteAtual)
+        body: JSON.stringify({
+            ...clienteAtual,
+            nomeValidadoPortal: nomePfBloqueado,
+        })
       });
 
       if (res.ok) {
@@ -363,8 +446,23 @@ export default function MeusClientes() {
   // Classes utilitárias para reutilização
   const labelClass = "block text-xs font-bold text-slate-500 mb-1 uppercase";
   const inputClass = "w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition text-sm text-slate-700";
+  const formularioBloqueado = buscandoDados || salvando;
 
   return (
+    <div className="saas-shell">
+      <AppHeader
+        title="Meus clientes"
+        subtitle="Gerencie tomadores PF, PJ e Exterior."
+        eyebrow="Carteira"
+        backHref="/cliente/dashboard"
+        action={(
+          <button onClick={abrirNovoCadastro} className="saas-btn-primary">
+            <Plus size={18} /> Novo cliente
+          </button>
+        )}
+      />
+      <div className="saas-container max-w-6xl space-y-6">
+        <div className="hidden">
     <div className="min-h-screen bg-slate-50 p-6 md:p-8">
       <div className="max-w-6xl mx-auto space-y-6">
         
@@ -385,6 +483,10 @@ export default function MeusClientes() {
             </button>
         </div>
 
+        </div>
+        </div>
+        </div>
+
         {/* MODAL */}
         {isFormOpen && (
             <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
@@ -395,13 +497,13 @@ export default function MeusClientes() {
                         <div className="flex items-center gap-3">
                             {/* Botão voltar só aparece se for formulario de novo cadastro */}
                             {modalStep === 'FORMULARIO' && !clienteAtual.id && (
-                                <button onClick={voltarSelecao} className="text-slate-400 hover:text-blue-600"><ArrowLeft size={20}/></button>
+                                <button disabled={formularioBloqueado} onClick={voltarSelecao} className="text-slate-400 hover:text-blue-600 disabled:opacity-40"><ArrowLeft size={20}/></button>
                             )}
                             <h3 className="font-bold text-lg text-slate-800">
                                 {modalStep === 'SELECAO' ? 'Novo Cliente' : clienteAtual.id ? 'Editar Cliente' : `Novo - ${clienteAtual.tipo === 'EXT' ? 'Exterior' : clienteAtual.tipo}`}
                             </h3>
                         </div>
-                        <button onClick={() => setIsFormOpen(false)} className="p-2 hover:bg-slate-100 rounded-full text-slate-400"><X size={24} /></button>
+                        <button disabled={formularioBloqueado} onClick={() => setIsFormOpen(false)} className="p-2 hover:bg-slate-100 rounded-full text-slate-400 disabled:opacity-40"><X size={24} /></button>
                     </div>
             
                     <div className="p-6 overflow-y-auto custom-scrollbar flex-1">
@@ -445,10 +547,10 @@ export default function MeusClientes() {
                                                 className={`${inputClass} font-mono pr-10`}
                                                 value={clienteAtual.documento || ''} 
                                                 onChange={e => handleDocumentoChange(e.target.value)}
-                                                disabled={isEdicaoPJ}
+                                                disabled={formularioBloqueado || isEdicaoPJ}
                                                 // Verifica se existe no banco ao sair do campo (para Exterior)
                                                 onBlur={(e) => {
-                                                    if(clienteAtual.tipo === 'EXT' && e.target.value.length > 3) verificarClienteExistente(e.target.value);
+                                                    if(!formularioBloqueado && clienteAtual.tipo === 'EXT' && e.target.value.length > 3) verificarClienteExistente(e.target.value);
                                                 }}
                                                 placeholder={clienteAtual.tipo === 'EXT' ? 'Ex: 123456789' : 'Apenas números'}
                                                 maxLength={clienteAtual.tipo === 'EXT' ? 20 : 18}
@@ -464,6 +566,7 @@ export default function MeusClientes() {
                                         <label className={labelClass}>Email</label>
                                         <input type="email" placeholder="email@cliente.com" className={inputClass}
                                             value={clienteAtual.email || ''} onChange={e => setClienteAtual({...clienteAtual, email: e.target.value})}
+                                            disabled={formularioBloqueado}
                                         />
                                     </div>
                                 </div>
@@ -478,8 +581,13 @@ export default function MeusClientes() {
                                             className={inputClass}
                                             value={clienteAtual.nome} 
                                             onChange={e => setClienteAtual({...clienteAtual, nome: e.target.value})}
-                                            disabled={isEdicaoPJ}
+                                            disabled={formularioBloqueado || isEdicaoPJ || nomePfBloqueado}
                                         />
+                                        {nomePfBloqueado && (
+                                            <p className="mt-1 text-xs font-medium text-green-700">
+                                                Nome confirmado pelo Portal Nacional para este CPF.
+                                            </p>
+                                        )}
                                     </div>
                                     
                                     {isPJ && (
@@ -488,7 +596,7 @@ export default function MeusClientes() {
                                                 <label className={labelClass}>Nome Fantasia</label>
                                                 <input className={inputClass}
                                                     value={clienteAtual.nomeFantasia || ''} onChange={e => setClienteAtual({...clienteAtual, nomeFantasia: e.target.value})}
-                                                    disabled={isEdicaoPJ}
+                                                    disabled={formularioBloqueado || isEdicaoPJ}
                                                 />
                                             </div>
                                             <div>
@@ -496,6 +604,7 @@ export default function MeusClientes() {
                                                 <input className={inputClass}
                                                     value={clienteAtual.inscricaoMunicipal || ''} onChange={e => setClienteAtual({...clienteAtual, inscricaoMunicipal: e.target.value})}
                                                     placeholder="Apenas números"
+                                                    disabled={formularioBloqueado}
                                                 />
                                             </div>
                                         </>
@@ -523,6 +632,7 @@ export default function MeusClientes() {
                                                         className={`${inputClass} bg-yellow-50 font-bold text-slate-800`}
                                                         value={clienteAtual.pais || ''}
                                                         onChange={e => setClienteAtual({...clienteAtual, pais: e.target.value})}
+                                                        disabled={formularioBloqueado}
                                                     >
                                                         <option value="">Selecione o País...</option>
                                                         {LISTA_PAISES.map(p => (
@@ -537,6 +647,7 @@ export default function MeusClientes() {
                                                         className={`${inputClass} font-bold text-slate-800`}
                                                         value={clienteAtual.moeda || 'BRL'}
                                                         onChange={e => setClienteAtual({...clienteAtual, moeda: e.target.value})}
+                                                        disabled={formularioBloqueado}
                                                     >
                                                         <option value="BRL">BRL - Real Brasileiro</option>
                                                         <option value="USD">USD - Dólar Americano</option>
@@ -565,42 +676,42 @@ export default function MeusClientes() {
                                                 onChange={e => setClienteAtual({...clienteAtual, cep: e.target.value})}
                                                 onBlur={handleBuscarCep}
                                                 placeholder={clienteAtual.tipo === 'EXT' ? 'Ex: A2B-3C4' : '00000-000'}
-                                                disabled={isEdicaoPJ}
+                                                disabled={formularioBloqueado || isEdicaoPJ}
                                             />
                                         </div>
                                         <div className="md:col-span-2">
                                             <label className={labelClass}>Logradouro</label>
                                             <input className={inputClass}
                                                 value={clienteAtual.logradouro || ''} onChange={e => setClienteAtual({...clienteAtual, logradouro: e.target.value})}
-                                                disabled={isEdicaoPJ}
+                                                disabled={formularioBloqueado || isEdicaoPJ}
                                             />
                                         </div>
                                         <div>
                                             <label className={labelClass}>Número</label>
                                             <input required placeholder="Nº" className={inputClass}
                                                 value={clienteAtual.numero || ''} onChange={e => setClienteAtual({...clienteAtual, numero: e.target.value})}
-                                                disabled={isEdicaoPJ}
+                                                disabled={formularioBloqueado || isEdicaoPJ}
                                             />
                                         </div>
                                         <div className="md:col-span-2">
                                             <label className={labelClass}>Bairro</label>
                                             <input className={inputClass}
                                                 value={clienteAtual.bairro || ''} onChange={e => setClienteAtual({...clienteAtual, bairro: e.target.value})}
-                                                disabled={isEdicaoPJ}
+                                                disabled={formularioBloqueado || isEdicaoPJ}
                                             />
                                         </div>
                                         <div>
                                             <label className={labelClass}>Cidade</label>
                                             <input className={inputClass}
                                                 value={clienteAtual.cidade || ''} onChange={e => setClienteAtual({...clienteAtual, cidade: e.target.value})}
-                                                disabled={isEdicaoPJ}
+                                                disabled={formularioBloqueado || isEdicaoPJ}
                                             />
                                         </div>
                                         <div>
                                             <label className={labelClass}>{clienteAtual.tipo === 'EXT' ? 'Província/Estado' : 'UF'}</label>
                                             <input className={inputClass}
                                                 value={clienteAtual.uf || ''} onChange={e => setClienteAtual({...clienteAtual, uf: e.target.value})} maxLength={clienteAtual.tipo === 'EXT' ? 50 : 2}
-                                                disabled={isEdicaoPJ}
+                                                disabled={formularioBloqueado || isEdicaoPJ}
                                             />
                                         </div>
                                     </div>
@@ -612,7 +723,7 @@ export default function MeusClientes() {
                     {/* Footer do Modal (Só aparece no formulário) */}
                     {modalStep === 'FORMULARIO' && (
                         <div className="flex justify-end gap-3 p-6 border-t bg-white">
-                            <button type="button" onClick={() => setIsFormOpen(false)} className="px-6 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition font-medium">Cancelar</button>
+                            <button type="button" disabled={formularioBloqueado} onClick={() => setIsFormOpen(false)} className="px-6 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition font-medium disabled:opacity-40">Cancelar</button>
                             {isEdicaoPJ && (
                                 <button
                                     type="button"
@@ -623,8 +734,8 @@ export default function MeusClientes() {
                                     {buscandoDados ? <Loader2 className="animate-spin" size={18}/> : <RefreshCw size={18} />} Atualizar cadastro
                                 </button>
                             )}
-                            <button onClick={handleSalvar} disabled={salvando} className="bg-green-600 text-white px-8 py-2 rounded-lg hover:bg-green-700 transition font-bold shadow-lg shadow-green-100 flex items-center gap-2 disabled:opacity-60">
-                                {salvando ? <Loader2 className="animate-spin" size={18}/> : <><Save size={18} /> Salvar</>}
+                            <button onClick={handleSalvar} disabled={formularioBloqueado} className="bg-green-600 text-white px-8 py-2 rounded-lg hover:bg-green-700 transition font-bold shadow-lg shadow-green-100 flex items-center gap-2 disabled:opacity-60">
+                                {formularioBloqueado ? <><Loader2 className="animate-spin" size={18}/> Aguarde</> : <><Save size={18} /> Salvar</>}
                             </button>
                         </div>
                     )}

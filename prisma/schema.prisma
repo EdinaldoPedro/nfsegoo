@@ -83,6 +83,9 @@ model Empresa {
   certificadoVencimento    DateTime?
   updatedAt                DateTime          @updatedAt
   lastApiCheck             DateTime?
+  arquivadoEm              DateTime?
+  arquivadoPor             String?
+  motivoArquivamento       String?
   atividades               Cnae[]
   contadoresLink           ContadorVinculo[] @relation("EmpresaContabil")
   notasEmitidas            NotaFiscal[]      @relation("PrestadorNota")
@@ -116,6 +119,9 @@ model Cliente {
   codigoIbge         String?
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt
+  arquivadoEm        DateTime?
+  arquivadoPor       String?
+  motivoArquivamento String?
   moeda              String?           @default("BRL")
   nif                String?
   notas              NotaFiscal[]
@@ -133,6 +139,9 @@ model VinculoCarteira {
   emailFinanceiro String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+  arquivadoEm     DateTime?
+  arquivadoPor    String?
+  motivoArquivamento String?
   cliente         Cliente  @relation(fields: [clienteId], references: [id], onDelete: Cascade)
   empresa         Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
 
@@ -148,6 +157,9 @@ model Venda {
   status    String       @default("PENDENTE")
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
+  arquivadoEm DateTime?
+  arquivadoPor String?
+  motivoArquivamento String?
   notas     NotaFiscal[]
   logs      SystemLog[]
   cliente   Cliente      @relation(fields: [clienteId], references: [id])
@@ -187,6 +199,8 @@ model NotaFiscal {
   tomadorCnpj   String
   status        StatusNota @default(RASCUNHO)
   xmlBase64     String?
+  xmlAutorizadoBase64 String?
+  xmlCancelamentoEventoBase64 String?
   pdfBase64     String?
   chaveAcesso   String?
   protocolo     String?
@@ -196,6 +210,9 @@ model NotaFiscal {
   codigoServico String?
   dataEmissao   DateTime?
   createdAt     DateTime   @default(now())
+  arquivadoEm   DateTime?
+  arquivadoPor  String?
+  motivoArquivamento String?
   cliente       Cliente    @relation(fields: [clienteId], references: [id])
   empresa       Empresa    @relation("PrestadorNota", fields: [empresaId], references: [id])
   venda         Venda?     @relation(fields: [vendaId], references: [id])
@@ -276,6 +293,9 @@ model PlanHistory {
   status        String    @default("ATIVO")
   notasEmitidas Int       @default(0)
   createdAt     DateTime  @default(now())
+  arquivadoEm   DateTime?
+  arquivadoPor  String?
+  motivoArquivamento String?
   plan          Plan      @relation(fields: [planId], references: [id])
   user          User      @relation(fields: [userId], references: [id])
 }
@@ -309,6 +329,9 @@ model Ticket {
   atendenteId   String?
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
+  arquivadoEm   DateTime?
+  arquivadoPor  String?
+  motivoArquivamento String?
   atendente     User?            @relation("AtendenteTicket", fields: [atendenteId], references: [id])
   catalogItem   TicketCatalog?   @relation(fields: [catalogId], references: [id])
   solicitante   User             @relation("SolicitanteTicket", fields: [solicitanteId], references: [id])
@@ -336,6 +359,9 @@ model ContadorVinculo {
   empresaId  String
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+  arquivadoEm DateTime?
+  arquivadoPor String?
+  motivoArquivamento String?
   contador   User     @relation("ContadorUser", fields: [contadorId], references: [id])
   empresa    Empresa  @relation("EmpresaContabil", fields: [empresaId], references: [id])
 
@@ -376,6 +402,9 @@ model Pedido {
   gatewayId       String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+  arquivadoEm     DateTime?
+  arquivadoPor    String?
+  motivoArquivamento String?
   user            User     @relation(fields: [userId], references: [id])
 }
 

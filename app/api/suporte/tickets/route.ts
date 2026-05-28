@@ -10,7 +10,7 @@ export async function GET(request: Request) {
 
   try {
     const tickets = await prisma.ticket.findMany({
-      where: { solicitanteId: targetId },
+      where: { solicitanteId: targetId, arquivadoEm: null } as any,
       include: {
         solicitante: { select: { nome: true, email: true } },
         atendente: { select: { nome: true } },
@@ -52,6 +52,7 @@ export async function POST(request: Request) {
       const duplicado = await prisma.ticket.findFirst({
         where: {
           solicitanteId: targetId,
+          arquivadoEm: null,
           assunto: { contains: vendaIdReferencia.split('-')[0] },
           status: { notIn: ['RESOLVIDO', 'FECHADO'] },
         },

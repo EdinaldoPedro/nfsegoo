@@ -81,6 +81,8 @@ export async function PUT(request: Request, { params }: { params: { id: string }
 export async function DELETE(request: Request, { params }: { params: { id: string } }) {
   const authError = await ensureSupport(request);
   if (authError) return authError;
+  const user = await getAuthenticatedUser(request);
+  if (!user) return unauthorized();
 
   try {
     const { id } = params;
@@ -95,9 +97,23 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
       );
     }
 
-    await prisma.systemLog.deleteMany({ where: { vendaId: id } });
-    await prisma.notaFiscal.deleteMany({ where: { vendaId: id } });
-    await prisma.venda.delete({ where: { id } });
+    await prisma.notaFiscal.updateMany({
+      where: { vendaId: id },
+      data: {
+        arquivadoEm: new Date(),
+        arquivadoPor: user.id,
+        motivoArquivamento: 'Exclusao solicitada no painel admin.',
+      } as any,
+    });
+    await prisma.venda.update({
+      where: { id },
+      data: {
+        status: 'ARQUIVADA',
+        arquivadoEm: new Date(),
+        arquivadoPor: user.id,
+        motivoArquivamento: 'Exclusao solicitada no painel admin.',
+      } as any,
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {

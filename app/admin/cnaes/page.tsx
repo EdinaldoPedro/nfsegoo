@@ -1,302 +1,142 @@
 'use client';
+
 import { useEffect, useState } from 'react';
-import { Search, Edit, Save, X, ChevronLeft, ChevronRight, CheckCircle, XCircle } from 'lucide-react';
+import { Search, Edit, Save, X, ChevronLeft, ChevronRight, CheckCircle, XCircle, Briefcase, FileCode2, ShieldCheck, Percent } from 'lucide-react';
 import { useDialog } from '@/app/contexts/DialogContext';
+
+const inputBase = 'w-full rounded-xl border border-slate-200 bg-white p-3 text-sm outline-none transition focus:border-blue-300 focus:ring-2 focus:ring-blue-100';
 
 export default function AdminCnaes() {
   const dialog = useDialog();
   const [cnaes, setCnaes] = useState<any[]>([]);
-  
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
   const [termoBusca, setTermoBusca] = useState('');
   const limit = 10;
-
   const [editing, setEditing] = useState<any>(null);
 
   useEffect(() => {
-    const delayDebounce = setTimeout(() => {
-      carregar(page, termoBusca);
-    }, 500);
+    const delayDebounce = setTimeout(() => carregar(page, termoBusca), 500);
     return () => clearTimeout(delayDebounce);
   }, [page, termoBusca]);
 
   const carregar = (pagina: number, busca: string) => {
-
-    fetch(`/api/admin/cnaes?page=${pagina}&limit=${limit}&search=${busca}`, {
-        headers: { 
-        }
-    })
+    fetch(`/api/admin/cnaes?page=${pagina}&limit=${limit}&search=${busca}`, { headers: {} })
       .then(r => r.json())
       .then(res => {
         setCnaes(res.data || []);
         setTotalPages(res.meta?.totalPages || 1);
         setTotalItems(res.meta?.total || 0);
       })
-      .catch(err => console.error("Erro ao carregar CNAEs:", err));
+      .catch(err => console.error('Erro ao carregar CNAEs:', err));
   };
 
   const handleSave = async () => {
-    
-    // Tratamento para garantir que enviamos nulo caso a flag seja falsa
-    const payloadToSave = {
-        ...editing,
-        aliquotaCrsf: editing.retemCrsf ? editing.aliquotaCrsf : null,
-        aliquotaIr: editing.retemIr ? editing.aliquotaIr : null
-    };
-    
-    const res = await fetch('/api/admin/cnaes', {
-        method: 'PUT',
-        headers: { 
-            'Content-Type': 'application/json'},
-        body: JSON.stringify(payloadToSave)
-    });
-
+    const payloadToSave = { ...editing, aliquotaCrsf: editing.retemCrsf ? editing.aliquotaCrsf : null, aliquotaIr: editing.retemIr ? editing.aliquotaIr : null };
+    const res = await fetch('/api/admin/cnaes', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payloadToSave) });
     if (res.ok) {
-        setEditing(null);
-        carregar(page, termoBusca);
-        dialog.showAlert({ type: 'success', description: "Tributação atualizada!" });
+      setEditing(null);
+      carregar(page, termoBusca);
+      dialog.showAlert({ type: 'success', description: 'Tributação atualizada!' });
     } else {
-        dialog.showAlert({ type: 'danger', description: "Erro ao salvar." });
+      dialog.showAlert({ type: 'danger', description: 'Erro ao salvar.' });
     }
   };
-  
-  // Helpers visuais para as retenções
+
   const handleToggleRetencao = (campoBooleano: string, campoAliquota: string, valorPadrao: number) => {
-      setEditing((prev: any) => {
-          const isAtivando = !prev[campoBooleano];
-          return {
-              ...prev,
-              [campoBooleano]: isAtivando,
-              [campoAliquota]: isAtivando ? valorPadrao : null
-          };
-      });
+    setEditing((prev: any) => {
+      const isAtivando = !prev[campoBooleano];
+      return { ...prev, [campoBooleano]: isAtivando, [campoAliquota]: isAtivando ? valorPadrao : null };
+    });
   };
 
+  const comTribNacional = cnaes.filter(c => c.codigoTributacaoNacional).length;
+  const comRetencao = cnaes.filter(c => c.temRetencaoInss || c.retemCrsf || c.retemIr).length;
+
   return (
-    <div className="p-6">
-      <div className="flex justify-between items-center mb-6">
+    <div className="space-y-7">
+      <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
         <div>
-            <h1 className="text-2xl font-bold text-slate-800">Tabela Nacional de CNAEs</h1>
-            <p className="text-sm text-slate-500">Total de {totalItems} atividades encontradas.</p>
+          <p className="text-xs font-black uppercase tracking-[0.28em] text-blue-600">Base nacional</p>
+          <h1 className="mt-2 text-4xl font-black tracking-tight text-slate-950">Tabela Nacional de CNAEs</h1>
+          <p className="mt-2 max-w-3xl text-slate-500">Configure código de tributação nacional, NBS e retenções aplicáveis por atividade.</p>
         </div>
-        
-        <div className="relative">
-            <Search className="absolute left-3 top-3 text-slate-400" size={18} />
-            <input 
-                placeholder="Buscar CNAE ou Descrição..." 
-                className="pl-10 p-2 border rounded-lg w-80 focus:ring-2 focus:ring-blue-500 outline-none"
-                value={termoBusca}
-                onChange={e => {
-                    setTermoBusca(e.target.value);
-                    setPage(1); 
-                }}
-            />
+        <div className="relative w-full lg:w-96">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+          <input placeholder="Buscar CNAE ou descrição..." className={`${inputBase} pl-10`} value={termoBusca} onChange={e => { setTermoBusca(e.target.value); setPage(1); }} />
         </div>
       </div>
 
-      {/* MODAL DE EDIÇÃO */}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><Briefcase className="text-blue-600" /><p className="mt-3 text-3xl font-black text-slate-950">{totalItems}</p><p className="text-xs font-bold uppercase text-slate-400">Atividades nacionais</p></div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><FileCode2 className="text-purple-600" /><p className="mt-3 text-3xl font-black text-slate-950">{comTribNacional}</p><p className="text-xs font-bold uppercase text-slate-400">Com trib. nacional na página</p></div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><ShieldCheck className="text-emerald-600" /><p className="mt-3 text-3xl font-black text-slate-950">{comRetencao}</p><p className="text-xs font-bold uppercase text-slate-400">Com retenções na página</p></div>
+      </div>
+
       {editing && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
-            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto custom-scrollbar">
-                <div className="flex justify-between mb-4 border-b pb-2 sticky top-0 bg-white z-10">
-                    <h3 className="font-bold text-lg text-slate-800">Configurar Tributação</h3>
-                    <button onClick={() => setEditing(null)} className="text-slate-400 hover:text-slate-600"><X size={20}/></button>
-                </div>
-                
-                <div className="space-y-5">
-                    <div className="bg-slate-50 p-3 rounded border">
-                        <label className="block text-xs font-bold text-gray-400 uppercase mb-1">CNAE (Bloqueado)</label>
-                        <input className="w-full p-2.5 bg-gray-100 border rounded font-mono text-sm text-slate-600" value={editing.codigo} disabled />
-                        <p className="text-xs text-gray-500 mt-1 italic">{editing.descricao}</p>
-                    </div>
-                    
-                    {/* Campos Fiscais */}
-                    <div>
-                        <h4 className="text-sm font-bold text-slate-700 border-b pb-1 mb-3">Padrão Nacional (Sefaz)</h4>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <div>
-                                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Item LC 116/03</label>
-                                <input 
-                                    className="w-full p-2.5 border rounded focus:ring-2 focus:ring-blue-500 outline-none" 
-                                    value={editing.itemLc || ''} 
-                                    onChange={e => setEditing({...editing, itemLc: e.target.value})}
-                                    placeholder="Ex: 1.07"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Cód. Trib. Nac.</label>
-                                <input 
-                                    className="w-full p-2.5 border rounded focus:ring-2 focus:ring-blue-500 outline-none" 
-                                    value={editing.codigoTributacaoNacional || ''} 
-                                    onChange={e => setEditing({...editing, codigoTributacaoNacional: e.target.value})}
-                                    placeholder="Ex: 01.07.01"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Código NBS</label>
-                                <input 
-                                    className="w-full p-2.5 border rounded focus:ring-2 focus:ring-blue-500 outline-none" 
-                                    value={editing.codigoNbs || ''} 
-                                    onChange={e => setEditing({...editing, codigoNbs: e.target.value})}
-                                    placeholder="Ex: 123456789"
-                                />
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* BLOCO DE RETENÇÕES */}
-                    <div>
-                        <h4 className="text-sm font-bold text-slate-700 border-b pb-1 mb-3">Regras de Retenção (Lucro Presumido/Real)</h4>
-                        <div className="space-y-3">
-                            
-                            {/* INSS */}
-                            <div className="flex items-center justify-between p-3 border rounded bg-white hover:bg-slate-50 transition">
-                                <label className="flex items-center gap-3 cursor-pointer select-none">
-                                    <input 
-                                        type="checkbox" 
-                                        className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
-                                        checked={editing.temRetencaoInss || false}
-                                        onChange={e => setEditing({...editing, temRetencaoInss: e.target.checked})}
-                                    />
-                                    <span className="text-sm font-bold text-slate-700">Reter INSS?</span>
-                                </label>
-                                <span className="text-xs text-slate-400 bg-slate-100 px-2 py-1 rounded">11% (Calculado no app)</span>
-                            </div>
-
-                            {/* PIS/COFINS/CSLL */}
-                            <div className="flex items-center justify-between p-3 border rounded bg-white hover:bg-slate-50 transition">
-                                <label className="flex items-center gap-3 cursor-pointer select-none">
-                                    <input 
-                                        type="checkbox" 
-                                        className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
-                                        checked={editing.retemCrsf || false}
-                                        onChange={() => handleToggleRetencao('retemCrsf', 'aliquotaCrsf', 4.65)}
-                                    />
-                                    <span className="text-sm font-bold text-slate-700">Reter CRSF (PIS/COFINS/CSLL)?</span>
-                                </label>
-                                {editing.retemCrsf && (
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-xs text-slate-500">Alíquota %</span>
-                                        <input 
-                                            type="number" step="0.01"
-                                            className="w-20 p-1.5 border rounded text-sm outline-blue-500 text-center" 
-                                            value={editing.aliquotaCrsf || ''} 
-                                            onChange={e => setEditing({...editing, aliquotaCrsf: e.target.value})}
-                                        />
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* IMPOSTO DE RENDA */}
-                            <div className="flex items-center justify-between p-3 border rounded bg-white hover:bg-slate-50 transition">
-                                <label className="flex items-center gap-3 cursor-pointer select-none">
-                                    <input 
-                                        type="checkbox" 
-                                        className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
-                                        checked={editing.retemIr || false}
-                                        onChange={() => handleToggleRetencao('retemIr', 'aliquotaIr', 1.50)}
-                                    />
-                                    <span className="text-sm font-bold text-slate-700">Reter IR?</span>
-                                </label>
-                                {editing.retemIr && (
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-xs text-slate-500">Alíquota %</span>
-                                        <input 
-                                            type="number" step="0.01"
-                                            className="w-20 p-1.5 border rounded text-sm outline-blue-500 text-center" 
-                                            value={editing.aliquotaIr || ''} 
-                                            onChange={e => setEditing({...editing, aliquotaIr: e.target.value})}
-                                        />
-                                    </div>
-                                )}
-                            </div>
-
-                        </div>
-                    </div>
-                </div>
-
-                <div className="mt-8 flex justify-end gap-2 border-t pt-4 bg-white sticky bottom-0">
-                    <button onClick={() => setEditing(null)} className="px-4 py-2 text-slate-500 font-bold hover:bg-slate-100 rounded transition">Cancelar</button>
-                    <button onClick={handleSave} className="bg-blue-600 text-white px-6 py-2 rounded flex items-center gap-2 hover:bg-blue-700 font-bold shadow-md transition">
-                        <Save size={18}/> Salvar Alterações
-                    </button>
-                </div>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-in fade-in">
+          <div className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b bg-slate-50 px-6 py-5">
+              <div><h3 className="text-xl font-black text-slate-950">Configurar tributação</h3><p className="text-sm text-slate-500">Ajuste regras nacionais e retenções para este CNAE.</p></div>
+              <button onClick={() => setEditing(null)} className="rounded-xl p-2 text-slate-400 hover:bg-white hover:text-red-500"><X size={20} /></button>
             </div>
+            <div className="flex-1 space-y-6 overflow-y-auto p-6">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <label className="mb-1 block text-xs font-black uppercase text-slate-400">CNAE bloqueado</label>
+                <input className={`${inputBase} bg-white font-mono font-black text-slate-700`} value={editing.codigo} disabled />
+                <p className="mt-2 text-sm leading-relaxed text-slate-500">{editing.descricao}</p>
+              </div>
+
+              <div>
+                <h4 className="mb-3 text-sm font-black uppercase text-slate-500">Padrão nacional</h4>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                  <div><label className="mb-1 block text-xs font-black uppercase text-slate-500">Item LC 116/03</label><input className={inputBase} value={editing.itemLc || ''} onChange={e => setEditing({ ...editing, itemLc: e.target.value })} placeholder="Ex: 1.07" /></div>
+                  <div><label className="mb-1 block text-xs font-black uppercase text-slate-500">Cód. Trib. Nacional</label><input className={inputBase} value={editing.codigoTributacaoNacional || ''} onChange={e => setEditing({ ...editing, codigoTributacaoNacional: e.target.value })} placeholder="Ex: 01.07.01" /></div>
+                  <div><label className="mb-1 block text-xs font-black uppercase text-slate-500">Código NBS</label><input className={inputBase} value={editing.codigoNbs || ''} onChange={e => setEditing({ ...editing, codigoNbs: e.target.value })} placeholder="Ex: 123456789" /></div>
+                </div>
+              </div>
+
+              <div>
+                <h4 className="mb-3 text-sm font-black uppercase text-slate-500">Regras de retenção</h4>
+                <div className="space-y-3">
+                  <button type="button" onClick={() => setEditing({ ...editing, temRetencaoInss: !editing.temRetencaoInss })} className={`w-full rounded-2xl border p-4 text-left transition ${editing.temRetencaoInss ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}><p className="font-black">Reter INSS?</p><p className="text-sm opacity-75">11% calculado automaticamente no app.</p></button>
+                  <div className={`rounded-2xl border p-4 ${editing.retemCrsf ? 'border-purple-200 bg-purple-50' : 'border-slate-200 bg-white'}`}>
+                    <div className="flex items-center justify-between gap-4"><button type="button" onClick={() => handleToggleRetencao('retemCrsf', 'aliquotaCrsf', 4.65)} className="text-left"><p className="font-black text-slate-800">Reter CRSF?</p><p className="text-sm text-slate-500">PIS/COFINS/CSLL.</p></button>{editing.retemCrsf && <div className="relative w-28"><Percent className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} /><input type="number" step="0.01" className={`${inputBase} pl-8 text-center`} value={editing.aliquotaCrsf || ''} onChange={e => setEditing({ ...editing, aliquotaCrsf: e.target.value })} /></div>}</div>
+                  </div>
+                  <div className={`rounded-2xl border p-4 ${editing.retemIr ? 'border-orange-200 bg-orange-50' : 'border-slate-200 bg-white'}`}>
+                    <div className="flex items-center justify-between gap-4"><button type="button" onClick={() => handleToggleRetencao('retemIr', 'aliquotaIr', 1.50)} className="text-left"><p className="font-black text-slate-800">Reter IR?</p><p className="text-sm text-slate-500">Imposto de renda retido na fonte.</p></button>{editing.retemIr && <div className="relative w-28"><Percent className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} /><input type="number" step="0.01" className={`${inputBase} pl-8 text-center`} value={editing.aliquotaIr || ''} onChange={e => setEditing({ ...editing, aliquotaIr: e.target.value })} /></div>}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 border-t bg-slate-50 p-5"><button onClick={() => setEditing(null)} className="rounded-xl px-5 py-3 text-sm font-bold text-slate-600 hover:bg-white">Cancelar</button><button onClick={handleSave} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-6 py-3 text-sm font-bold text-white hover:bg-blue-700"><Save size={18} /> Salvar alterações</button></div>
+          </div>
         </div>
       )}
 
-      {/* TABELA COM NOVAS COLUNAS */}
-      <div className="bg-white rounded-xl shadow-sm border overflow-hidden flex flex-col justify-between min-h-[500px]">
-        <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm whitespace-nowrap">
-                <thead className="bg-slate-50 border-b">
-                    <tr>
-                        <th className="p-4 font-bold text-slate-500 uppercase text-xs">CNAE</th>
-                        <th className="p-4 font-bold text-slate-500 uppercase text-xs w-1/3">Descrição</th>
-                        <th className="p-4 font-bold text-slate-500 uppercase text-xs text-center">Trib. Nac.</th>
-                        <th className="p-4 font-bold text-slate-500 uppercase text-xs text-center border-l">INSS</th>
-                        <th className="p-4 font-bold text-slate-500 uppercase text-xs text-center">CRSF</th>
-                        <th className="p-4 font-bold text-slate-500 uppercase text-xs text-center">IR</th>
-                        <th className="p-4 font-bold text-slate-500 uppercase text-xs text-right">Ação</th>
-                    </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                    {cnaes.length === 0 ? (
-                        <tr><td colSpan={7} className="p-12 text-center text-gray-400 italic">Nenhum CNAE encontrado.</td></tr>
-                    ) : (
-                        cnaes.map(cnae => (
-                            <tr key={cnae.id} className="hover:bg-slate-50 transition">
-                                <td className="p-4 font-mono font-bold text-slate-700">{cnae.codigo}</td>
-                                <td className="p-4 text-slate-600 text-xs truncate max-w-[200px]" title={cnae.descricao}>{cnae.descricao}</td>
-                                <td className="p-4 text-center">
-                                    {cnae.codigoTributacaoNacional ? (
-                                        <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-[10px] font-bold border border-blue-200">{cnae.codigoTributacaoNacional}</span>
-                                    ) : <span className="text-gray-300">-</span>}
-                                </td>
-                                
-                                <td className="p-4 text-center border-l">
-                                    {cnae.temRetencaoInss ? <CheckCircle size={16} className="text-green-500 mx-auto"/> : <XCircle size={16} className="text-slate-200 mx-auto"/>}
-                                </td>
-                                <td className="p-4 text-center">
-                                    {cnae.retemCrsf ? <span className="text-xs font-bold text-purple-600">{Number(cnae.aliquotaCrsf).toFixed(2)}%</span> : <XCircle size={16} className="text-slate-200 mx-auto"/>}
-                                </td>
-                                <td className="p-4 text-center">
-                                    {cnae.retemIr ? <span className="text-xs font-bold text-orange-600">{Number(cnae.aliquotaIr).toFixed(2)}%</span> : <XCircle size={16} className="text-slate-200 mx-auto"/>}
-                                </td>
-                                
-                                <td className="p-4 text-right">
-                                    <button onClick={() => setEditing(cnae)} className="text-blue-600 hover:bg-blue-50 p-2 rounded transition" title="Editar">
-                                        <Edit size={18}/>
-                                    </button>
-                                </td>
-                            </tr>
-                        ))
-                    )}
-                </tbody>
-            </table>
-        </div>
-
-        {/* PAGINAÇÃO */}
-        <div className="p-4 border-t bg-slate-50 flex justify-between items-center">
-            <span className="text-xs text-slate-500 font-medium">Página {page} de {totalPages}</span>
-            <div className="flex gap-2">
-                <button 
-                    onClick={() => setPage(p => Math.max(1, p - 1))} 
-                    disabled={page === 1}
-                    className="p-2 bg-white border rounded hover:bg-slate-100 disabled:opacity-50 text-slate-600 transition"
-                >
-                    <ChevronLeft size={16} />
-                </button>
-                <button 
-                    onClick={() => setPage(p => Math.min(totalPages, p + 1))} 
-                    disabled={page === totalPages}
-                    className="p-2 bg-white border rounded hover:bg-slate-100 disabled:opacity-50 text-slate-600 transition"
-                >
-                    <ChevronRight size={16} />
-                </button>
-            </div>
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <table className="w-full text-left text-sm">
+          <thead className="border-b bg-slate-50 text-xs font-black uppercase text-slate-400">
+            <tr><th className="p-4">CNAE</th><th className="p-4">Descrição</th><th className="p-4 text-center">Trib. Nac.</th><th className="p-4 text-center">INSS</th><th className="p-4 text-center">CRSF</th><th className="p-4 text-center">IR</th><th className="p-4 text-right">Ação</th></tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {cnaes.length === 0 ? <tr><td colSpan={7} className="p-12 text-center text-slate-400">Nenhum CNAE encontrado.</td></tr> : cnaes.map(cnae => (
+              <tr key={cnae.id} className="transition hover:bg-slate-50">
+                <td className="p-4 font-mono font-black text-slate-800">{cnae.codigo}</td>
+                <td className="max-w-[320px] truncate p-4 text-xs font-medium text-slate-600" title={cnae.descricao}>{cnae.descricao}</td>
+                <td className="p-4 text-center">{cnae.codigoTributacaoNacional ? <span className="rounded-full border border-blue-200 bg-blue-100 px-3 py-1 text-[10px] font-black text-blue-800">{cnae.codigoTributacaoNacional}</span> : <span className="text-slate-300">-</span>}</td>
+                <td className="p-4 text-center">{cnae.temRetencaoInss ? <CheckCircle size={17} className="mx-auto text-emerald-500" /> : <XCircle size={17} className="mx-auto text-slate-200" />}</td>
+                <td className="p-4 text-center">{cnae.retemCrsf ? <span className="text-xs font-black text-purple-600">{Number(cnae.aliquotaCrsf).toFixed(2)}%</span> : <XCircle size={17} className="mx-auto text-slate-200" />}</td>
+                <td className="p-4 text-center">{cnae.retemIr ? <span className="text-xs font-black text-orange-600">{Number(cnae.aliquotaIr).toFixed(2)}%</span> : <XCircle size={17} className="mx-auto text-slate-200" />}</td>
+                <td className="p-4 text-right"><button onClick={() => setEditing(cnae)} className="rounded-xl p-2 text-blue-600 hover:bg-blue-50"><Edit size={18} /></button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="flex items-center justify-between border-t bg-slate-50 p-4">
+          <span className="text-sm font-medium text-slate-500">Página {page} de {totalPages}</span>
+          <div className="flex gap-2"><button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="rounded-xl border bg-white p-2 text-slate-600 disabled:opacity-50"><ChevronLeft size={16} /></button><button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="rounded-xl border bg-white p-2 text-slate-600 disabled:opacity-50"><ChevronRight size={16} /></button></div>
         </div>
       </div>
     </div>

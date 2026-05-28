@@ -219,7 +219,7 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
   const activeIsCancelada = activeVendaData?.status === 'CANCELADA' || activeNotaData?.status === 'CANCELADA';
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden relative">
+    <div className="saas-card overflow-hidden relative">
       
       {/* MENU FLUTUANTE (FIXO) */}
       {activeMenu && activeVendaData && (
@@ -241,9 +241,16 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
                     </button>
                     
                     {activeNotaData.xmlBase64 && (
-                        <button onClick={() => downloadBase64(activeNotaData.xmlBase64, `nota-${activeNotaData.numero}${activeIsCancelada ? '-CANCELADA' : ''}.xml`, 'text/xml')} 
+                        <button onClick={() => downloadBase64(activeIsCancelada ? (activeNotaData.xmlAutorizadoBase64 || activeNotaData.xmlBase64) : activeNotaData.xmlBase64, `nota-${activeNotaData.numero}.xml`, 'text/xml')} 
                             className="w-full text-left px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2 border-b border-slate-50">
-                            <FileCode size={16} className="text-blue-500"/> {activeIsCancelada ? 'XML Cancelado' : 'XML Sefaz'}
+                            <FileCode size={16} className="text-blue-500"/> XML NFS-e
+                        </button>
+                    )}
+
+                    {activeIsCancelada && activeNotaData.xmlCancelamentoEventoBase64 && (
+                        <button onClick={() => downloadBase64(activeNotaData.xmlCancelamentoEventoBase64, `nota-${activeNotaData.numero}-evento-cancelamento.xml`, 'text/xml')} 
+                            className="w-full text-left px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2 border-b border-slate-50">
+                            <FileCode size={16} className="text-red-500"/> XML Evento Cancelamento
                         </button>
                     )}
 

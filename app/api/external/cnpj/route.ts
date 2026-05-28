@@ -23,6 +23,18 @@ async function fetchSafe(url: string, options: any = {}, retries = 2) {
     return null;
 }
 
+async function buscarIbgePorCep(cep?: string | null): Promise<string> {
+    const cepLimpo = String(cep || '').replace(/\D/g, '');
+    if (cepLimpo.length !== 8) return '';
+
+    try {
+        const data = await fetchSafe(`https://viacep.com.br/ws/${cepLimpo}/json/`, {}, 1);
+        return data && !data.erro && data.ibge ? String(data.ibge).replace(/\D/g, '') : '';
+    } catch {
+        return '';
+    }
+}
+
 export async function POST(request: Request) {
   // 1. Segurança
   const user = await getAuthenticatedUser(request);
@@ -46,6 +58,7 @@ export async function POST(request: Request) {
             if (dataBrasil.cnaes_secundarios) {
                 dataBrasil.cnaes_secundarios.forEach((c: any) => cnaes.push({ codigo: String(c.codigo), descricao: c.descricao, principal: false }));
             }
+            const codigoIbge = String(dataBrasil.codigo_municipio || '').replace(/\D/g, '') || await buscarIbgePorCep(dataBrasil.cep);
 
             return NextResponse.json({
                 razaoSocial: dataBrasil.razao_social,
@@ -58,7 +71,7 @@ export async function POST(request: Request) {
                 bairro: dataBrasil.bairro,
                 cidade: dataBrasil.municipio,
                 uf: dataBrasil.uf,
-                codigoIbge: dataBrasil.codigo_municipio, // As vezes vem vazio ou diferente
+                codigoIbge,
                 cnaePrincipal: String(dataBrasil.cnae_fiscal),
                 cnaes
             });
@@ -77,6 +90,8 @@ export async function POST(request: Request) {
          if (dataReceita.atividade_principal) dataReceita.atividade_principal.forEach((c: any) => listaCnaes.push({ codigo: c.code.replace(/\D/g, ''), descricao: c.text, principal: true }));
          if (dataReceita.atividades_secundarias) dataReceita.atividades_secundarias.forEach((c: any) => listaCnaes.push({ codigo: c.code.replace(/\D/g, ''), descricao: c.text, principal: false }));
 
+         const codigoIbge = await buscarIbgePorCep(dataReceita.cep);
+
          return NextResponse.json({
              razaoSocial: dataReceita.nome,
              nomeFantasia: dataReceita.fantasia || dataReceita.nome,
@@ -88,7 +103,7 @@ export async function POST(request: Request) {
              bairro: dataReceita.bairro,
              cidade: dataReceita.municipio,
              uf: dataReceita.uf,
-             codigoIbge: '', // ReceitaWS não retorna IBGE confiavel
+             codigoIbge,
              cnaePrincipal: listaCnaes.find((c: any) => c.principal)?.codigo || '',
              cnaes: listaCnaes
          });

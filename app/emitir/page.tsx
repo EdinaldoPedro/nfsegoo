@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, Suspense } from "react";
-import { CheckCircle, ArrowRight, ArrowLeft, Building2, Calculator, FileCheck, Briefcase, Loader2, Home, UserPlus, AlertTriangle } from "lucide-react";
+import { CheckCircle, ArrowRight, ArrowLeft, Building2, Calculator, FileCheck, Briefcase, Loader2, Home, UserPlus, AlertTriangle, Send, FileSearch, FileCode2, BadgeCheck, ServerCog } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useDialog } from "@/app/contexts/DialogContext";
 import Link from "next/link";
@@ -41,6 +41,7 @@ function EmitirNotaContent() {
   
   const [progressStatus, setProgressStatus] = useState("Iniciando...");
   const [progressPercent, setProgressPercent] = useState(0);
+  const [progressDetail, setProgressDetail] = useState("Conectando com o Portal Nacional.");
   
   const [clientes, setClientes] = useState<ClienteDB[]>([]);
   const [meusCnaes, setMeusCnaes] = useState<CnaeDB[]>([]);
@@ -427,12 +428,57 @@ function EmitirNotaContent() {
 
   const handleBack = () => setStep(step - 1);
 
+  const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+  const aguardarConclusaoDaNota = async (vendaId: string, headers: HeadersInit) => {
+      const tentativas = 60;
+
+      for (let tentativa = 1; tentativa <= tentativas; tentativa++) {
+          setProgressPercent(Math.min(95, 58 + tentativa));
+
+          if (tentativa < 4) {
+              setProgressStatus("Nota autorizada. Sincronizando retorno oficial...");
+              setProgressDetail("Estamos buscando o XML de distribuição e preparando os arquivos fiscais.");
+          } else if (tentativa < 12) {
+              setProgressStatus("Baixando XML e PDF oficiais...");
+              setProgressDetail("Aguarde só mais um pouco, o sistema está finalizando os documentos da nota.");
+          } else {
+              setProgressStatus("Conferindo disponibilidade da nota...");
+              setProgressDetail("A nota já foi enviada ao processamento final. Mantemos esta tela até tudo ficar pronto.");
+          }
+
+          const vendaRes = await fetch(`/api/vendas/${vendaId}`, { headers });
+          const venda = await vendaRes.json();
+
+          if (!vendaRes.ok) {
+              throw new Error(venda.error || 'Não foi possível acompanhar a emissão.');
+          }
+
+          const nota = venda.notas?.[0];
+          if (venda.status === 'ERRO_EMISSAO') {
+              throw new Error(venda.motivoErro || 'A emissão falhou durante o processamento final.');
+          }
+
+          if (venda.status === 'CONCLUIDA' && nota?.status === 'AUTORIZADA') {
+              setProgressPercent(100);
+              setProgressStatus("Nota disponível e autorizada.");
+              setProgressDetail("Tudo pronto. Os documentos fiscais já foram sincronizados.");
+              return venda;
+          }
+
+          await sleep(2000);
+      }
+
+      throw new Error('A nota foi autorizada, mas os arquivos ainda não ficaram disponíveis. Verifique novamente em instantes.');
+  };
+
   const handleEmitir = async () => {
     if (!nfData.codigoCnae) { dialog.showAlert("Selecione uma Atividade (CNAE)."); return; }
     
     setLoading(true);
     setProgressPercent(10);
     setProgressStatus("Preparando envio...");
+    setProgressDetail("Validando os dados da nota antes da transmissão.");
 
     const userId = localStorage.getItem('userId');
     const contextId = localStorage.getItem('empresaContextId'); 
@@ -448,6 +494,7 @@ function EmitirNotaContent() {
 
       setProgressPercent(40);
       setProgressStatus("Transmitindo para o Portal Nacional...");
+      setProgressDetail("Enviando a DPS assinada e aguardando autorização.");
 
       const res = await fetch('/api/notas', {
         method: 'POST',
@@ -469,22 +516,30 @@ function EmitirNotaContent() {
       const resposta = await res.json();
       
       if (res.ok) {
-        setProgressPercent(100);
-        setProgressStatus("Concluído!");
-
         if (resposta.isHomologation) {
+            setProgressPercent(100);
+            setProgressStatus("Validação concluída.");
+            setProgressDetail("A configuração foi aceita no ambiente de homologação.");
             const irConfig = await dialog.showConfirm({ type: 'success', title: 'Tudo certo em Homologação!', description: 'As configurações da sua nota estão perfeitas. Mude para PRODUÇÃO nas configurações.', confirmText: 'Mudar para Produção', cancelText: 'Voltar ao Início' });
             if (irConfig) router.push('/configuracoes');
             else router.push('/cliente/dashboard');
         } else {
-            await dialog.showAlert({ type: 'success', title: 'Sucesso Total!', description: 'Nota emitida e autorizada na Prefeitura.' });
+            setProgressPercent(58);
+            setProgressStatus("Autorização recebida.");
+            setProgressDetail("Agora vamos finalizar a sincronização antes de liberar a tela.");
+            await aguardarConclusaoDaNota(resposta.nota.vendaId, {
+                'x-user-id': userId || '',
+                'x-empresa-id': contextId || ''
+            });
+            await sleep(500);
+            await dialog.showAlert({ type: 'success', title: 'Sucesso Total!', description: 'Nota emitida, autorizada e disponível para download.' });
             router.push('/cliente/dashboard');
         }
       } else {
         await tratarErroEmissao(resposta);
       }
-    } catch (error) { 
-        dialog.showAlert("Erro de Conexão. Verifique sua internet."); 
+    } catch (error: any) { 
+        await dialog.showAlert({ type: 'danger', title: 'Processamento interrompido', description: error?.message || "Erro de conexão. Verifique sua internet." }); 
         router.push('/cliente/dashboard');
     } 
     finally { setLoading(false); }
@@ -522,9 +577,71 @@ function EmitirNotaContent() {
   const minDateStr = minDateObj.toLocaleDateString('en-CA');
   
   const isDataCompetenciaInvalida = nfData.dataCompetencia > maxDateStr || nfData.dataCompetencia < minDateStr;
+  const etapasEmissao = [
+      { label: 'Preparação', icon: FileCheck, doneAt: 20 },
+      { label: 'Transmissão', icon: Send, doneAt: 50 },
+      { label: 'Autorização', icon: BadgeCheck, doneAt: 60 },
+      { label: 'Sincronização', icon: FileSearch, doneAt: 96 },
+      { label: 'Disponível', icon: FileCode2, doneAt: 100 },
+  ];
 
   return (
     <div className="max-w-4xl mx-auto py-10 relative">
+      {loading && (
+        <div className="fixed inset-0 z-[9999] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-xl bg-white rounded-xl shadow-2xl border border-blue-100 overflow-hidden">
+            <div className="relative bg-slate-950 text-white p-8 overflow-hidden">
+              <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.06)_1px,transparent_1px)] bg-[size:32px_32px]" />
+              <div className="absolute -right-16 -top-16 h-44 w-44 rounded-full bg-blue-500/30 blur-3xl" />
+              <div className="absolute -left-16 bottom-0 h-40 w-40 rounded-full bg-emerald-400/20 blur-3xl" />
+              <div className="relative flex items-center gap-4">
+                <div className="h-14 w-14 rounded-xl bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-950/30">
+                  <ServerCog className="animate-pulse" size={28} />
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-blue-200 uppercase tracking-wider">Processando NFS-e</p>
+                  <h3 className="text-2xl font-black mt-1">{progressStatus}</h3>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-7">
+              <div className="flex justify-between text-xs font-black text-blue-700 mb-2">
+                <span>{progressDetail}</span>
+                <span>{progressPercent}%</span>
+              </div>
+              <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
+                <div className="h-full bg-blue-600 rounded-full transition-all duration-700 ease-out" style={{ width: `${progressPercent}%` }} />
+              </div>
+
+              <div className="grid grid-cols-5 gap-2 mt-7">
+                {etapasEmissao.map((etapa) => {
+                  const Icon = etapa.icon;
+                  const concluida = progressPercent >= etapa.doneAt;
+                  const ativa = !concluida && progressPercent >= etapa.doneAt - 20;
+
+                  return (
+                    <div key={etapa.label} className="flex flex-col items-center gap-2 text-center">
+                      <div className={`h-10 w-10 rounded-lg flex items-center justify-center border transition ${
+                        concluida ? 'bg-green-50 border-green-200 text-green-700' :
+                        ativa ? 'bg-blue-50 border-blue-200 text-blue-700' :
+                        'bg-slate-50 border-slate-200 text-slate-400'
+                      }`}>
+                        {ativa ? <Loader2 className="animate-spin" size={18} /> : <Icon size={18} />}
+                      </div>
+                      <span className={`text-[11px] font-bold leading-tight ${concluida ? 'text-green-700' : ativa ? 'text-blue-700' : 'text-slate-400'}`}>{etapa.label}</span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <p className="mt-6 text-center text-xs text-slate-500">
+                Pode levar alguns segundos. Vamos manter esta tela até a nota ficar autorizada e disponível no histórico.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="mb-6">
         <button onClick={() => router.push('/cliente/dashboard')} className="flex items-center gap-2 text-slate-500 hover:text-blue-600 transition font-medium text-sm group">
             <div className="p-2 bg-white rounded-full border border-slate-200 group-hover:border-blue-200 group-hover:bg-blue-50 transition"><Home size={18} /></div> Voltar ao Início

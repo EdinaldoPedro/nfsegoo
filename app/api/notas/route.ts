@@ -30,7 +30,7 @@ async function getEmpresaContexto(user: any, contextId: string | null) {
         const vinculo = await prisma.contadorVinculo.findUnique({
             where: { contadorId_empresaId: { contadorId: user.id, empresaId: contextId } }
         });
-        if (vinculo && vinculo.status === 'APROVADO') return contextId;
+        if (vinculo && vinculo.status === 'APROVADO' && !(vinculo as any).arquivadoEm) return contextId;
         
         // 5. Dono do faturamento (Guarda-chuva)
         const empresaAdicional = await prisma.empresa.findFirst({
@@ -270,8 +270,10 @@ export async function POST(request: Request) {
 
         if (customUserAction && apagarVenda) {
             if (!vendaId) { 
-                await prisma.systemLog.deleteMany({ where: { vendaId: venda.id } });
-                await prisma.venda.delete({ where: { id: venda.id } });
+                await prisma.venda.update({
+                    where: { id: venda.id },
+                    data: { status: 'DESCARTADA', arquivadoEm: new Date(), arquivadoPor: userId, motivoArquivamento: 'Emissao descartada apos falha validada.' } as any
+                });
             }
         } else {
             await prisma.venda.update({ where: { id: venda.id }, data: { status: 'ERRO_EMISSAO' } });
@@ -288,8 +290,10 @@ export async function POST(request: Request) {
     // --- CENÁRIO 1: BYPASS DE HOMOLOGAÇÃO ---
     if (prestador.ambiente === 'HOMOLOGACAO') {
         if (!vendaId) { 
-            await prisma.systemLog.deleteMany({ where: { vendaId: venda.id } });
-            await prisma.venda.delete({ where: { id: venda.id } });
+                await prisma.venda.update({
+                    where: { id: venda.id },
+                    data: { status: 'DESCARTADA', arquivadoEm: new Date(), arquivadoPor: userId, motivoArquivamento: 'Homologacao validada sem gerar nota fiscal.' } as any
+                });
         }
 
         return NextResponse.json({ 
@@ -308,8 +312,8 @@ export async function POST(request: Request) {
             numero: parseInt(resultado.notaGov!.numero) || 0, valor: valorFloat, descricao: descricao,
             prestadorCnpj: prestador.documento.replace(/\D/g, ''), tomadorCnpj: tomador.documento ? tomador.documento.replace(/\D/g, '') : 'EXTERIOR',
             status: 'AUTORIZADA', chaveAcesso: resultado.notaGov!.chave, protocolo: resultado.notaGov!.protocolo, 
-            xmlBase64: resultado.notaGov!.xml, cnae: cnaeFinal, dataEmissao: new Date()
-        }
+            xmlBase64: resultado.notaGov!.xml, xmlAutorizadoBase64: resultado.notaGov!.xml, cnae: cnaeFinal, dataEmissao: new Date()
+        } as any
     });
 
     await createLog({ level: 'INFO', action: 'NOTA_AUTORIZADA', message: `Nota ${nota.numero} autorizada!`, empresaId: prestador.id, vendaId: venda.id });
@@ -349,6 +353,7 @@ export async function GET(request: Request) {
       
       const whereClause: any = {
           empresaId: empresaIdAlvo,
+          arquivadoEm: null,
           ...(search && {
               OR: [
                   { cliente: { nome: { contains: search, mode: 'insensitive' } } }, 
@@ -367,7 +372,7 @@ export async function GET(request: Request) {
               where: whereClause, take: limit, skip: skip, orderBy: { createdAt: 'desc' },
               include: {
                   cliente: { select: { nome: true, documento: true } },
-                  notas: { select: { id: true, numero: true, status: true, vendaId: true, valor: true, cnae: true, dataEmissao: true, xmlBase64: true, pdfBase64: true } },
+                  notas: { select: { id: true, numero: true, status: true, vendaId: true, valor: true, cnae: true, dataEmissao: true, xmlBase64: true, xmlAutorizadoBase64: true, xmlCancelamentoEventoBase64: true, pdfBase64: true } as any },
                   logs: { where: { level: 'ERRO' }, orderBy: { createdAt: 'desc' }, take: 1, select: { message: true } }
               }
           }),

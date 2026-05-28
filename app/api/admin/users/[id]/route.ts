@@ -20,8 +20,9 @@ export async function GET(request: Request, { params }: { params: { id: string }
                 },
                 // === CORREÇÃO 1: O nome correto da relação no seu schema é historicoPlanos ===
                 historicoPlanos: {
-                    where: { status: 'ATIVO' },
-                    include: { plan: true }
+                    include: { plan: true },
+                    orderBy: { createdAt: 'desc' },
+                    take: 5
                 }
             }
         });
@@ -45,7 +46,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
 
     try {
         const body = await request.json();
-        const { limiteEmpresas, role, limiteNotas, limiteClientes } = body;
+        const { limiteEmpresas, role, limiteNotas, limiteClientes, assinaturaAtiva, renovacaoAutomatica } = body;
 
         const userAtual = await prisma.user.findUnique({ where: { id: params.id } });
         if (!userAtual) return NextResponse.json({ error: 'Usuário não encontrado' }, { status: 404 });
@@ -72,7 +73,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
         }
 
         // === AUTO-GERAÇÃO DO PLANO PARCEIRO ===
-        if (role === 'CONTADOR' && (limiteNotas !== undefined || limiteClientes !== undefined)) {
+        if (role === 'CONTADOR' && (limiteNotas !== undefined || limiteClientes !== undefined || assinaturaAtiva !== undefined || renovacaoAutomatica !== undefined)) {
             
             let planoParceiro = await prisma.plan.findFirst({
                 where: { slug: 'parceiro-contabil', tipo: 'CUSTOM' }
@@ -101,11 +102,26 @@ export async function PATCH(request: Request, { params }: { params: { id: string
 
             const novoLimiteNotas = limiteNotas !== undefined ? parseInt(limiteNotas) : planoParceiro.maxNotasMensal;
             const novoLimiteClientes = limiteClientes !== undefined ? parseInt(limiteClientes) : planoParceiro.maxClientes;
+            const deveFicarAtivo = assinaturaAtiva !== false;
+            const dataFim = new Date();
+            if (renovacaoAutomatica) {
+                dataFim.setFullYear(dataFim.getFullYear() + 10);
+            } else {
+                dataFim.setDate(dataFim.getDate() + 30);
+            }
 
             if (historyExistente) {
                 await prisma.plan.update({
                     where: { id: planoParceiro.id },
                     data: { maxNotasMensal: novoLimiteNotas, maxClientes: novoLimiteClientes }
+                });
+
+                await prisma.planHistory.update({
+                    where: { id: historyExistente.id },
+                    data: {
+                        status: deveFicarAtivo ? 'ATIVO' : 'CANCELADO',
+                        dataFim: deveFicarAtivo ? dataFim : new Date()
+                    }
                 });
             } else {
                 await prisma.planHistory.updateMany({
@@ -118,21 +134,23 @@ export async function PATCH(request: Request, { params }: { params: { id: string
                     data: { maxNotasMensal: novoLimiteNotas, maxClientes: novoLimiteClientes }
                 });
 
-                const dataFim = new Date();
-                dataFim.setFullYear(dataFim.getFullYear() + 10); 
-
                 await prisma.planHistory.create({
                     data: {
                         userId: updated.id,
                         planId: planoParceiro.id,
-                        status: 'ATIVO',
+                        status: deveFicarAtivo ? 'ATIVO' : 'CANCELADO',
                         dataInicio: new Date(),
-                        dataFim: dataFim,
+                        dataFim: deveFicarAtivo ? dataFim : new Date(),
                         notasEmitidas: 0
                         // === CORREÇÃO 3: Removido 'valorPago' que não existe no seu Schema ===
                     }
                 });
             }
+
+            await prisma.user.update({
+                where: { id: updated.id },
+                data: { planoStatus: deveFicarAtivo ? 'active' : 'canceled' }
+            });
         }
 
         return NextResponse.json(stripUserSecrets(updated));

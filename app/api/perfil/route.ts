@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { syncCnaesGlobalmente } from '@/app/services/syncService'; 
-import forge from 'node-forge';
 import { validateRequest } from '@/app/utils/api-security';
 import { encrypt } from '@/app/utils/crypto';
 import { hasEmpresaAccess, isAdminRole } from '@/app/utils/access-control';
+import { validarCertificadoA1 } from '@/app/utils/certificadoA1Validation';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,6 +21,10 @@ async function buscarIbgePorCep(cep: string): Promise<string | null> {
     } catch (e) {
         return null;
     }
+}
+
+function codigoIbgeValido(codigo?: string | null) {
+    return String(codigo || '').replace(/\D/g, '').length >= 7;
 }
 
 export async function GET(request: Request) {
@@ -85,6 +89,7 @@ export async function GET(request: Request) {
             // Conta os clientes reais na carteira
             const usoClientes = await prisma.vinculoCarteira.count({
                 where: {
+                    arquivadoEm: null,
                     empresa: {
                         OR: [
                             { donoFaturamentoId: user.id },
@@ -277,19 +282,13 @@ export async function PUT(request: Request) {
           dadosEmpresa.certificadoA1 = null; dadosEmpresa.senhaCertificado = null; dadosEmpresa.certificadoVencimento = null;
       } else if (body.certificadoArquivo && body.certificadoSenha) {
           try {
-              const p12Der = forge.util.decode64(body.certificadoArquivo);
-              const p12Asn1 = forge.asn1.fromDer(p12Der);
-              const p12 = forge.pkcs12.pkcs12FromAsn1(p12Asn1, body.certificadoSenha);
-              let dataVencimento = null;
-              const bags = p12.getBags({ bagType: forge.pki.oids.certBag });
-              // @ts-ignore
-              const certBag = bags[forge.pki.oids.certBag]?.[0];
-              if(certBag && certBag.cert) dataVencimento = certBag.cert.validity.notAfter;
+              const certificadoValidado = validarCertificadoA1(body.certificadoArquivo, body.certificadoSenha, cnpjLimpo);
               
               dadosEmpresa.certificadoA1 = encrypt(body.certificadoArquivo);
               dadosEmpresa.senhaCertificado = encrypt(body.certificadoSenha);
-              dadosEmpresa.certificadoVencimento = dataVencimento;
-          } catch (e) {
+              dadosEmpresa.certificadoVencimento = certificadoValidado.vencimento;
+          } catch (e: any) {
+              if (e?.message) return NextResponse.json({ error: e.message }, { status: 400 });
               return NextResponse.json({ error: 'Senha incorreta ou arquivo inválido.' }, { status: 400 });
           }
       }
@@ -325,6 +324,16 @@ export async function PUT(request: Request) {
           }
 
           empresaAlvoId = empresaExistente.id;
+      }
+
+      if (!codigoIbgeValido(dadosEmpresa.codigoIbge) && empresaAlvoId) {
+          const empresaAtual = await prisma.empresa.findUnique({
+              where: { id: empresaAlvoId },
+              select: { codigoIbge: true }
+          });
+          if (codigoIbgeValido(empresaAtual?.codigoIbge)) {
+              dadosEmpresa.codigoIbge = empresaAtual?.codigoIbge;
+          }
       }
 
       const empresaSalva = empresaAlvoId
