@@ -272,7 +272,7 @@ export async function POST(request: Request) {
             if (!vendaId) { 
                 await prisma.venda.update({
                     where: { id: venda.id },
-                    data: { status: 'DESCARTADA', arquivadoEm: new Date(), arquivadoPor: userId, motivoArquivamento: 'Emissao descartada apos falha validada.' } as any
+                    data: { status: 'DESCARTADA', arquivadoEm: new Date(), arquivadoPor: user.id, motivoArquivamento: 'Emissao descartada apos falha validada.' } as any
                 });
             }
         } else {
@@ -292,7 +292,7 @@ export async function POST(request: Request) {
         if (!vendaId) { 
                 await prisma.venda.update({
                     where: { id: venda.id },
-                    data: { status: 'DESCARTADA', arquivadoEm: new Date(), arquivadoPor: userId, motivoArquivamento: 'Homologacao validada sem gerar nota fiscal.' } as any
+                    data: { status: 'DESCARTADA', arquivadoEm: new Date(), arquivadoPor: user.id, motivoArquivamento: 'Homologacao validada sem gerar nota fiscal.' } as any
                 });
         }
 

@@ -25,16 +25,53 @@ export async function GET(request: Request) {
       orderBy: { updatedAt: 'desc' },
     });
 
+    const inicioMes = new Date();
+    inicioMes.setDate(1);
+    inicioMes.setHours(0, 0, 0, 0);
+
     const dataComErros = await Promise.all(
       emissores.map(async (emp) => {
-        const erros = await prisma.systemLog.count({
-          where: {
-            empresaId: emp.id,
-            level: 'ERRO',
-            createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
-      },
-    });
-        return { ...stripEmpresaSecrets(emp), errosRecentes: erros };
+        const [erros, vendasFalhas, vendasProcessando, vendasMes, ultimoErro, ultimaFalha] = await Promise.all([
+          prisma.systemLog.count({
+            where: {
+              empresaId: emp.id,
+              level: 'ERRO',
+              createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+            },
+          }),
+          prisma.venda.count({
+            where: { empresaId: emp.id, status: 'ERRO_EMISSAO', arquivadoEm: null },
+          }),
+          prisma.venda.count({
+            where: { empresaId: emp.id, status: 'PROCESSANDO', arquivadoEm: null },
+          }),
+          prisma.venda.count({
+            where: { empresaId: emp.id, createdAt: { gte: inicioMes }, arquivadoEm: null },
+          }),
+          prisma.systemLog.findFirst({
+            where: { empresaId: emp.id, level: 'ERRO' },
+            orderBy: { createdAt: 'desc' },
+            select: { id: true, action: true, message: true, createdAt: true, vendaId: true },
+          }),
+          prisma.venda.findFirst({
+            where: { empresaId: emp.id, status: 'ERRO_EMISSAO', arquivadoEm: null },
+            orderBy: { updatedAt: 'desc' },
+            select: { id: true, valor: true, updatedAt: true, cliente: { select: { nome: true, documento: true } } },
+          }),
+        ]);
+
+        return {
+          ...stripEmpresaSecrets(emp),
+          errosRecentes: erros,
+          vendasFalhas,
+          vendasProcessando,
+          vendasMes,
+          ultimoErro,
+          ultimaFalha: ultimaFalha ? {
+            ...ultimaFalha,
+            valor: Number(ultimaFalha.valor),
+          } : null,
+        };
       }),
     );
 
