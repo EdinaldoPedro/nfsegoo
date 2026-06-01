@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import { prisma } from '@/app/utils/prisma';
 import { checkRateLimit } from '@/app/utils/rate-limit';
 import { validateJsonContentLength, validateSameOrigin } from '@/app/utils/request-guards';
+import { registrarEventoCrm } from '@/app/services/crmService';
 
 export async function POST(request: Request) {
   try {
@@ -28,21 +29,60 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Muitas tentativas. Aguarde e tente novamente.' }, { status: 429 });
     }
 
-    const user = await prisma.user.findUnique({ where: { email: emailNormalizado } });
+    const pending = await prisma.pendingRegistration.findUnique({ where: { email: emailNormalizado } });
 
     if (
-      !user ||
-      user.verificationCode !== String(code) ||
-      !user.verificationExpires ||
-      new Date() > user.verificationExpires
+      !pending ||
+      pending.verificationCode !== String(code) ||
+      !pending.verificationExpires ||
+      new Date() > pending.verificationExpires
     ) {
       return NextResponse.json({ error: 'Codigo invalido ou expirado.' }, { status: 400 });
     }
 
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { verificationCode: null, verificationExpires: null },
+    const existente = await prisma.user.findFirst({
+      where: { OR: [{ email: pending.email }, { cpf: pending.cpf }] },
+      select: { id: true },
     });
+
+    if (existente) {
+      await prisma.pendingRegistration.delete({ where: { id: pending.id } });
+      return NextResponse.json({ error: 'Nao foi possivel confirmar este cadastro.' }, { status: 409 });
+    }
+
+    const user = await prisma.$transaction(async (tx) => {
+      const created = await tx.user.create({
+        data: {
+          nome: pending.nome,
+          email: pending.email,
+          senha: pending.senhaHash,
+          cpf: pending.cpf,
+          telefone: pending.telefone,
+          role: pending.role,
+          verificationCode: null,
+          verificationExpires: null,
+          tutorialStep: 0,
+          historicoPlanos: {
+            create: {
+              plan: { connect: { slug: 'TRIAL' } },
+              status: 'ATIVO',
+              dataFim: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+              notasEmitidas: 0,
+            },
+          },
+        },
+      });
+
+      await tx.pendingRegistration.delete({ where: { id: pending.id } });
+      return created;
+    });
+
+    await registrarEventoCrm(
+      user.id,
+      'SISTEMA',
+      'Conta Criada',
+      'O cliente confirmou o codigo por e-mail e o plano TRIAL de 7 dias foi ativado.',
+    );
 
     const token = await signJWT({ sub: user.id, role: user.role });
 
@@ -58,9 +98,13 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
-      user: { id: user.id, nome: user.nome, role: user.role },
+      user: { id: user.id, nome: user.nome, email: user.email, role: user.role },
     });
-  } catch {
+  } catch (error: any) {
+    console.error('Erro confirmacao cadastro:', error);
+    if (error?.code === 'P2025') {
+      return NextResponse.json({ error: 'Erro de configuracao do sistema (Plano Base nao encontrado no banco).' }, { status: 500 });
+    }
     return NextResponse.json({ error: 'Erro ao confirmar.' }, { status: 500 });
   }
 }

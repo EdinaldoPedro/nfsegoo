@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { getRequestOrigin, normalizeOrigin } from '@/app/utils/request-url';
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const DEFAULT_MAX_JSON_BODY_BYTES = 1_000_000;
@@ -6,30 +7,6 @@ export const MAX_SUPPORT_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 
 const ALLOWED_ATTACHMENT_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.pdf', '.xml']);
 const ALLOWED_ATTACHMENT_MIME_TYPES = new Set(['application/pdf', 'application/xml', 'text/xml']);
-
-function firstHeaderValue(value: string | null) {
-  return value?.split(',')[0]?.trim() || null;
-}
-
-function toOrigin(value: string | undefined | null) {
-  if (!value) return null;
-  try {
-    return new URL(value).origin;
-  } catch {
-    return null;
-  }
-}
-
-function expectedRequestOrigin(request: Request) {
-  const configuredOrigin = toOrigin(process.env.NEXT_PUBLIC_APP_URL);
-  if (configuredOrigin) return configuredOrigin;
-
-  const host = firstHeaderValue(request.headers.get('x-forwarded-host')) || firstHeaderValue(request.headers.get('host'));
-  if (!host) return null;
-
-  const proto = firstHeaderValue(request.headers.get('x-forwarded-proto')) || (host.startsWith('localhost') ? 'http' : 'https');
-  return toOrigin(`${proto}://${host}`);
-}
 
 export function validateSameOrigin(request: Request) {
   if (!MUTATING_METHODS.has(request.method.toUpperCase())) return null;
@@ -39,11 +16,15 @@ export function validateSameOrigin(request: Request) {
     return NextResponse.json({ error: 'Origem da requisicao nao autorizada.' }, { status: 403 });
   }
 
-  const origin = toOrigin(request.headers.get('origin'));
+  const origin = normalizeOrigin(request.headers.get('origin'));
   if (!origin) return null;
 
   const allowedOrigins = new Set(
-    [expectedRequestOrigin(request), toOrigin(process.env.NEXT_PUBLIC_APP_URL), toOrigin(process.env.URL_API_LOCAL)].filter(Boolean) as string[],
+    [
+      getRequestOrigin(request),
+      normalizeOrigin(process.env.NEXT_PUBLIC_APP_URL),
+      normalizeOrigin(process.env.URL_API_LOCAL),
+    ].filter(Boolean) as string[],
   );
 
   if (!allowedOrigins.has(origin)) {

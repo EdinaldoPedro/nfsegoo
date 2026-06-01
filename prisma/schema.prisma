@@ -54,6 +54,20 @@ model User {
   cuponsUsados    CupomLog[]
 }
 
+model PendingRegistration {
+  id                  String   @id @default(uuid())
+  email               String   @unique
+  senhaHash           String
+  nome                String
+  cpf                 String   @unique
+  telefone            String?
+  role                Role     @default(COMUM)
+  verificationCode    String
+  verificationExpires DateTime
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
 model Empresa {
   id                       String            @id @default(uuid())
   documento                String            @unique

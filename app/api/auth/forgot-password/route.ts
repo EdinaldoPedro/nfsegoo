@@ -4,6 +4,7 @@ import { EmailService } from '@/app/services/EmailService';
 import { checkRateLimit } from '@/app/utils/rate-limit';
 import { prisma } from '@/app/utils/prisma';
 import { validateJsonContentLength, validateSameOrigin } from '@/app/utils/request-guards';
+import { getPublicBaseUrl } from '@/app/utils/request-url';
 
 export async function POST(request: Request) {
     try {
@@ -49,13 +50,7 @@ export async function POST(request: Request) {
         });
 
         // Captura dinamicamente o domínio/IP que o utilizador está a usar no navegador
-        const protocol = request.headers.get('x-forwarded-proto') || 'http';
-        const host = request.headers.get('host') || 'localhost:3000';
-        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || `${protocol}://${host}`;
-
-        if (process.env.NODE_ENV === 'production' && !process.env.NEXT_PUBLIC_APP_URL) {
-            return NextResponse.json({ error: 'URL da aplicacao nao configurada.' }, { status: 500 });
-        }
+        const baseUrl = getPublicBaseUrl(request);
 
         const resetLink = `${baseUrl}/redefinir-senha?token=${resetToken}`;
         

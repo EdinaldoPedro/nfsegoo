@@ -181,7 +181,13 @@ export default function Cadastro() {
       if (res.ok) {
         localStorage.setItem('userId', data.user.id);
         localStorage.setItem('userRole', data.user.role);
-        router.push('/cliente/dashboard');
+        if (['ADMIN', 'MASTER', 'SUPORTE', 'SUPORTE_TI'].includes(data.user.role)) {
+          router.push('/admin/dashboard');
+        } else if (data.user.role === 'CONTADOR') {
+          router.push('/contador');
+        } else {
+          router.push('/cliente/dashboard');
+        }
       } else {
         setServerError(data.error || 'Código inválido');
       }
