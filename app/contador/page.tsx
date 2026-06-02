@@ -28,6 +28,12 @@ import {
 import { useDialog } from '@/app/contexts/DialogContext';
 
 const PAGE_SIZE = 12;
+const STATUS_PENDENTES = ['PENDENTE', 'PENDENTE_DONO', 'PENDENTE_CUSTODIANTE'];
+const isStatusPendente = (status?: string) => STATUS_PENDENTES.includes(status || '');
+const textoStatusPendente = (status?: string) => {
+  if (status === 'PENDENTE_CUSTODIANTE') return 'Pendente com o contador atual.';
+  return 'Aprovação pendente pelo dono.';
+};
 
 const filtrosRapidos = [
   { id: 'TODOS', label: 'Todos' },
@@ -179,7 +185,7 @@ export default function ContadorDashboard() {
       notasMes: empresas.reduce((acc, item) => acc + (item.resumo?.notasMes || 0), 0),
       pendencias: empresas.filter(temPendencia).length,
       certificadosVencendo: empresas.filter(certificadoVencendo).length,
-      aguardando: empresas.filter((item) => item.status === 'PENDENTE').length,
+      aguardando: empresas.filter((item) => isStatusPendente(item.status)).length,
       clientes: aprovadas.reduce((acc, item) => acc + (item.resumo?.clientesCarteira || 0), 0),
     };
   }, [empresas]);
@@ -296,7 +302,7 @@ export default function ContadorDashboard() {
     if (status === 'APROVADO') {
       return <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-black text-emerald-700 ring-1 ring-emerald-200"><CheckCircle size={12} /> Ativo</span>;
     }
-    if (status === 'PENDENTE') {
+    if (isStatusPendente(status)) {
       return <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-black text-amber-700 ring-1 ring-amber-200"><Clock size={12} /> Aguardando</span>;
     }
     return <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2.5 py-1 text-[11px] font-black text-red-700 ring-1 ring-red-200"><AlertTriangle size={12} /> Recusado</span>;
@@ -490,7 +496,7 @@ export default function ContadorDashboard() {
                       </button>
                     ) : (
                       <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-100 px-4 py-3 text-center text-xs font-bold text-slate-500">
-                        {item.status === 'PENDENTE' ? 'Aprovação pendente pelo dono.' : 'Acesso negado.'}
+                        {isStatusPendente(item.status) ? textoStatusPendente(item.status) : 'Acesso negado.'}
                       </div>
                     )}
                   </article>

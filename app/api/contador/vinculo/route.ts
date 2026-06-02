@@ -5,6 +5,7 @@ import { upsertEmpresaAndLinkUser } from '@/app/services/empresaService';
 import { stripEmpresaSecrets } from '@/app/utils/safe-data';
 
 const prisma = new PrismaClient();
+const PENDING_LINK_STATUSES = ['PENDENTE', 'PENDENTE_DONO', 'PENDENTE_CUSTODIANTE'];
 
 // GET
 export async function GET(request: Request) {
@@ -67,7 +68,7 @@ export async function GET(request: Request) {
     if (mode === 'cliente') {
         if (!user.empresaId) return NextResponse.json([]);
         const solicitacoes = await prisma.contadorVinculo.findMany({
-            where: { empresaId: user.empresaId, status: 'PENDENTE', arquivadoEm: null } as any,
+            where: { empresaId: user.empresaId, status: { in: ['PENDENTE', 'PENDENTE_DONO'] }, arquivadoEm: null } as any,
             include: { contador: { select: { nome: true, email: true } } }
         });
         return NextResponse.json(solicitacoes);
@@ -100,17 +101,23 @@ export async function POST(request: Request) {
     const resultado: any = await upsertEmpresaAndLinkUser(cnpjLimpo, user.id, null, 'CONTADOR');
     
     // Verifica se ficou PENDENTE ou APROVADO
-    const isPendente = resultado._statusVinculo === 'PENDENTE';
+    const isPendente = PENDING_LINK_STATUSES.includes(resultado._statusVinculo);
+    const messageByStatus: Record<string, string> = {
+        APROVADO: 'Empresa vinculada com sucesso!',
+        PENDENTE: 'Solicitacao enviada ao dono da empresa.',
+        PENDENTE_DONO: 'Solicitacao enviada ao dono da empresa.',
+        PENDENTE_CUSTODIANTE: 'Solicitacao registrada. A liberacao depende do contador custodiante atual.'
+    };
 
     return NextResponse.json({ 
         success: true, 
-        message: isPendente ? 'Solicitação enviada ao dono da empresa.' : 'Empresa vinculada com sucesso!', 
+        message: messageByStatus[resultado._statusVinculo] || (isPendente ? 'Solicitacao pendente.' : 'Empresa vinculada com sucesso!'),
         status: resultado._statusVinculo 
     });
 
   } catch (e: any) { 
       console.error("[CONTADOR] Erro:", e);
-      if (e.message && e.message.includes("Empresa já vinculada")) {
+      if (e.message && (e.message.includes("Empresa") && e.message.toLowerCase().includes("vinculada"))) {
           return NextResponse.json({ error: "Esta empresa já está na sua lista (ou aguardando aprovação)." }, { status: 409 });
       }
       return NextResponse.json({ error: 'Erro: ' + e.message }, { status: 500 }); 

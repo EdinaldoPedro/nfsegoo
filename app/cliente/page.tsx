@@ -39,6 +39,7 @@ interface Cliente {
   codigoIbge?: string;
   pais?: string;
   moeda?: string;
+  semEndereco?: boolean;
 }
 
 export default function MeusClientes() {
@@ -64,11 +65,12 @@ export default function MeusClientes() {
     id: '', nome: '', nomeFantasia: '', inscricaoMunicipal: '', 
     email: '', documento: '', cidade: '', uf: '', cep: '', 
     logradouro: '', numero: '', bairro: '', codigoIbge: '',
-    tipo: 'PJ', pais: 'Brasil', moeda: 'BRL'
+    tipo: 'PJ', pais: 'Brasil', moeda: 'BRL', semEndereco: false
   });
 
   const isPJ = clienteAtual.tipo === 'PJ';
   const isEdicaoPJ = !!clienteAtual.id && clienteAtual.tipo === 'PJ';
+  const isEnderecoDispensado = clienteAtual.tipo === 'PF' && clienteAtual.semEndereco === true;
 
   // --- CARREGAMENTO ---
   const carregarClientes = async () => {
@@ -117,7 +119,7 @@ export default function MeusClientes() {
     setClienteAtual({ 
         id: '', nome: '', nomeFantasia: '', inscricaoMunicipal: '', email: '', 
         documento: '', cidade: '', uf: '', cep: '', logradouro: '', 
-        numero: '', bairro: '', codigoIbge: '', tipo: 'PJ', pais: 'Brasil', moeda: 'BRL'
+        numero: '', bairro: '', codigoIbge: '', tipo: 'PJ', pais: 'Brasil', moeda: 'BRL', semEndereco: false
     });
     setModalStep('SELECAO');
     setIsFormOpen(true);
@@ -131,6 +133,7 @@ export default function MeusClientes() {
           pais: tipo === 'EXT' ? '' : 'Brasil',
           documento: '',
           nome: tipo === 'PF' ? '' : prev.nome,
+          semEndereco: false,
       }));
       setModalStep('FORMULARIO');
   };
@@ -370,7 +373,7 @@ export default function MeusClientes() {
   };
 
   const handleBuscarCep = async () => {
-      if (clienteAtual.tipo === 'EXT') return;
+      if (clienteAtual.tipo === 'EXT' || isEnderecoDispensado) return;
       const cepLimpo = clienteAtual.cep?.replace(/\D/g, '');
       if (!cepLimpo || cepLimpo.length !== 8) return; 
 
@@ -399,6 +402,29 @@ export default function MeusClientes() {
     }
     if (!clienteAtual.nome) return dialog.showAlert("Nome é obrigatório.");
     
+    if (clienteAtual.tipo === 'PF' && !isEnderecoDispensado) {
+      const camposObrigatorios = [
+        ['CEP', clienteAtual.cep],
+        ['logradouro', clienteAtual.logradouro],
+        ['numero', clienteAtual.numero],
+        ['bairro', clienteAtual.bairro],
+        ['cidade', clienteAtual.cidade],
+        ['UF', clienteAtual.uf],
+        ['codigo IBGE', clienteAtual.codigoIbge],
+      ];
+      const faltantes = camposObrigatorios
+        .filter(([, valor]) => !String(valor || '').trim())
+        .map(([label]) => label);
+
+      if (faltantes.length > 0) {
+        return dialog.showAlert({
+          type: 'warning',
+          title: 'Endereco incompleto',
+          description: `Informe ${faltantes.join(', ')} ou marque a opcao de emitir sem informar endereco.`,
+        });
+      }
+    }
+
     setSalvando(true);
     // GARANTIR QUE AS VARIÁVEIS SÃO DEFINIDAS AQUI DENTRO:
     const userId = localStorage.getItem('userId');
@@ -415,6 +441,16 @@ export default function MeusClientes() {
         },
         body: JSON.stringify({
             ...clienteAtual,
+            ...(isEnderecoDispensado ? {
+                cep: '',
+                logradouro: '',
+                numero: '',
+                complemento: '',
+                bairro: '',
+                cidade: '',
+                uf: '',
+                codigoIbge: '',
+            } : {}),
             nomeValidadoPortal: nomePfBloqueado,
         })
       });
@@ -618,11 +654,49 @@ export default function MeusClientes() {
                                 )}
 
                                 <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 relative">
-                                    <h4 className="font-bold text-sm text-slate-700 mb-3 flex items-center gap-2">
-                                        <MapPin size={16}/> Endereço {clienteAtual.tipo === 'EXT' && '(Exterior)'}
-                                    </h4>
-                                    {buscandoDados && <div className="absolute top-4 right-4 flex items-center gap-2 text-xs text-blue-600"><Loader2 className="animate-spin" size={14}/> Buscando...</div>}
+                                    <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                                        <h4 className="font-bold text-sm text-slate-700 flex items-center gap-2">
+                                            <MapPin size={16}/> Endereco {clienteAtual.tipo === 'EXT' && '(Exterior)'}
+                                        </h4>
+                                        {clienteAtual.tipo === 'PF' && (
+                                            <label className="flex shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-blue-700">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={clienteAtual.semEndereco === true}
+                                                    disabled={formularioBloqueado}
+                                                    onChange={(e) => {
+                                                        const marcado = e.target.checked;
+                                                        setClienteAtual(prev => ({
+                                                            ...prev,
+                                                            semEndereco: marcado,
+                                                            ...(marcado ? {
+                                                                cep: '',
+                                                                logradouro: '',
+                                                                numero: '',
+                                                                bairro: '',
+                                                                cidade: '',
+                                                                uf: '',
+                                                                codigoIbge: '',
+                                                            } : {}),
+                                                        }));
+                                                    }}
+                                                    className="h-4 w-4 accent-blue-600"
+                                                />
+                                                Emitir sem informar endereco
+                                            </label>
+                                        )}
+                                    </div>
+                                    {buscandoDados && (
+                                        <div className="mb-3 flex items-center gap-2 text-xs font-medium text-blue-600">
+                                            <Loader2 className="animate-spin" size={14}/> Buscando dados oficiais...
+                                        </div>
+                                    )}
 
+                                    {isEnderecoDispensado ? (
+                                        <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm font-medium text-blue-800">
+                                            A DPS sera enviada somente com CPF e nome do tomador, sem o bloco de endereco.
+                                        </div>
+                                    ) : (
                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                         {clienteAtual.tipo === 'EXT' && (
                                             <>
@@ -715,6 +789,7 @@ export default function MeusClientes() {
                                             />
                                         </div>
                                     </div>
+                                    )}
                                 </div>
                             </form>
                         )}

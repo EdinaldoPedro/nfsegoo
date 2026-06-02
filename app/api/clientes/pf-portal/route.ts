@@ -5,6 +5,12 @@ import { validateRequest } from '@/app/utils/api-security';
 import { validarCPF } from '@/app/utils/cpf';
 
 const prisma = new PrismaClient();
+const MAX_CONSULTA_CPF_ATTEMPTS = 3;
+const RETRY_DELAY_MS = 1500;
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 async function getEmpresaContexto(user: any, contextId: string | null) {
   const isStaff = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(user.role);
@@ -23,9 +29,7 @@ async function getEmpresaContexto(user: any, contextId: string | null) {
     });
     if (vinculo && vinculo.status === 'APROVADO' && !(vinculo as any).arquivadoEm) return contextId;
 
-    const empresaAdicional = await prisma.empresa.findFirst({
-      where: { id: contextId, donoFaturamentoId: user.id, arquivadoEm: null } as any,
-    });
+    const empresaAdicional = null;
     if (empresaAdicional) return contextId;
 
     return null;
@@ -76,12 +80,37 @@ export async function POST(request: Request) {
     }
 
     const client = new NfsePortalInscricaoClient();
-    const info = await client.recuperarInfoInscricao(
-      cpf,
-      empresa.certificadoA1,
-      empresa.senhaCertificado,
-      empresa.id,
-    );
+    let info = null;
+    let ultimoErro: any = null;
+
+    for (let tentativa = 1; tentativa <= MAX_CONSULTA_CPF_ATTEMPTS; tentativa += 1) {
+      try {
+        info = await client.recuperarInfoInscricao(
+          cpf,
+          empresa.certificadoA1,
+          empresa.senhaCertificado,
+          empresa.id,
+          undefined,
+          {
+            navigationTimeoutMs: 25000,
+            authTimeoutMs: 20000,
+            actionTimeoutMs: 6000,
+          },
+        );
+        break;
+      } catch (error: any) {
+        ultimoErro = error;
+        console.warn(`[CPF PORTAL] Tentativa ${tentativa}/${MAX_CONSULTA_CPF_ATTEMPTS} falhou: ${error.message}`);
+        if (tentativa < MAX_CONSULTA_CPF_ATTEMPTS) await delay(RETRY_DELAY_MS);
+      }
+    }
+
+    if (!info) {
+      return NextResponse.json({
+        error: 'Portal Nacional instavel: nao foi possivel consultar este CPF apos algumas tentativas. Voce pode tentar novamente em instantes ou salvar o cliente marcando a opcao de emitir sem informar endereco.',
+        details: ultimoErro?.message,
+      }, { status: 504 });
+    }
 
     return NextResponse.json({
       origem: 'PORTAL_NACIONAL',

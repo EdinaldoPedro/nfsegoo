@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
   LayoutDashboard, Users, Building, Shield, Activity, 
-  LogOut, MapPin, List, LifeBuoy, CreditCard, Settings, Map, Briefcase, Ticket // <--- Ticket adicionado aqui
+  LogOut, MapPin, List, LifeBuoy, CreditCard, Settings, Map, Briefcase, Ticket,
+  ClipboardList, Wrench
 } from 'lucide-react';
 import Link from 'next/link';
 import { checkIsStaff } from '@/app/utils/permissions';
@@ -67,6 +68,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     
     // Sistema (Antigo "Usuários")
     { icon: Users, label: 'Configurar Contas', href: '/admin/usuarios' },
+    { icon: Shield, label: 'Bancada de Vinculos', href: '/admin/vinculos-custodia' },
     
     // Cadastros Técnicos
     { icon: Building, label: 'Base de Empresas', href: '/admin/empresas' }, 
@@ -82,6 +84,45 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
     // Configurações
     { icon: Settings, label: 'Configurações', href: '/admin/configuracoes' },
+  ];
+
+  const menuSections = [
+    {
+      title: 'Visão Geral',
+      items: [
+        { icon: LayoutDashboard, label: 'Dashboard', href: '/admin/dashboard' },
+        { icon: ClipboardList, label: 'Bancadas', href: '/admin/bancadas' },
+      ],
+    },
+    {
+      title: 'Bancada Operacional',
+      items: [
+        { icon: Activity, label: 'Central de Emissões', href: '/admin/emissoes' },
+        { icon: Building, label: 'Base de Empresas', href: '/admin/empresas' },
+        { icon: LifeBuoy, label: 'Helpdesk / Suporte', href: '/admin/suporte' },
+        { icon: Shield, label: 'Bancada de Vínculos', href: '/admin/vinculos-custodia' },
+      ],
+    },
+    {
+      title: 'Bancada Técnica',
+      items: [
+        { icon: Wrench, label: 'Logs do Sistema', href: '/admin/logs' },
+        { icon: List, label: 'Tabela CNAEs', href: '/admin/cnaes' },
+        { icon: MapPin, label: 'Trib. Municipal', href: '/admin/tributacao-municipal' },
+        { icon: Map, label: 'Mapa de Cobertura', href: '/admin/cobertura' },
+        { icon: Settings, label: 'Configurações', href: '/admin/configuracoes' },
+      ],
+    },
+    {
+      title: 'Gestão do SaaS',
+      items: [
+        { icon: Briefcase, label: 'CRM / Clientes', href: '/admin/crm' },
+        { icon: CreditCard, label: 'Planos e Pacotes', href: '/admin/planos' },
+        { icon: Ticket, label: 'Cupons & Parceiros', href: '/admin/cupons' },
+        { icon: Users, label: 'Configurar Contas', href: '/admin/usuarios' },
+        { icon: Shield, label: 'Colaboradores', href: '/admin/colaboradores' },
+      ],
+    },
   ];
 
   const handleLogout = async () => {
@@ -110,20 +151,31 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 </div>
             </div>
 
-            <nav className="flex-1 p-4 space-y-2 overflow-y-auto custom-scrollbar">
-                {menuItems.map((item) => (
-                    <Link 
-                    key={item.href} 
-                    href={item.href}
-                    className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all font-medium ${
-                        item.href === '/admin/crm' 
-                            ? 'bg-purple-900/50 text-purple-300 border border-purple-800/50 hover:bg-purple-800/50' // Destaque visual para o CRM
-                            : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                    }`}
-                    >
-                    <item.icon size={20} />
-                    {item.label}
-                    </Link>
+            <nav className="flex-1 p-4 space-y-5 overflow-y-auto custom-scrollbar">
+                {menuSections.map((section) => (
+                    <div key={section.title}>
+                        <p className="px-3 mb-2 text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">
+                            {section.title}
+                        </p>
+                        <div className="space-y-1.5">
+                            {section.items.map((item) => (
+                                <Link
+                                key={item.href}
+                                href={item.href}
+                                className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all font-medium ${
+                                    item.href === '/admin/bancadas'
+                                        ? 'bg-blue-900/50 text-blue-200 border border-blue-800/50 hover:bg-blue-800/50'
+                                        : item.href === '/admin/crm'
+                                            ? 'bg-purple-900/40 text-purple-300 border border-purple-800/40 hover:bg-purple-800/50'
+                                            : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                                }`}
+                                >
+                                <item.icon size={19} />
+                                {item.label}
+                                </Link>
+                            ))}
+                        </div>
+                    </div>
                 ))}
             </nav>
 

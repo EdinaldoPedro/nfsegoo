@@ -7,6 +7,33 @@ import { prisma } from '@/app/utils/prisma';
 import { checkRateLimit } from '@/app/utils/rate-limit';
 import { validateJsonContentLength, validateSameOrigin } from '@/app/utils/request-guards';
 
+function conflictResponse(conflicts: Array<'email' | 'cpf'>, pending = false) {
+  const errors: Record<string, string> = {};
+
+  if (conflicts.includes('email')) {
+    errors.email = pending
+      ? 'Este e-mail ja possui um cadastro aguardando confirmacao.'
+      : 'Este e-mail ja esta cadastrado. Tente fazer login ou recuperar a senha.';
+  }
+
+  if (conflicts.includes('cpf')) {
+    errors.cpf = pending
+      ? 'Este CPF ja possui um cadastro aguardando confirmacao.'
+      : 'Este CPF ja esta vinculado a uma conta existente.';
+  }
+
+  const error = conflicts.length === 2
+    ? 'E-mail e CPF ja estao cadastrados.'
+    : errors[conflicts[0]];
+
+  return NextResponse.json({
+    error,
+    code: pending ? 'PENDING_REGISTRATION_CONFLICT' : 'ACCOUNT_ALREADY_EXISTS',
+    fields: conflicts,
+    errors,
+  }, { status: 409 });
+}
+
 export async function POST(request: Request) {
   try {
     const originError = validateSameOrigin(request);
@@ -49,21 +76,38 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'CPF invalido.' }, { status: 400 });
     }
 
-    const usuarioExistente = await prisma.user.findFirst({
+    const usuariosExistentes = await prisma.user.findMany({
       where: { OR: [{ email: emailNormalizado }, { cpf: documentoLimpo }] },
-      select: { id: true },
+      select: { email: true, cpf: true },
+      take: 2,
     });
 
-    if (usuarioExistente) {
-      return NextResponse.json({ error: 'Nao foi possivel concluir o cadastro com os dados informados.' }, { status: 409 });
+    if (usuariosExistentes.length > 0) {
+      const conflicts = new Set<'email' | 'cpf'>();
+      usuariosExistentes.forEach((usuario) => {
+        if (usuario.email === emailNormalizado) conflicts.add('email');
+        if (usuario.cpf === documentoLimpo) conflicts.add('cpf');
+      });
+      return conflictResponse(Array.from(conflicts));
     }
 
-    const pendingConflict = await prisma.pendingRegistration.findFirst({
+    const pendingConflicts = await prisma.pendingRegistration.findMany({
       where: { OR: [{ email: emailNormalizado }, { cpf: documentoLimpo }] },
+      select: { email: true, cpf: true },
+      take: 2,
     });
 
-    if (pendingConflict && (pendingConflict.email !== emailNormalizado || pendingConflict.cpf !== documentoLimpo)) {
-      return NextResponse.json({ error: 'Nao foi possivel concluir o cadastro com os dados informados.' }, { status: 409 });
+    const pendingDivergente = pendingConflicts.filter((pending) => (
+      pending.email !== emailNormalizado || pending.cpf !== documentoLimpo
+    ));
+
+    if (pendingDivergente.length > 0) {
+      const conflicts = new Set<'email' | 'cpf'>();
+      pendingDivergente.forEach((pending) => {
+        if (pending.email === emailNormalizado) conflicts.add('email');
+        if (pending.cpf === documentoLimpo) conflicts.add('cpf');
+      });
+      return conflictResponse(Array.from(conflicts), true);
     }
 
     const senhaHash = await bcrypt.hash(senha, 10);

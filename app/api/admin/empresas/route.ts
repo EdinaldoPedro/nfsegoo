@@ -86,6 +86,7 @@ export async function GET(request: Request) {
                 take: limit,
                 include: { 
                     donoUser: { select: { nome: true, email: true } },
+                    proprietarioUser: { select: { nome: true, email: true } } as any,
                     // ADICIONE ESTA PARTE:
                     minhaCarteira: {
                         where: { arquivadoEm: null },
@@ -102,7 +103,7 @@ export async function GET(request: Request) {
             return {
                 ...stripEmpresaSecrets(emp),
                 origem: 'PRESTADOR',
-                donos: emp.donoUser ? [emp.donoUser] : [],
+                donos: (emp as any).proprietarioUser ? [(emp as any).proprietarioUser] : (emp.donoUser ? [emp.donoUser] : []),
                 clientesVinculados: emp.minhaCarteira.map((v: any) => v.cliente)
             };
         });

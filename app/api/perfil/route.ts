@@ -5,6 +5,7 @@ import { validateRequest } from '@/app/utils/api-security';
 import { encrypt } from '@/app/utils/crypto';
 import { hasEmpresaAccess, isAdminRole } from '@/app/utils/access-control';
 import { validarCertificadoA1 } from '@/app/utils/certificadoA1Validation';
+import { renovarUsoMensalSeNecessario } from '@/app/services/planService';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,7 +42,8 @@ export async function GET(request: Request) {
         where: { id: userId },
         include: { 
             empresa: true,
-            empresasFaturadas: true 
+            empresasFaturadas: true,
+            empresasProprietarias: true
         }
       });
 
@@ -58,6 +60,13 @@ export async function GET(request: Request) {
               }
           });
       }
+      if ((user as any).empresasProprietarias && (user as any).empresasProprietarias.length > 0) {
+          (user as any).empresasProprietarias.forEach((emp: any) => {
+              if (!listaEmpresas.some(e => e.id === emp.id)) {
+                  listaEmpresas.push({ id: emp.id, razaoSocial: emp.razaoSocial || 'Empresa Proprietaria', cnpj: emp.documento, isPrimary: emp.id === user.empresaId });
+              }
+          });
+      }
 
       const isStaff = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(user.role);
       let planoDetalhado = null;
@@ -70,6 +79,8 @@ export async function GET(request: Request) {
           };
       } else {
             // === NOVO CÉREBRO NA API DE PERFIL ===
+            await renovarUsoMensalSeNecessario(user.id);
+
             const historicosAtivos = await prisma.planHistory.findMany({
                 where: { userId: user.id, status: 'ATIVO' },
                 include: { plan: true },
@@ -93,6 +104,7 @@ export async function GET(request: Request) {
                     empresa: {
                         OR: [
                             { donoFaturamentoId: user.id },
+                            { proprietarioUserId: user.id } as any,
                             { id: user.empresaId || '' }
                         ]
                     }

@@ -33,6 +33,15 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: "Nenhum e-mail pendente." }, { status: 400 });
         }
 
+        const emailExiste = await prisma.user.findFirst({
+            where: { email: user.tempEmail, id: { not: user.id } },
+            select: { id: true }
+        });
+
+        if (emailExiste) {
+            return NextResponse.json({ error: "Este e-mail ja esta em uso por outra conta." }, { status: 409 });
+        }
+
         // 2. Efetiva a Troca
         await prisma.user.update({
             where: { id: user.id },

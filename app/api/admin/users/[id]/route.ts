@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { getAuthenticatedUser, forbidden } from '@/app/utils/api-middleware';
 import { stripUserSecrets } from '@/app/utils/safe-data';
+import { marcarEmpresasProprietariasDoContador } from '@/app/services/contadorOwnershipService';
 
 const prisma = new PrismaClient();
 
@@ -18,6 +19,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
                 empresasContabeis: {
                     include: { empresa: true }
                 },
+                empresasProprietarias: true,
                 // === CORREÇÃO 1: O nome correto da relação no seu schema é historicoPlanos ===
                 historicoPlanos: {
                     include: { plan: true },
@@ -46,10 +48,57 @@ export async function PATCH(request: Request, { params }: { params: { id: string
 
     try {
         const body = await request.json();
-        const { limiteEmpresas, role, limiteNotas, limiteClientes, assinaturaAtiva, renovacaoAutomatica } = body;
+        const { limiteEmpresas, role, limiteNotas, limiteClientes, assinaturaAtiva, renovacaoAutomatica, addEmpresaProprietaria, removeEmpresaProprietariaId } = body;
 
         const userAtual = await prisma.user.findUnique({ where: { id: params.id } });
         if (!userAtual) return NextResponse.json({ error: 'Usuário não encontrado' }, { status: 404 });
+
+        if (addEmpresaProprietaria) {
+            const cnpjLimpo = String(addEmpresaProprietaria.documento || '').replace(/\D/g, '');
+            if (cnpjLimpo.length !== 14) return NextResponse.json({ error: 'CNPJ invalido.' }, { status: 400 });
+
+            const empresaExistente = await prisma.empresa.findUnique({ where: { documento: cnpjLimpo } });
+            if (empresaExistente && (empresaExistente as any).proprietarioUserId && (empresaExistente as any).proprietarioUserId !== params.id) {
+                return NextResponse.json({ error: 'Esta empresa ja possui outro proprietario.' }, { status: 409 });
+            }
+
+            const empresa = empresaExistente
+                ? await prisma.empresa.update({
+                    where: { id: empresaExistente.id },
+                    data: {
+                        proprietarioUserId: params.id,
+                        contadorCustodianteId: params.id,
+                        statusPropriedade: 'PROPRIETARIA',
+                        donoFaturamentoId: (empresaExistente as any).donoFaturamentoId || params.id,
+                    } as any,
+                  })
+                : await prisma.empresa.create({
+                    data: {
+                        documento: cnpjLimpo,
+                        razaoSocial: addEmpresaProprietaria.razaoSocial || `Empresa ${cnpjLimpo}`,
+                        proprietarioUserId: params.id,
+                        contadorCustodianteId: params.id,
+                        donoFaturamentoId: params.id,
+                        statusPropriedade: 'PROPRIETARIA',
+                    } as any,
+                  });
+
+            await prisma.contadorVinculo.upsert({
+                where: { contadorId_empresaId: { contadorId: params.id, empresaId: empresa.id } },
+                create: { contadorId: params.id, empresaId: empresa.id, status: 'APROVADO' } as any,
+                update: { status: 'APROVADO', arquivadoEm: null, arquivadoPor: null, motivoArquivamento: null } as any,
+            });
+
+            return NextResponse.json({ success: true, empresa });
+        }
+
+        if (removeEmpresaProprietariaId) {
+            await prisma.empresa.updateMany({
+                where: { id: removeEmpresaProprietariaId, proprietarioUserId: params.id } as any,
+                data: { proprietarioUserId: null } as any,
+            });
+            return NextResponse.json({ success: true });
+        }
 
         const data: any = {};
         if (role) data.role = role;
@@ -61,15 +110,8 @@ export async function PATCH(request: Request, { params }: { params: { id: string
         });
 
         // === AUTO-VÍNCULO DA EMPRESA PRÓPRIA ===
-        if (role === 'CONTADOR' && userAtual.role !== 'CONTADOR' && userAtual.empresaId) {
-            const vinculoExiste = await prisma.contadorVinculo.findUnique({
-                where: { contadorId_empresaId: { contadorId: updated.id, empresaId: userAtual.empresaId } }
-            });
-            if (!vinculoExiste) {
-                await prisma.contadorVinculo.create({
-                    data: { contadorId: updated.id, empresaId: userAtual.empresaId, status: 'APROVADO' }
-                });
-            }
+        if (role === 'CONTADOR' && userAtual.role !== 'CONTADOR') {
+            await marcarEmpresasProprietariasDoContador(updated.id);
         }
 
         // === AUTO-GERAÇÃO DO PLANO PARCEIRO ===

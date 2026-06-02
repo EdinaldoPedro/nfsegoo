@@ -4,6 +4,13 @@ import { validarCPF } from '@/app/utils/cpf';
 
 const prisma = new PrismaClient();
 
+const STATUS_VINCULO = {
+  APROVADO: 'APROVADO',
+  PENDENTE_DONO: 'PENDENTE_DONO',
+  PENDENTE_CUSTODIANTE: 'PENDENTE_CUSTODIANTE',
+} as const;
+type StatusVinculo = (typeof STATUS_VINCULO)[keyof typeof STATUS_VINCULO];
+
 function safeString(val: any): string | null {
     if (val === null || val === undefined) return null;
     const str = String(val).trim();
@@ -123,26 +130,42 @@ export async function upsertEmpresaAndLinkUser(documento: string, userId: string
 
       // >> CONTADOR CADASTRANDO <<
       if (userRole === 'CONTADOR') {
-          if (empresaExistente) {
-             const vinculo = await tx.contadorVinculo.findUnique({
-                  where: { contadorId_empresaId: { contadorId: userId, empresaId: empresaExistente.id } }
-              });
-              if (vinculo) throw new Error("Empresa já vinculada ou solicitação pendente.");
+          const proprietarioAtualId = (empresaExistente as any)?.proprietarioUserId || null;
+          const temDonoReal = (!!empresaExistente?.donoUser && empresaExistente.donoUser.id !== userId) || (!!proprietarioAtualId && proprietarioAtualId !== userId);
+          const custodianteAtualId = (empresaExistente as any)?.contadorCustodianteId || null;
+          const temOutroCustodiante = !!custodianteAtualId && custodianteAtualId !== userId;
+
+          let statusVinculo: StatusVinculo = STATUS_VINCULO.APROVADO;
+          if (temDonoReal) {
+              statusVinculo = STATUS_VINCULO.PENDENTE_DONO;
+          } else if (temOutroCustodiante) {
+              statusVinculo = STATUS_VINCULO.PENDENTE_CUSTODIANTE;
           }
 
-          const statusVinculo = (empresaExistente && empresaExistente.donoUser) ? 'PENDENTE' : 'APROVADO';
+          const dadosAtualizacao: any = { ...dadosFinais, lastApiCheck: new Date() };
+          if (!empresaExistente || (!temDonoReal && !temOutroCustodiante)) {
+              dadosAtualizacao.contadorCustodianteId = userId;
+              dadosAtualizacao.statusPropriedade = 'CUSTODIADA';
+              dadosAtualizacao.modoCobranca = (empresaExistente as any)?.modoCobranca || 'RESPONSAVEL_UNICO';
+              if (!(empresaExistente as any)?.donoFaturamentoId) {
+                  dadosAtualizacao.donoFaturamentoId = userId;
+              }
+          }
 
           // ATENÇÃO: Se não existe, o CONTADOR vira o donoFaturamentoId
           const dadosCriacao = { 
               documento: docLimpo, 
               ...dadosFinais, 
               lastApiCheck: new Date(),
-              ...(!empresaExistente ? { donoFaturamentoId: userId } : {})
-          };
+              donoFaturamentoId: userId,
+              contadorCustodianteId: userId,
+              statusPropriedade: 'CUSTODIADA',
+              modoCobranca: 'RESPONSAVEL_UNICO'
+          } as any;
 
           const empresa = await tx.empresa.upsert({
               where: { documento: docLimpo },
-              update: { ...dadosFinais, lastApiCheck: new Date() },
+              update: dadosAtualizacao,
               create: dadosCriacao
           });
 
@@ -151,8 +174,31 @@ export async function upsertEmpresaAndLinkUser(documento: string, userId: string
               await tx.cnae.createMany({ data: cnaesUnicos.map(c => ({ ...c, empresaId: empresa.id })) });
           }
 
-          await tx.contadorVinculo.create({
-              data: { contadorId: userId, empresaId: empresa.id, status: statusVinculo }
+          const vinculoExistente = await tx.contadorVinculo.findUnique({
+              where: { contadorId_empresaId: { contadorId: userId, empresaId: empresa.id } }
+          });
+
+          if (vinculoExistente && !(vinculoExistente as any).arquivadoEm && vinculoExistente.status !== 'DESVINCULADO') {
+              throw new Error("Empresa jÃ¡ vinculada ou solicitaÃ§Ã£o pendente.");
+          }
+
+          await tx.contadorVinculo.upsert({
+              where: { contadorId_empresaId: { contadorId: userId, empresaId: empresa.id } },
+              create: {
+                  contadorId: userId,
+                  empresaId: empresa.id,
+                  status: statusVinculo,
+                  clientePodeAcessarPortal: false,
+                  nivelPortal: 'NENHUM'
+              } as any,
+              update: {
+                  status: statusVinculo,
+                  arquivadoEm: null,
+                  arquivadoPor: null,
+                  motivoArquivamento: null,
+                  clientePodeAcessarPortal: false,
+                  nivelPortal: 'NENHUM'
+              } as any
           });
 
           return { ...empresa, _statusVinculo: statusVinculo };
@@ -162,6 +208,11 @@ export async function upsertEmpresaAndLinkUser(documento: string, userId: string
       else {
           if (empresaExistente) {
               // Se já tem dono e NÃO É um contador
+              const proprietarioAtualId = (empresaExistente as any)?.proprietarioUserId || null;
+              if (proprietarioAtualId && proprietarioAtualId !== userId) {
+                  throw new Error("Esta empresa ja pertence a outro usuario.");
+              }
+
               if (empresaExistente.donoUser && empresaExistente.donoUser.role !== 'CONTADOR' && empresaExistente.donoUser.id !== userId) {
                   throw new Error("Esta empresa já pertence a outro usuário.");
               }
@@ -172,7 +223,7 @@ export async function upsertEmpresaAndLinkUser(documento: string, userId: string
                   // O contador que geria a empresa tem o vínculo suspenso para 'PENDENTE'
                   await tx.contadorVinculo.updateMany({ 
                       where: { empresaId: empresaExistente.id }, 
-                      data: { status: 'PENDENTE' } 
+                      data: { status: STATUS_VINCULO.PENDENTE_DONO }
                   });
               }
           }
@@ -183,15 +234,22 @@ export async function upsertEmpresaAndLinkUser(documento: string, userId: string
                   ...dadosFinais, 
                   lastApiCheck: new Date(), 
                   donoUser: { connect: { id: userId } },
-                  donoFaturamentoId: userId // O Cliente comum assume a posse e o faturamento
-              },
+                  donoFaturamentoId: userId,
+                  proprietarioUserId: userId,
+                  contadorCustodianteId: null,
+                  statusPropriedade: 'PROPRIETARIA',
+                  modoCobranca: 'RESPONSAVEL_UNICO'
+              } as any,
               create: { 
                   documento: docLimpo, 
                   ...dadosFinais, 
                   lastApiCheck: new Date(), 
                   donoUser: { connect: { id: userId } },
-                  donoFaturamentoId: userId
-              }
+                  donoFaturamentoId: userId,
+                  proprietarioUserId: userId,
+                  statusPropriedade: 'PROPRIETARIA',
+                  modoCobranca: 'RESPONSAVEL_UNICO'
+              } as any
           });
 
           if (cnaesUnicos.length > 0) {

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { User, Save, ArrowLeft, Mail, Phone, CreditCard, Settings, Monitor, X, RefreshCcw, Calendar, TrendingUp, Building2, Plus } from 'lucide-react';
+import { User, Save, ArrowLeft, Mail, Phone, CreditCard, Settings, Monitor, X, RefreshCcw, Calendar, TrendingUp, Building2, Plus, KeyRound, Lock, CheckCircle, Loader2 } from 'lucide-react';
 import PlanSelector from '@/components/PlanSelector';
 import { useAppConfig } from '@/app/contexts/AppConfigContext';
 import AppHeader from '@/components/AppHeader';
@@ -15,6 +15,11 @@ export default function MinhaContaPage() {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
   const [showPlans, setShowPlans] = useState(false);
+  const [showEmailModal, setShowEmailModal] = useState(false);
+  const [emailStep, setEmailStep] = useState<'send' | 'confirm'>('send');
+  const [emailLoading, setEmailLoading] = useState(false);
+  const [emailError, setEmailError] = useState('');
+  const [emailForm, setEmailForm] = useState({ newEmail: '', password: '', code: '' });
   
   // === ESTADOS PARA NOVA EMPRESA ===
   const [showAddPJ, setShowAddPJ] = useState(false);
@@ -125,6 +130,71 @@ export default function MinhaContaPage() {
   };
   
   // === NOVA FUNÇÃO: CRIAR EMPRESA ADICIONAL ===
+  const abrirTrocaEmail = () => {
+      setEmailStep('send');
+      setEmailError('');
+      setEmailForm({ newEmail: '', password: '', code: '' });
+      setShowEmailModal(true);
+  };
+
+  const handleSendEmailCode = async (e: React.FormEvent) => {
+      e.preventDefault();
+      setEmailLoading(true);
+      setEmailError('');
+
+      try {
+          const res = await fetch('/api/auth/verify-email/send', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                  newEmail: emailForm.newEmail,
+                  password: emailForm.password
+              })
+          });
+          const response = await res.json().catch(() => ({}));
+
+          if (!res.ok) {
+              setEmailError(response.error || 'Nao foi possivel enviar o codigo.');
+              return;
+          }
+
+          setEmailStep('confirm');
+      } catch {
+          setEmailError('Erro de conexao.');
+      } finally {
+          setEmailLoading(false);
+      }
+  };
+
+  const handleConfirmEmailCode = async (e: React.FormEvent) => {
+      e.preventDefault();
+      setEmailLoading(true);
+      setEmailError('');
+
+      try {
+          const res = await fetch('/api/auth/verify-email/confirm', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ code: emailForm.code })
+          });
+          const response = await res.json().catch(() => ({}));
+
+          if (!res.ok) {
+              setEmailError(response.error || 'Nao foi possivel confirmar o codigo.');
+              return;
+          }
+
+          setData(prev => ({ ...prev, email: emailForm.newEmail.trim().toLowerCase() }));
+          setMsg('Email atualizado com sucesso!');
+          setShowEmailModal(false);
+          setTimeout(() => setMsg(''), 3000);
+      } catch {
+          setEmailError('Erro de conexao.');
+      } finally {
+          setEmailLoading(false);
+      }
+  };
+
   const handleCreatePJ = async (e: React.FormEvent) => {
       e.preventDefault();
       setAddingPJ(true);
@@ -216,6 +286,98 @@ export default function MinhaContaPage() {
                     <button type="submit" disabled={addingPJ} className="w-full py-3 mt-4 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition disabled:opacity-50">
                         {addingPJ ? 'Criando...' : 'Vincular Empresa'}
                     </button>
+                </form>
+             </div>
+         </div>
+      )}
+
+      {showEmailModal && (
+         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden dark:bg-slate-800">
+                <div className="p-6 border-b flex justify-between items-center bg-gray-50 dark:bg-slate-900 dark:border-slate-700">
+                    <div>
+                        <h2 className="text-lg font-bold text-slate-800 dark:text-white flex items-center gap-2">
+                            <Mail size={20}/> Trocar e-mail
+                        </h2>
+                        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                            {emailStep === 'send' ? 'Enviaremos um codigo para o novo endereco.' : `Digite o codigo enviado para ${emailForm.newEmail}.`}
+                        </p>
+                    </div>
+                    <button onClick={() => setShowEmailModal(false)} className="p-2 hover:bg-gray-200 rounded-full transition dark:hover:bg-slate-700">
+                        <X size={20} className="text-gray-500"/>
+                    </button>
+                </div>
+
+                <form onSubmit={emailStep === 'send' ? handleSendEmailCode : handleConfirmEmailCode} className="p-6 space-y-4">
+                    {emailError && (
+                        <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">
+                            {emailError}
+                        </div>
+                    )}
+
+                    {emailStep === 'send' ? (
+                        <>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">E-mail atual</label>
+                                <input className="w-full p-2.5 border rounded-lg bg-slate-50 text-slate-500 dark:bg-slate-900 dark:border-slate-600" disabled value={data.email} />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Novo e-mail</label>
+                                <div className="relative">
+                                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                                    <input
+                                        required
+                                        type="email"
+                                        className="w-full p-2.5 pl-10 border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:border-slate-600 dark:text-white"
+                                        value={emailForm.newEmail}
+                                        onChange={e => setEmailForm({...emailForm, newEmail: e.target.value})}
+                                        placeholder="novo@email.com"
+                                    />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Senha atual</label>
+                                <div className="relative">
+                                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                                    <input
+                                        required
+                                        type="password"
+                                        className="w-full p-2.5 pl-10 border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:border-slate-600 dark:text-white"
+                                        value={emailForm.password}
+                                        onChange={e => setEmailForm({...emailForm, password: e.target.value})}
+                                        placeholder="Confirme sua senha"
+                                    />
+                                </div>
+                            </div>
+                            <button type="submit" disabled={emailLoading} className="w-full py-3 mt-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition disabled:opacity-50 flex items-center justify-center gap-2">
+                                {emailLoading ? <Loader2 className="animate-spin" size={18}/> : <><KeyRound size={18}/> Enviar codigo</>}
+                            </button>
+                        </>
+                    ) : (
+                        <>
+                            <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm font-semibold text-blue-800">
+                                Codigo valido por 15 minutos. Confira a caixa de entrada e spam.
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Codigo de verificacao</label>
+                                <input
+                                    required
+                                    inputMode="numeric"
+                                    maxLength={6}
+                                    className="w-full rounded-xl border bg-slate-50 p-4 text-center font-mono text-2xl font-black tracking-[0.28em] outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:bg-slate-900 dark:border-slate-600 dark:text-white"
+                                    value={emailForm.code}
+                                    onChange={e => setEmailForm({...emailForm, code: e.target.value.replace(/\D/g, '')})}
+                                    placeholder="000000"
+                                />
+                            </div>
+                            <button type="submit" disabled={emailLoading || emailForm.code.length < 6} className="w-full py-3 mt-2 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 transition disabled:opacity-50 flex items-center justify-center gap-2">
+                                {emailLoading ? <Loader2 className="animate-spin" size={18}/> : <><CheckCircle size={18}/> Confirmar troca</>}
+                            </button>
+                            <button type="button" onClick={() => { setEmailStep('send'); setEmailError(''); }} className="w-full py-2 text-sm font-bold text-slate-500 hover:text-blue-700">
+                                Alterar e-mail ou reenviar codigo
+                            </button>
+                        </>
+                    )}
                 </form>
              </div>
          </div>
@@ -335,7 +497,16 @@ export default function MinhaContaPage() {
                     </div>
                     <div>
                         <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Email</label>
-                        <input className="saas-input bg-gray-50 text-gray-500 cursor-not-allowed dark:bg-slate-700 dark:border-slate-600" disabled value={data.email} />
+                        <div className="flex gap-2">
+                            <input className="saas-input bg-gray-50 text-gray-500 cursor-not-allowed dark:bg-slate-700 dark:border-slate-600" disabled value={data.email} />
+                            <button
+                                type="button"
+                                onClick={abrirTrocaEmail}
+                                className="shrink-0 rounded-xl border border-blue-200 bg-blue-50 px-4 text-xs font-black text-blue-700 transition hover:bg-blue-100"
+                            >
+                                Trocar
+                            </button>
+                        </div>
                     </div>
                     <div>
                         <label className="block text-xs font-bold text-gray-500 uppercase mb-1">CPF</label>
@@ -377,7 +548,7 @@ export default function MinhaContaPage() {
               </div>
 
               <div className="flex justify-between items-center pt-4">
-                <span className={`text-sm font-medium transition-opacity ${msg ? 'opacity-100' : 'opacity-0'} ${msg.includes('✅') ? 'text-green-600' : 'text-red-600'}`}>{msg}</span>
+                <span className={`text-sm font-medium transition-opacity ${msg ? 'opacity-100' : 'opacity-0'} ${msg.toLowerCase().includes('erro') ? 'text-red-600' : 'text-green-600'}`}>{msg}</span>
                 <button type="submit" disabled={saving} className="saas-btn-primary disabled:opacity-70 dark:shadow-none">
                   {saving ? 'Salvando...' : <><Save size={20} /> Salvar Alterações</>}
                 </button>

@@ -5,7 +5,7 @@ import { EmissorFactory } from '@/app/services/emissor/factories/EmissorFactory'
 import { getTributacaoPorCnae } from '@/app/utils/tributacao'; 
 import { processarRetornoNota } from '@/app/services/notaProcessor';
 import { unauthorized, forbidden } from '@/app/utils/api-middleware';
-import { checkPlanLimits, incrementUsage } from '@/app/services/planService';
+import { checkPlanLimits, incrementUsage, resolveBillingUserId } from '@/app/services/planService';
 import { validateRequest } from "@/app/utils/api-security"; 
 
 const prisma = new PrismaClient();
@@ -33,9 +33,7 @@ async function getEmpresaContexto(user: any, contextId: string | null) {
         if (vinculo && vinculo.status === 'APROVADO' && !(vinculo as any).arquivadoEm) return contextId;
         
         // 5. Dono do faturamento (Guarda-chuva)
-        const empresaAdicional = await prisma.empresa.findFirst({
-            where: { id: contextId, donoFaturamentoId: user.id }
-        });
+        const empresaAdicional = null;
         if (empresaAdicional) return contextId;
 
         return null; 
@@ -84,7 +82,11 @@ export async function POST(request: Request) {
 
     // === NOVO: INTELIGÊNCIA DE GUARDA-CHUVA (UMBRELLA BILLING) ===
     let planHistoryId: string | null = null;
-    let donoFaturamentoId = prestador.donoFaturamentoId;
+    let donoFaturamentoId = await resolveBillingUserId({
+        empresaId: empresaIdAlvo,
+        actorUserId: user.id,
+        acao: 'EMITIR'
+    });
     
     // Se não tiver donoFaturamentoId (é a empresa primária de alguém), busca o dono original
     if (!donoFaturamentoId) {
@@ -189,24 +191,26 @@ export async function POST(request: Request) {
         codigoNbs = nbsEncontrado;
     }
 
+    const semEnderecoTomador = tomador.tipo === 'PF' && (tomador as any).semEndereco === true;
     const tomadorAdaptado = { 
         ...tomador, 
         razaoSocial: tomador.nome, 
         documento: tomador.documento || '', 
         inscricaoMunicipal: tomador.inscricaoMunicipal ? String(tomador.inscricaoMunicipal) : undefined,
-        codigoIbge: tomador.codigoIbge || '9999999',
+        codigoIbge: semEnderecoTomador ? '' : tomador.codigoIbge || '9999999',
         tipo: tomador.tipo,
         nif: tomador.nif,
         pais: tomador.pais,
         moeda: tomador.moeda,
+        semEndereco: semEnderecoTomador,
         endereco: {
-            cep: tomador.cep || '',
-            logradouro: tomador.logradouro || '',
-            numero: tomador.numero || '',
-            bairro: tomador.bairro || '',
-            cidade: tomador.cidade || '',
-            codigoIbge: tomador.codigoIbge || '9999999',
-            uf: tomador.uf || ''
+            cep: semEnderecoTomador ? '' : tomador.cep || '',
+            logradouro: semEnderecoTomador ? '' : tomador.logradouro || '',
+            numero: semEnderecoTomador ? '' : tomador.numero || '',
+            bairro: semEnderecoTomador ? '' : tomador.bairro || '',
+            cidade: semEnderecoTomador ? '' : tomador.cidade || '',
+            codigoIbge: semEnderecoTomador ? '' : tomador.codigoIbge || '9999999',
+            uf: semEnderecoTomador ? '' : tomador.uf || ''
         }
     };
 

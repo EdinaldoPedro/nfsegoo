@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { 
     Search, FileText, MoreVertical, Ban, RefreshCcw, 
     Loader2, AlertCircle, FileCode, Printer, AlertTriangle, 
-    X, LifeBuoy, ChevronLeft, ChevronRight 
+    X, LifeBuoy, ChevronLeft, ChevronRight, Eye, CheckCircle2
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useDialog } from '@/app/contexts/DialogContext';
@@ -22,6 +22,7 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
   
   // Estados de Controle
   const [downloadingPdfId, setDownloadingPdfId] = useState<string | null>(null);
+  const [viewingPdfId, setViewingPdfId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
@@ -34,6 +35,7 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [cancelData, setCancelData] = useState({ vendaId: '', tipo: '', detalhe: '' });
   const [cancelando, setCancelando] = useState(false);
+  const [cancelProgress, setCancelProgress] = useState(0);
 
   const formatarData = (data?: string | Date | null) => {
       if (!data) return '-';
@@ -55,26 +57,62 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
       };
   }, []);
 
+  useEffect(() => {
+      if (!cancelando) return;
+      const timer = window.setInterval(() => {
+          setCancelProgress((progress) => Math.min(progress + 7, 88));
+      }, 700);
+      return () => window.clearInterval(timer);
+  }, [cancelando]);
+
   // --- DOWNLOAD PDF (CORRIGIDO AUTH) ---
+  const fetchPdfBlob = async (notaId: string) => {
+      const userId = localStorage.getItem('userId');
+
+      const res = await fetch('/api/notas/pdf', {
+          method: 'POST',
+          headers: {
+              'Content-Type': 'application/json',
+              'x-user-id': userId || ''
+          },
+          body: JSON.stringify({ notaId })
+      });
+
+      if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || "Erro ao buscar documento.");
+      }
+
+      return res.blob();
+  };
+
+  const handleViewPdf = async (notaId: string, numeroNota: number) => {
+      const viewer = window.open('', '_blank');
+      if (!viewer) {
+          dialog.showAlert({ type: 'warning', description: 'O navegador bloqueou a abertura da visualizacao. Permita pop-ups para abrir o PDF.' });
+          return;
+      }
+
+      try {
+          setViewingPdfId(notaId);
+          viewer.document.title = `NFSe-${numeroNota}`;
+          viewer.document.body.innerHTML = '<p style="font-family: Arial; padding: 24px;">Carregando PDF...</p>';
+          const blob = await fetchPdfBlob(notaId);
+          const url = window.URL.createObjectURL(blob);
+          viewer.location.href = url;
+          setActiveMenu(null);
+      } catch (e: any) {
+          viewer.close();
+          dialog.showAlert({ type: 'danger', description: "Erro: " + e.message });
+      } finally {
+          setViewingPdfId(null);
+      }
+  };
+
   const handleDownloadPdf = async (notaId: string, numeroNota: number, isCancelada: boolean) => {
       try {
           setDownloadingPdfId(notaId); 
-          const userId = localStorage.getItem('userId');
-
-          const res = await fetch('/api/notas/pdf', {
-              method: 'POST',
-              headers: { 
-                  'Content-Type': 'application/json', 
-                  'x-user-id': userId || '' 
-              },
-              body: JSON.stringify({ notaId })
-          });
-
-          if (!res.ok) {
-              const err = await res.json();
-              throw new Error(err.error || "Erro ao buscar documento.");
-          }
-          const blob = await res.blob();
+          const blob = await fetchPdfBlob(notaId);
           const url = window.URL.createObjectURL(blob);
           const link = document.createElement('a');
           link.href = url;
@@ -95,6 +133,36 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
         link.click();
         document.body.removeChild(link);
     } catch (e) { dialog.showAlert("Erro ao baixar arquivo."); }
+  };
+
+  const handleDownloadXml = async (nota: any, isCancelada: boolean) => {
+    const xmlNota = isCancelada ? (nota.xmlAutorizadoBase64 || nota.xmlBase64) : nota.xmlBase64;
+    const xmlEvento = nota.xmlCancelamentoEventoBase64;
+
+    if (isCancelada && xmlNota && xmlEvento) {
+        try {
+            const JSZip = (await import('jszip')).default;
+            const zip = new JSZip();
+            zip.file(`nota-${nota.numero}.xml`, xmlNota, { base64: true });
+            zip.file(`nota-${nota.numero}-evento-cancelamento.xml`, xmlEvento, { base64: true });
+            const blob = await zip.generateAsync({ type: 'blob' });
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `nota-${nota.numero}-xmls.zip`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(url);
+        } catch (e) {
+            dialog.showAlert("Erro ao baixar XMLs em ZIP.");
+        }
+        return;
+    }
+
+    if (xmlNota) {
+        downloadBase64(xmlNota, `nota-${nota.numero}.xml`, 'text/xml');
+    }
   };
 
   // --- BUSCA E PAGINAÇÃO ---
@@ -177,6 +245,7 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
 
   const abrirModalCancelamento = (vendaId: string) => {
       setCancelData({ vendaId, tipo: '', detalhe: '' });
+      setCancelProgress(0);
       setCancelModalOpen(true);
       setActiveMenu(null);
   };
@@ -190,9 +259,11 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
       if (!await dialog.showConfirm({ title: 'Cancelar Nota Fiscal?', description: 'Esta ação é irreversível.', confirmText: 'Sim, Cancelar', type: 'danger' })) return;
 
       setCancelando(true);
+      setCancelProgress(8);
       const userId = localStorage.getItem('userId');
 
       try {
+          setCancelProgress(28);
           const res = await fetch('/api/notas/gerenciar', {
               method: 'POST',
               headers: { 
@@ -203,10 +274,14 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
           });
           const data = await res.json();
           if(res.ok) { 
+              setCancelProgress(100);
               await dialog.showAlert({ type: 'success', title: 'Sucesso', description: "Nota cancelada!" });
               setCancelModalOpen(false);
               fetchVendas(); 
-          } else { dialog.showAlert({ type: 'danger', title: 'Falha', description: data.error }); }
+          } else {
+              setCancelProgress(0);
+              dialog.showAlert({ type: 'danger', title: 'Falha', description: data.error });
+          }
       } catch(e) { dialog.showAlert("Erro de conexão."); }
       finally { setCancelando(false); }
   };
@@ -217,6 +292,21 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
   const activeVendaData = activeMenu ? vendas.find(v => v.id === activeMenu.id) : null;
   const activeNotaData = activeVendaData?.notas?.[0];
   const activeIsCancelada = activeVendaData?.status === 'CANCELADA' || activeNotaData?.status === 'CANCELADA';
+  const cancelSteps = [
+      { label: 'Validando pedido', doneAt: 20 },
+      { label: 'Assinando evento', doneAt: 45 },
+      { label: 'Transmitindo ao Portal Nacional', doneAt: 70 },
+      { label: 'Sincronizando retorno', doneAt: 95 },
+  ];
+  const cancelStatus = cancelProgress >= 95
+      ? 'Finalizando cancelamento'
+      : cancelProgress >= 70
+        ? 'Sincronizando com o Portal Nacional'
+        : cancelProgress >= 45
+          ? 'Transmitindo evento de cancelamento'
+          : cancelProgress >= 20
+            ? 'Preparando assinatura do evento'
+            : 'Validando justificativa';
 
   return (
     <div className="saas-card overflow-hidden relative">
@@ -234,23 +324,23 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
                 }}
             >
                 <div className="py-1">
+                    <button onClick={() => handleViewPdf(activeNotaData.id, activeNotaData.numero)} disabled={viewingPdfId === activeNotaData.id}
+                        className="w-full text-left px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2 border-b border-slate-50">
+                        {viewingPdfId === activeNotaData.id ? <Loader2 size={16} className="animate-spin"/> : <Eye size={16} className="text-blue-500"/>}
+                        {viewingPdfId === activeNotaData.id ? 'Abrindo...' : 'Visualizar PDF'}
+                    </button>
+
                     <button onClick={() => handleDownloadPdf(activeNotaData.id, activeNotaData.numero, activeIsCancelada)} disabled={downloadingPdfId === activeNotaData.id} 
                         className={`w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-2 border-b border-slate-50 ${activeIsCancelada ? 'text-red-600 font-medium' : 'text-slate-700'}`}>
                         {downloadingPdfId === activeNotaData.id ? <Loader2 size={16} className="animate-spin"/> : <Printer size={16}/>} 
                         {downloadingPdfId === activeNotaData.id ? 'Baixando...' : (activeIsCancelada ? 'PDF Cancelamento' : 'PDF Oficial')}
                     </button>
                     
-                    {activeNotaData.xmlBase64 && (
-                        <button onClick={() => downloadBase64(activeIsCancelada ? (activeNotaData.xmlAutorizadoBase64 || activeNotaData.xmlBase64) : activeNotaData.xmlBase64, `nota-${activeNotaData.numero}.xml`, 'text/xml')} 
+                    {(activeNotaData.xmlBase64 || activeNotaData.xmlAutorizadoBase64) && (
+                        <button onClick={() => handleDownloadXml(activeNotaData, activeIsCancelada)}
                             className="w-full text-left px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2 border-b border-slate-50">
-                            <FileCode size={16} className="text-blue-500"/> XML NFS-e
-                        </button>
-                    )}
-
-                    {activeIsCancelada && activeNotaData.xmlCancelamentoEventoBase64 && (
-                        <button onClick={() => downloadBase64(activeNotaData.xmlCancelamentoEventoBase64, `nota-${activeNotaData.numero}-evento-cancelamento.xml`, 'text/xml')} 
-                            className="w-full text-left px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2 border-b border-slate-50">
-                            <FileCode size={16} className="text-red-500"/> XML Evento Cancelamento
+                            <FileCode size={16} className={activeIsCancelada && activeNotaData.xmlCancelamentoEventoBase64 ? 'text-red-500' : 'text-blue-500'}/>
+                            {activeIsCancelada && activeNotaData.xmlCancelamentoEventoBase64 ? 'XMLs NFS-e + Evento' : 'XML NFS-e'}
                         </button>
                     )}
 
@@ -271,8 +361,45 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
                 <div className="bg-red-50 p-4 border-b border-red-100 flex justify-between items-center">
                     <h3 className="font-bold text-red-700 flex items-center gap-2"><AlertTriangle size={20}/> Cancelar Nota</h3>
-                    <button onClick={() => setCancelModalOpen(false)} className="text-red-400 hover:text-red-600"><X size={20}/></button>
+                    <button disabled={cancelando} onClick={() => setCancelModalOpen(false)} className="text-red-400 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"><X size={20}/></button>
                 </div>
+                {cancelando ? (
+                    <div className="p-6 space-y-5">
+                        <div className="flex flex-col items-center text-center">
+                            <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-red-100 text-red-600 ring-8 ring-red-50">
+                                <Loader2 className="animate-spin" size={30}/>
+                            </div>
+                            <p className="text-xs font-black uppercase tracking-[0.18em] text-red-500">Cancelando NFS-e</p>
+                            <h4 className="mt-1 text-lg font-black text-slate-900">{cancelStatus}</h4>
+                            <p className="mt-2 text-sm text-slate-500">Mantenha esta janela aberta enquanto registramos o evento fiscal.</p>
+                        </div>
+
+                        <div>
+                            <div className="mb-2 flex items-center justify-between text-xs font-bold text-slate-500">
+                                <span>Progresso</span>
+                                <span>{cancelProgress}%</span>
+                            </div>
+                            <div className="h-3 overflow-hidden rounded-full bg-red-100">
+                                <div className="h-full rounded-full bg-red-600 transition-all duration-700 ease-out" style={{ width: `${cancelProgress}%` }} />
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-2">
+                            {cancelSteps.map((step) => {
+                                const done = cancelProgress >= step.doneAt;
+                                const active = !done && cancelProgress >= step.doneAt - 25;
+                                return (
+                                    <div key={step.label} className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-sm transition ${done ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : active ? 'border-red-200 bg-red-50 text-red-700' : 'border-slate-100 bg-slate-50 text-slate-400'}`}>
+                                        <div className={`flex h-7 w-7 items-center justify-center rounded-full ${done ? 'bg-emerald-100' : active ? 'bg-red-100' : 'bg-white'}`}>
+                                            {done ? <CheckCircle2 size={16}/> : active ? <Loader2 className="animate-spin" size={15}/> : <Ban size={14}/>}
+                                        </div>
+                                        <span className="font-bold">{step.label}</span>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                ) : (
                 <div className="p-6 space-y-4">
                     <div>
                         <label className="block text-sm font-bold text-slate-700 mb-2">Motivo</label>
@@ -287,10 +414,11 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
                         <textarea className="w-full p-2.5 border rounded-lg outline-none focus:ring-2 focus:ring-red-500 text-slate-700 h-24 resize-none text-sm"
                             placeholder="Descreva o motivo (min 15 caracteres)..." value={cancelData.detalhe} onChange={(e) => setCancelData({...cancelData, detalhe: e.target.value})}/>
                     </div>
-                    <button onClick={confirmarCancelamento} disabled={cancelando} className="w-full bg-red-600 text-white py-2.5 rounded-lg font-bold hover:bg-red-700 transition flex items-center justify-center gap-2 disabled:opacity-70 text-sm">
-                        {cancelando ? <Loader2 className="animate-spin" size={16}/> : <><Ban size={16}/> Confirmar Cancelamento</>}
+                    <button onClick={confirmarCancelamento} className="w-full bg-red-600 text-white py-2.5 rounded-lg font-bold hover:bg-red-700 transition flex items-center justify-center gap-2 text-sm">
+                        <Ban size={16}/> Confirmar Cancelamento
                     </button>
                 </div>
+                )}
             </div>
         </div>
       )}

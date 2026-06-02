@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { createLog } from '@/app/services/logger';
-import { checkPlanLimits } from '@/app/services/planService';
+import { checkPlanLimits, resolveBillingUserId } from '@/app/services/planService';
 import { validateRequest } from "@/app/utils/api-security";
 import { validarCPF } from '@/app/utils/cpf';
 
@@ -21,6 +21,36 @@ async function buscarIbgePorCep(cep: string): Promise<string | null> {
     }
 }
 
+function validarEnderecoMinimoParaEmissao(body: any, codigoIbgeFinal: string | null | undefined) {
+    const campos = [
+        { label: 'CEP', value: body.cep },
+        { label: 'logradouro', value: body.logradouro },
+        { label: 'numero', value: body.numero },
+        { label: 'bairro', value: body.bairro },
+        { label: 'cidade', value: body.cidade },
+        { label: 'UF', value: body.uf },
+        { label: 'codigo IBGE', value: codigoIbgeFinal },
+    ];
+
+    const faltantes = campos
+        .filter((campo) => !String(campo.value || '').trim())
+        .map((campo) => campo.label);
+
+    if (faltantes.length > 0) {
+        return `Informe todos os dados minimos de endereco para emitir: ${faltantes.join(', ')}. Ou marque a opcao de emitir sem informar endereco.`;
+    }
+
+    const cepLimpo = String(body.cep || '').replace(/\D/g, '');
+    const ibgeLimpo = String(codigoIbgeFinal || '').replace(/\D/g, '');
+    const ufLimpa = String(body.uf || '').trim();
+
+    if (cepLimpo.length !== 8) return 'CEP invalido. Informe um CEP com 8 digitos ou marque a opcao de emitir sem informar endereco.';
+    if (ibgeLimpo.length < 7) return 'Codigo IBGE invalido. Consulte o CEP novamente ou marque a opcao de emitir sem informar endereco.';
+    if (ufLimpa.length !== 2) return 'UF invalida. Informe a sigla com 2 letras ou marque a opcao de emitir sem informar endereco.';
+
+    return null;
+}
+
 async function getEmpresaContexto(user: any, contextId: string | null) {
     const isStaff = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(user.role);
     if (contextId && contextId !== 'null' && contextId !== 'undefined') {
@@ -37,9 +67,7 @@ async function getEmpresaContexto(user: any, contextId: string | null) {
         });
         if (vinculo && vinculo.status === 'APROVADO' && !(vinculo as any).arquivadoEm) return contextId;
         
-        const empresaAdicional = await prisma.empresa.findFirst({
-            where: { id: contextId, donoFaturamentoId: user.id, arquivadoEm: null } as any
-        });
+        const empresaAdicional = null;
         if (empresaAdicional) return contextId;
 
         return null; 
@@ -119,7 +147,11 @@ export async function POST(request: Request) {
         const prestador = await prisma.empresa.findUnique({ where: { id: empresaIdAlvo } });
         if (!prestador) throw new Error("Empresa não encontrada.");
 
-        let donoFaturamentoId = prestador.donoFaturamentoId;
+        let donoFaturamentoId = await resolveBillingUserId({
+            empresaId: empresaIdAlvo,
+            actorUserId: user.id,
+            acao: 'CADASTRAR_CLIENTE'
+        });
         if (!donoFaturamentoId) {
             const donoEmpresa = await prisma.user.findFirst({
                 where: { empresaId: empresaIdAlvo, role: { notIn: ['CONTADOR', 'SUPORTE', 'SUPORTE_TI'] } },
@@ -156,16 +188,22 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: 'CPF invalido.' }, { status: 400 });
         }
 
-        const cepLimpo = body.cep ? body.cep.replace(/\D/g, '') : null;
+        const semEndereco = tipoFinal === 'PF' && body.semEndereco === true;
+        const cepLimpo = !semEndereco && body.cep ? body.cep.replace(/\D/g, '') : null;
 
         // === 2. RECUPERA IBGE FALTANTE ===
-        let codigoIbgeFinal = body.codigoIbge;
-        if (cepLimpo && (!codigoIbgeFinal || codigoIbgeFinal.length < 7)) {
+        let codigoIbgeFinal = semEndereco ? null : body.codigoIbge;
+        if (!semEndereco && cepLimpo && (!codigoIbgeFinal || codigoIbgeFinal.length < 7)) {
             const ibgeEncontrado = await buscarIbgePorCep(cepLimpo);
             if (ibgeEncontrado) codigoIbgeFinal = ibgeEncontrado;
         }
 
         // 3. BUSCA O CLIENTE GLOBALMENTE NO BANCO (APENAS SE TIVER DOCUMENTO VÁLIDO)
+        if (tipoFinal === 'PF' && !semEndereco) {
+            const erroEndereco = validarEnderecoMinimoParaEmissao(body, codigoIbgeFinal);
+            if (erroEndereco) return NextResponse.json({ error: erroEndereco }, { status: 400 });
+        }
+
         let clienteGlobal = null;
         if (docLimpo) {
             clienteGlobal = await prisma.cliente.findUnique({
@@ -185,6 +223,7 @@ export async function POST(request: Request) {
                 where: { id: clienteGlobal.id },
                 data: {
                     tipo: tipoFinal,
+                    ...(semEndereco ? { semEndereco: true } : {}),
                     arquivadoEm: null,
                     arquivadoPor: null,
                     motivoArquivamento: null,
@@ -207,13 +246,14 @@ export async function POST(request: Request) {
                 tipo: tipoFinal,
                 email: body.email || null,
                 telefone: body.telefone ? body.telefone.replace(/\D/g, '') : null,
+                semEndereco,
                 cep: cepLimpo,
-                logradouro: body.logradouro || null,
-                numero: body.numero || null,
-                complemento: body.complemento || null,
-                bairro: body.bairro || null,
-                cidade: body.cidade || null,
-                uf: body.uf || null,
+                logradouro: semEndereco ? null : body.logradouro || null,
+                numero: semEndereco ? null : body.numero || null,
+                complemento: semEndereco ? null : body.complemento || null,
+                bairro: semEndereco ? null : body.bairro || null,
+                cidade: semEndereco ? null : body.cidade || null,
+                uf: semEndereco ? null : body.uf || null,
                 codigoIbge: codigoIbgeFinal,
                 inscricaoMunicipal: body.inscricaoMunicipal || null,
                 inscricaoEstadual: body.inscricaoEstadual || null,
@@ -272,16 +312,35 @@ export async function PUT(request: Request) {
         
         if (dadosAtualizacao.telefone) dadosAtualizacao.telefone = dadosAtualizacao.telefone.replace(/\D/g, '');
         
-        if (dadosAtualizacao.cep) {
+        const tipoAtualizado = dadosAtualizacao.tipo || clienteAtual.tipo;
+        const semEndereco = tipoAtualizado === 'PF' && dadosAtualizacao.semEndereco === true;
+
+        if (semEndereco) {
+            dadosAtualizacao.cep = null;
+            dadosAtualizacao.logradouro = null;
+            dadosAtualizacao.numero = null;
+            dadosAtualizacao.complemento = null;
+            dadosAtualizacao.bairro = null;
+            dadosAtualizacao.cidade = null;
+            dadosAtualizacao.uf = null;
+            dadosAtualizacao.codigoIbge = null;
+        } else if (dadosAtualizacao.cep) {
             dadosAtualizacao.cep = dadosAtualizacao.cep.replace(/\D/g, '');
             // Auto-recupera IBGE no PUT se tiver vindo vazio
             if (!dadosAtualizacao.codigoIbge || dadosAtualizacao.codigoIbge.length < 7) {
                 const ibgeEncontrado = await buscarIbgePorCep(dadosAtualizacao.cep);
                 if (ibgeEncontrado) dadosAtualizacao.codigoIbge = ibgeEncontrado;
             }
+        } else if ('semEndereco' in dadosAtualizacao && tipoAtualizado !== 'PF') {
+            dadosAtualizacao.semEndereco = false;
         }
         
         // === LIMPEZA DE CAMPOS INVÁLIDOS PARA O BANCO ===
+        if (tipoAtualizado === 'PF' && !semEndereco) {
+            const erroEndereco = validarEnderecoMinimoParaEmissao(dadosAtualizacao, dadosAtualizacao.codigoIbge);
+            if (erroEndereco) return NextResponse.json({ error: erroEndereco }, { status: 400 });
+        }
+
         if ('exterior' in dadosAtualizacao) delete dadosAtualizacao.exterior;
         if ('vendas' in dadosAtualizacao) delete dadosAtualizacao.vendas;
         if ('createdAt' in dadosAtualizacao) delete dadosAtualizacao.createdAt;

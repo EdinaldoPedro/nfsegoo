@@ -20,10 +20,12 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
 
     async executar(dados: IDadosEmissao): Promise<IResultadoEmissao> {
         // === 0. SANITIZAÇÃO DE DADOS ===
-        if (!dados.tomador.numero || dados.tomador.numero.trim() === '') {
+        const omitirEnderecoTomador = dados.tomador.tipo === 'PF' && dados.tomador.semEndereco === true;
+
+        if (!omitirEnderecoTomador && (!dados.tomador.numero || dados.tomador.numero.trim() === '')) {
             dados.tomador.numero = 'S/N';
         }
-        if (!dados.tomador.bairro || dados.tomador.bairro.trim() === '') {
+        if (!omitirEnderecoTomador && (!dados.tomador.bairro || dados.tomador.bairro.trim() === '')) {
             dados.tomador.bairro = 'Bairro';
         }
         
@@ -84,6 +86,7 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
                     nif: tomador.nif,
                     pais: tomador.pais,
                     moeda: tomador.moeda,
+                    semEndereco: tomador.semEndereco,
 
                     endereco: {
                         cep: tomador.cep,

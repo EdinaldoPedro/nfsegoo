@@ -40,14 +40,28 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Codigo invalido ou expirado.' }, { status: 400 });
     }
 
-    const existente = await prisma.user.findFirst({
+    const existentes = await prisma.user.findMany({
       where: { OR: [{ email: pending.email }, { cpf: pending.cpf }] },
-      select: { id: true },
+      select: { email: true, cpf: true },
+      take: 2,
     });
 
-    if (existente) {
+    if (existentes.length > 0) {
+      const errors: Record<string, string> = {};
+      existentes.forEach((usuario) => {
+        if (usuario.email === pending.email) errors.email = 'Este e-mail ja esta cadastrado.';
+        if (usuario.cpf === pending.cpf) errors.cpf = 'Este CPF ja esta vinculado a uma conta existente.';
+      });
+
       await prisma.pendingRegistration.delete({ where: { id: pending.id } });
-      return NextResponse.json({ error: 'Nao foi possivel confirmar este cadastro.' }, { status: 409 });
+      return NextResponse.json({
+        error: Object.keys(errors).length > 1
+          ? 'E-mail e CPF ja estao cadastrados.'
+          : Object.values(errors)[0] || 'Nao foi possivel confirmar este cadastro.',
+        code: 'ACCOUNT_ALREADY_EXISTS',
+        errors,
+        fields: Object.keys(errors),
+      }, { status: 409 });
     }
 
     const user = await prisma.$transaction(async (tx) => {

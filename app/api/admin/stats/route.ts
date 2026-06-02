@@ -24,6 +24,27 @@ function contarPorChave(grupos: any[], chave: string) {
   }, {} as Record<string, number>);
 }
 
+async function safeQuery<T>(label: string, query: Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await query;
+  } catch (error) {
+    console.error(`Erro parcial em /api/admin/stats (${label}):`, error);
+    return fallback;
+  }
+}
+
+function countFallback() {
+  return 0;
+}
+
+function groupFallback() {
+  return [] as any[];
+}
+
+function sumFallback(field: string) {
+  return { _sum: { [field]: null } } as any;
+}
+
 export async function GET(request: Request) {
   try {
     const user = await getAuthenticatedUser(request);
@@ -37,157 +58,113 @@ export async function GET(request: Request) {
     const ultimos30Dias = new Date(agora.getTime() - 30 * 24 * 60 * 60 * 1000);
     const proximos30Dias = new Date(agora.getTime() + 30 * 24 * 60 * 60 * 1000);
 
-    const [
-      totalUsuarios,
-      usuariosPorRole,
-      usuariosNovosMes,
-      usuariosNovosMesAnterior,
-      totalEmpresas,
-      empresasCompletas,
-      empresasArquivadas,
-      empresasSemIbge,
-      empresasSemCertificado,
-      certificadosVencendo,
-      empresasPorAmbiente,
-      empresasPorUf,
-      municipiosMaisUsados,
-      totalClientes,
-      totalVinculosCarteira,
-      totalNotas,
-      notasPorStatus,
-      notasMes,
-      notasMesAnterior,
-      valorNotasMes,
-      valorNotasMesAnterior,
-      notas30dPorDia,
-      notasCanceladasMes,
-      totalVendas,
-      vendasPorStatus,
-      totalTickets,
-      ticketsPorStatus,
-      ticketsPorPrioridade,
-      ticketsAbertos,
-      ticketsNovos7d,
-      totalGlobalCnae,
-      cnaesComRetencao,
-      cnaesLocais,
-      tributacoesMunicipais,
-      municipiosHomologados,
-      municipiosPorStatus,
-      cnaesMaisUsados,
-      planosAtivos,
-      assinaturasAtivas,
-      assinaturasPorStatus,
-      faturasMes,
-      faturasPagasMes,
-      faturasPendentes,
-      valorPagoMes,
-      pedidosPorStatus,
-      cuponsAtivos,
-      cuponsUsadosMes,
-      logsErro7d,
-      logsRecentes
-    ] = await Promise.all([
-      prisma.user.count(),
-      prisma.user.groupBy({ by: ['role'], _count: { _all: true } }),
-      prisma.user.count({ where: { createdAt: { gte: mesAtual } } }),
-      prisma.user.count({ where: { createdAt: { gte: mesAnterior, lt: mesAtual } } }),
-      prisma.empresa.count(),
-      prisma.empresa.count({ where: { cadastroCompleto: true, arquivadoEm: null } }),
-      prisma.empresa.count({ where: { arquivadoEm: { not: null } } }),
-      prisma.empresa.count({
+    const totalUsuarios = await safeQuery('totalUsuarios', prisma.user.count(), countFallback());
+    const usuariosPorRole = await safeQuery('usuariosPorRole', prisma.user.groupBy({ by: ['role'], _count: { _all: true } }), groupFallback());
+    const usuariosNovosMes = await safeQuery('usuariosNovosMes', prisma.user.count({ where: { createdAt: { gte: mesAtual } } }), countFallback());
+    const usuariosNovosMesAnterior = await safeQuery('usuariosNovosMesAnterior', prisma.user.count({ where: { createdAt: { gte: mesAnterior, lt: mesAtual } } }), countFallback());
+
+    const totalEmpresas = await safeQuery('totalEmpresas', prisma.empresa.count({ where: { arquivadoEm: null } }), countFallback());
+    const empresasCompletas = await safeQuery('empresasCompletas', prisma.empresa.count({ where: { cadastroCompleto: true, arquivadoEm: null } }), countFallback());
+    const empresasArquivadas = await safeQuery('empresasArquivadas', prisma.empresa.count({ where: { arquivadoEm: { not: null } } }), countFallback());
+    const empresasSemIbge = await safeQuery('empresasSemIbge', prisma.empresa.count({
         where: {
           arquivadoEm: null,
           OR: [{ codigoIbge: null }, { codigoIbge: '' }]
         }
-      }),
-      prisma.empresa.count({
+      }), countFallback());
+    const empresasSemCertificado = await safeQuery('empresasSemCertificado', prisma.empresa.count({
         where: {
           arquivadoEm: null,
           OR: [{ certificadoA1: null }, { certificadoA1: '' }]
         }
-      }),
-      prisma.empresa.count({
+      }), countFallback());
+    const certificadosVencendo = await safeQuery('certificadosVencendo', prisma.empresa.count({
         where: {
           arquivadoEm: null,
           certificadoVencimento: { gte: agora, lte: proximos30Dias }
         }
-      }),
-      prisma.empresa.groupBy({ by: ['ambiente'], _count: { _all: true } }),
-      prisma.empresa.groupBy({
+      }), countFallback());
+    const empresasPorAmbiente = await safeQuery('empresasPorAmbiente', prisma.empresa.groupBy({ by: ['ambiente'], _count: { _all: true } }), groupFallback());
+    const empresasPorUf = await safeQuery('empresasPorUf', prisma.empresa.groupBy({
         by: ['uf'],
         where: { uf: { not: null }, arquivadoEm: null },
         _count: { _all: true },
         orderBy: { _count: { uf: 'desc' } },
         take: 8
-      }),
-      prisma.empresa.groupBy({
+      }), groupFallback());
+    const municipiosMaisUsados = await safeQuery('municipiosMaisUsados', prisma.empresa.groupBy({
         by: ['codigoIbge', 'cidade', 'uf'],
         where: { codigoIbge: { not: null }, arquivadoEm: null },
         _count: { _all: true },
         orderBy: { _count: { codigoIbge: 'desc' } },
         take: 8
-      }),
-      prisma.cliente.count({ where: { arquivadoEm: null } }),
-      prisma.vinculoCarteira.count({ where: { arquivadoEm: null } }),
-      prisma.notaFiscal.count(),
-      prisma.notaFiscal.groupBy({ by: ['status'], _count: { _all: true } }),
-      prisma.notaFiscal.count({ where: { createdAt: { gte: mesAtual } } }),
-      prisma.notaFiscal.count({ where: { createdAt: { gte: mesAnterior, lt: mesAtual } } }),
-      prisma.notaFiscal.aggregate({
+      }), groupFallback());
+
+    const totalClientes = await safeQuery('totalClientes', prisma.cliente.count({ where: { arquivadoEm: null } }), countFallback());
+    const totalVinculosCarteira = await safeQuery('totalVinculosCarteira', prisma.vinculoCarteira.count({ where: { arquivadoEm: null } }), countFallback());
+
+    const totalNotas = await safeQuery('totalNotas', prisma.notaFiscal.count({ where: { arquivadoEm: null } as any }), countFallback());
+    const notasPorStatus = await safeQuery('notasPorStatus', prisma.notaFiscal.groupBy({ by: ['status'], where: { arquivadoEm: null } as any, _count: { _all: true } }), groupFallback());
+    const notasMes = await safeQuery('notasMes', prisma.notaFiscal.count({ where: { arquivadoEm: null, createdAt: { gte: mesAtual } } as any }), countFallback());
+    const notasMesAnterior = await safeQuery('notasMesAnterior', prisma.notaFiscal.count({ where: { arquivadoEm: null, createdAt: { gte: mesAnterior, lt: mesAtual } } as any }), countFallback());
+    const valorNotasMes = await safeQuery('valorNotasMes', prisma.notaFiscal.aggregate({
         where: { status: 'AUTORIZADA', createdAt: { gte: mesAtual } },
         _sum: { valor: true }
-      }),
-      prisma.notaFiscal.aggregate({
+      }), sumFallback('valor'));
+    const valorNotasMesAnterior = await safeQuery('valorNotasMesAnterior', prisma.notaFiscal.aggregate({
         where: { status: 'AUTORIZADA', createdAt: { gte: mesAnterior, lt: mesAtual } },
         _sum: { valor: true }
-      }),
-      prisma.notaFiscal.groupBy({
+      }), sumFallback('valor'));
+    const notas30dPorDia = await safeQuery('notas30dPorDia', prisma.notaFiscal.groupBy({
         by: ['createdAt'],
-        where: { createdAt: { gte: ultimos30Dias } },
+        where: { arquivadoEm: null, createdAt: { gte: ultimos30Dias } } as any,
         _count: { _all: true },
         orderBy: { createdAt: 'asc' }
-      }),
-      prisma.notaFiscal.count({ where: { status: 'CANCELADA', createdAt: { gte: mesAtual } } }),
-      prisma.venda.count({ where: { arquivadoEm: null } }),
-      prisma.venda.groupBy({ by: ['status'], where: { arquivadoEm: null }, _count: { _all: true } }),
-      prisma.ticket.count({ where: { arquivadoEm: null } }),
-      prisma.ticket.groupBy({ by: ['status'], where: { arquivadoEm: null }, _count: { _all: true } }),
-      prisma.ticket.groupBy({ by: ['prioridade'], where: { arquivadoEm: null }, _count: { _all: true } }),
-      prisma.ticket.count({ where: { arquivadoEm: null, status: { in: ['ABERTO', 'EM_ANDAMENTO'] } } }),
-      prisma.ticket.count({ where: { arquivadoEm: null, createdAt: { gte: ultimos7Dias } } }),
-      prisma.globalCnae.count(),
-      prisma.globalCnae.count({ where: { OR: [{ temRetencaoInss: true }, { retemCrsf: true }, { retemIr: true }] } }),
-      prisma.cnae.count(),
-      prisma.tributacaoMunicipal.count(),
-      prisma.municipioHomologado.count(),
-      prisma.municipioHomologado.groupBy({ by: ['status'], _count: { _all: true } }),
-      prisma.cnae.groupBy({
+      }), groupFallback());
+    const notasCanceladasMes = await safeQuery('notasCanceladasMes', prisma.notaFiscal.count({ where: { status: 'CANCELADA', arquivadoEm: null, createdAt: { gte: mesAtual } } as any }), countFallback());
+
+    const totalVendas = await safeQuery('totalVendas', prisma.venda.count({ where: { arquivadoEm: null } }), countFallback());
+    const vendasPorStatus = await safeQuery('vendasPorStatus', prisma.venda.groupBy({ by: ['status'], where: { arquivadoEm: null }, _count: { _all: true } }), groupFallback());
+
+    const totalTickets = await safeQuery('totalTickets', prisma.ticket.count({ where: { arquivadoEm: null } }), countFallback());
+    const ticketsPorStatus = await safeQuery('ticketsPorStatus', prisma.ticket.groupBy({ by: ['status'], where: { arquivadoEm: null }, _count: { _all: true } }), groupFallback());
+    const ticketsPorPrioridade = await safeQuery('ticketsPorPrioridade', prisma.ticket.groupBy({ by: ['prioridade'], where: { arquivadoEm: null }, _count: { _all: true } }), groupFallback());
+    const ticketsAbertos = await safeQuery('ticketsAbertos', prisma.ticket.count({ where: { arquivadoEm: null, status: { in: ['ABERTO', 'EM_ANDAMENTO'] } } }), countFallback());
+    const ticketsNovos7d = await safeQuery('ticketsNovos7d', prisma.ticket.count({ where: { arquivadoEm: null, createdAt: { gte: ultimos7Dias } } }), countFallback());
+
+    const totalGlobalCnae = await safeQuery('totalGlobalCnae', prisma.globalCnae.count(), countFallback());
+    const cnaesComRetencao = await safeQuery('cnaesComRetencao', prisma.globalCnae.count({ where: { OR: [{ temRetencaoInss: true }, { retemCrsf: true }, { retemIr: true }] } }), countFallback());
+    const cnaesLocais = await safeQuery('cnaesLocais', prisma.cnae.count(), countFallback());
+    const tributacoesMunicipais = await safeQuery('tributacoesMunicipais', prisma.tributacaoMunicipal.count(), countFallback());
+    const municipiosHomologados = await safeQuery('municipiosHomologados', prisma.municipioHomologado.count(), countFallback());
+    const municipiosPorStatus = await safeQuery('municipiosPorStatus', prisma.municipioHomologado.groupBy({ by: ['status'], _count: { _all: true } }), groupFallback());
+    const cnaesMaisUsados = await safeQuery('cnaesMaisUsados', prisma.cnae.groupBy({
         by: ['codigo', 'descricao'],
         _count: { _all: true },
         orderBy: { _count: { codigo: 'desc' } },
         take: 8
-      }),
-      prisma.plan.count({ where: { active: true } }),
-      prisma.planHistory.count({ where: { status: 'ATIVO', arquivadoEm: null } }),
-      prisma.planHistory.groupBy({ by: ['status'], where: { arquivadoEm: null }, _count: { _all: true } }),
-      prisma.fatura.count({ where: { createdAt: { gte: mesAtual } } }),
-      prisma.fatura.count({ where: { status: 'PAGO', pagoEm: { gte: mesAtual } } }),
-      prisma.fatura.count({ where: { status: 'PENDENTE' } }),
-      prisma.fatura.aggregate({
+      }), groupFallback());
+
+    const planosAtivos = await safeQuery('planosAtivos', prisma.plan.count({ where: { active: true } }), countFallback());
+    const assinaturasAtivas = await safeQuery('assinaturasAtivas', prisma.planHistory.count({ where: { status: 'ATIVO', arquivadoEm: null } }), countFallback());
+    const assinaturasPorStatus = await safeQuery('assinaturasPorStatus', prisma.planHistory.groupBy({ by: ['status'], where: { arquivadoEm: null }, _count: { _all: true } }), groupFallback());
+    const faturasMes = await safeQuery('faturasMes', prisma.fatura.count({ where: { createdAt: { gte: mesAtual } } }), countFallback());
+    const faturasPagasMes = await safeQuery('faturasPagasMes', prisma.fatura.count({ where: { status: 'PAGO', pagoEm: { gte: mesAtual } } }), countFallback());
+    const faturasPendentes = await safeQuery('faturasPendentes', prisma.fatura.count({ where: { status: 'PENDENTE' } }), countFallback());
+    const valorPagoMes = await safeQuery('valorPagoMes', prisma.fatura.aggregate({
         where: { status: 'PAGO', pagoEm: { gte: mesAtual } },
         _sum: { valorTotal: true }
-      }),
-      prisma.pedido.groupBy({ by: ['status'], _count: { _all: true } }),
-      prisma.cupom.count({ where: { ativo: true } }),
-      prisma.cupomLog.count({ where: { createdAt: { gte: mesAtual } } }),
-      prisma.systemLog.count({ where: { level: { in: ['ERROR', 'ERRO', 'CRITICAL'] }, createdAt: { gte: ultimos7Dias } } }),
-      prisma.systemLog.findMany({
+      }), sumFallback('valorTotal'));
+    const pedidosPorStatus = await safeQuery('pedidosPorStatus', prisma.pedido.groupBy({ by: ['status'], _count: { _all: true } }), groupFallback());
+    const cuponsAtivos = await safeQuery('cuponsAtivos', prisma.cupom.count({ where: { ativo: true } }), countFallback());
+    const cuponsUsadosMes = await safeQuery('cuponsUsadosMes', prisma.cupomLog.count({ where: { createdAt: { gte: mesAtual } } }), countFallback());
+
+    const logsErro7d = await safeQuery('logsErro7d', prisma.systemLog.count({ where: { level: { in: ['ERROR', 'ERRO', 'CRITICAL'] }, createdAt: { gte: ultimos7Dias } } }), countFallback());
+    const logsRecentes = await safeQuery('logsRecentes', prisma.systemLog.findMany({
         orderBy: { createdAt: 'desc' },
         take: 8,
         select: { id: true, level: true, action: true, message: true, createdAt: true }
-      })
-    ]);
+      }), [] as any[]);
 
     const usuariosOperacionais = usuariosPorRole
       .filter((item) => !STAFF_ROLES.includes(item.role))

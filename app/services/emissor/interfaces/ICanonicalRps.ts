@@ -27,6 +27,7 @@ export interface ICanonicalRps {
         nif?: string;
         pais?: string;
         moeda?: string;
+        semEndereco?: boolean;
         endereco: {
             cep: string;
             logradouro: string;

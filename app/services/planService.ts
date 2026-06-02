@@ -4,6 +4,127 @@ const prisma = new PrismaClient();
 
 export type TipoAcao = 'EMITIR' | 'VISUALIZAR' | 'CADASTRAR_CLIENTE';
 
+function inicioDoMes(data = new Date()) {
+    return new Date(data.getFullYear(), data.getMonth(), 1);
+}
+
+export async function renovarUsoMensalSeNecessario(userId: string) {
+    const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { dataRenovacaoCiclo: true, empresaId: true }
+    });
+
+    if (!user) return;
+
+    const mesAtual = inicioDoMes();
+    const ultimaRenovacao = user.dataRenovacaoCiclo ? inicioDoMes(user.dataRenovacaoCiclo) : null;
+
+    if (ultimaRenovacao && ultimaRenovacao >= mesAtual) return;
+
+    const historicosAtivos = await prisma.planHistory.findMany({
+        where: { userId, status: 'ATIVO' },
+        include: { plan: true },
+        orderBy: { createdAt: 'asc' }
+    });
+
+    const notasAutorizadasMes = await prisma.notaFiscal.count({
+        where: {
+            status: 'AUTORIZADA',
+            arquivadoEm: null,
+            createdAt: { gte: mesAtual },
+            empresa: {
+                OR: [
+                    { donoFaturamentoId: userId },
+                    { proprietarioUserId: userId } as any,
+                    { id: user.empresaId || '' },
+                    { contadoresLink: { some: { contadorId: userId, status: 'APROVADO', arquivadoEm: null } } }
+                ]
+            }
+        } as any
+    });
+
+    let restante = notasAutorizadasMes;
+    const updates = historicosAtivos.map((hist) => {
+        const limite = hist.plan.maxNotasMensal || 0;
+        const uso = limite > 0 ? Math.min(restante, limite) : 0;
+        restante = Math.max(0, restante - uso);
+
+        return prisma.planHistory.update({
+            where: { id: hist.id },
+            data: { notasEmitidas: uso }
+        });
+    });
+
+    await prisma.$transaction([
+        ...updates,
+        prisma.user.update({
+            where: { id: userId },
+            data: { dataRenovacaoCiclo: mesAtual }
+        })
+    ]);
+}
+
+export async function resolveBillingUserId(params: {
+    empresaId: string;
+    actorUserId: string;
+    acao?: TipoAcao;
+}) {
+    const { empresaId, actorUserId } = params;
+
+    const [empresa, actor] = await Promise.all([
+        prisma.empresa.findUnique({
+            where: { id: empresaId },
+            select: {
+                id: true,
+                donoFaturamentoId: true,
+                proprietarioUserId: true,
+                modoCobranca: true,
+                contadorCustodianteId: true
+            } as any
+        }),
+        prisma.user.findUnique({
+            where: { id: actorUserId },
+            select: { id: true, role: true }
+        })
+    ]);
+
+    if (!empresa) {
+        throw new Error('Empresa nÃ£o encontrada para resolver cobranÃ§a.');
+    }
+
+    if ((empresa as any).modoCobranca === 'POR_OPERADOR') {
+        return actorUserId;
+    }
+
+    if ((empresa as any).donoFaturamentoId) {
+        return (empresa as any).donoFaturamentoId as string;
+    }
+
+    if ((empresa as any).proprietarioUserId) {
+        return (empresa as any).proprietarioUserId as string;
+    }
+
+    const donoEmpresa = await prisma.user.findFirst({
+        where: { empresaId, role: { notIn: ['CONTADOR', 'SUPORTE', 'SUPORTE_TI'] } },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true }
+    });
+
+    if (donoEmpresa) {
+        return donoEmpresa.id;
+    }
+
+    if ((empresa as any).contadorCustodianteId) {
+        return (empresa as any).contadorCustodianteId as string;
+    }
+
+    if (actor?.role === 'CONTADOR') {
+        return actorUserId;
+    }
+
+    return actorUserId;
+}
+
 export async function checkPlanLimits(userId: string, acao: TipoAcao = 'EMITIR') {
     // 0. Verifica se é ADMIN/STAFF (Acesso total sempre)
     const user = await prisma.user.findUnique({
@@ -19,6 +140,8 @@ export async function checkPlanLimits(userId: string, acao: TipoAcao = 'EMITIR')
     }
 
     // 1. Busca TODOS os históricos ATIVOS (Plano Base + Pacotes Extras)
+    await renovarUsoMensalSeNecessario(userId);
+
     const historicosAtivos = await prisma.planHistory.findMany({
         where: { userId, status: 'ATIVO' },
         include: { plan: true },
@@ -109,6 +232,7 @@ export async function checkPlanLimits(userId: string, acao: TipoAcao = 'EMITIR')
                 empresa: {
                     OR: [
                         { donoFaturamentoId: userId },
+                        { proprietarioUserId: userId } as any,
                         { id: user?.empresaId || '' }
                     ]
                 }

@@ -114,10 +114,11 @@ export class NacionalAdapter {
 
         const docTomador = this.clean(t.documento);
         const tagDocTomador = docTomador.length === 11 ? `<CPF>${docTomador}</CPF>` : `<CNPJ>${docTomador}</CNPJ>`;
+        const omitirEnderecoTomador = !isExterior && docTomador.length === 11 && t.semEndereco === true;
 
         const razaoSocialTomador = this.escapeXml(t.razaoSocial);
-        const enderecoLogradouro = this.escapeXml(t.endereco.logradouro);
-        const enderecoBairro = this.escapeXml(t.endereco.bairro);
+        const enderecoLogradouro = this.escapeXml(t.endereco?.logradouro);
+        const enderecoBairro = this.escapeXml(t.endereco?.bairro);
         const descricaoServico = this.escapeXml(s.descricao);
 
         // --- PRESTADOR ---
@@ -149,24 +150,26 @@ export class NacionalAdapter {
         }
         // <------------------------------------>
 
-        tomaXml += `<xNome>${razaoSocialTomador}</xNome><end>`;
-        
-        if (isExterior) {
-            tomaXml += `<endExt>` +
-                       `<cPais>${codPais}</cPais>` +
-                       `<cEndPost>${this.escapeXml(this.clean(t.endereco.cep) || '00000')}</cEndPost>` +
-                       `<xCidade>${this.escapeXml(t.endereco.cidade || 'Exterior')}</xCidade>` +
-                       `<xEstProvReg>${this.escapeXml(t.endereco.uf || 'EX')}</xEstProvReg>` +
-                       `</endExt>`;
-        } else {
-            tomaXml += `<endNac><cMun>${this.clean(t.endereco.codigoIbge)}</cMun><CEP>${this.clean(t.endereco.cep)}</CEP></endNac>`;
+        tomaXml += `<xNome>${razaoSocialTomador}</xNome>`;
+
+        if (!omitirEnderecoTomador) {
+            tomaXml += `<end>`;
+            if (isExterior) {
+                tomaXml += `<endExt>` +
+                           `<cPais>${codPais}</cPais>` +
+                           `<cEndPost>${this.escapeXml(this.clean(t.endereco?.cep) || '00000')}</cEndPost>` +
+                           `<xCidade>${this.escapeXml(t.endereco?.cidade || 'Exterior')}</xCidade>` +
+                           `<xEstProvReg>${this.escapeXml(t.endereco?.uf || 'EX')}</xEstProvReg>` +
+                           `</endExt>`;
+            } else {
+                tomaXml += `<endNac><cMun>${this.clean(t.endereco?.codigoIbge)}</cMun><CEP>${this.clean(t.endereco?.cep)}</CEP></endNac>`;
+            }
+            tomaXml += `<xLgr>${enderecoLogradouro}</xLgr>` +
+                       `<nro>${this.escapeXml(t.endereco?.numero) || 'SN'}</nro>`;
+            if (t.endereco?.complemento) tomaXml += `<xCpl>${this.escapeXml(t.endereco.complemento)}</xCpl>`;
+            if (enderecoBairro) tomaXml += `<xBairro>${enderecoBairro}</xBairro>`;
+            tomaXml += `</end>`;
         }
-        tomaXml += `<xLgr>${enderecoLogradouro}</xLgr>` +
-                   `<nro>${this.escapeXml(t.endereco.numero) || 'SN'}</nro>`;
-        // Add xCpl se existir
-        if (t.endereco.complemento) tomaXml += `<xCpl>${this.escapeXml(t.endereco.complemento)}</xCpl>`;
-        if (enderecoBairro) tomaXml += `<xBairro>${enderecoBairro}</xBairro>`;
-        tomaXml += `</end>`;
         if (t.email) tomaXml += `<email>${t.email}</email>`;
         if (t.telefone) tomaXml += `<fone>${this.clean(t.telefone)}</fone>`;
         tomaXml += `</toma>`;

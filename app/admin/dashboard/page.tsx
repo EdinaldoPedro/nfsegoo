@@ -161,18 +161,27 @@ export default function AdminDashboard() {
   const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState('');
 
   const carregarStats = async () => {
     setRefreshing(true);
+    setError('');
     try {
       const res = await fetch('/api/admin/stats', { cache: 'no-store' });
       if (res.status === 401 || res.status === 403) {
         router.push('/login');
         return;
       }
-      setStats(await res.json());
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error || 'Nao foi possivel carregar as estatisticas.');
+        setStats(null);
+        return;
+      }
+      setStats(data);
     } catch (err) {
       console.error(err);
+      setError('Erro de conexao ao carregar o dashboard.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -191,6 +200,30 @@ export default function AdminDashboard() {
     return (
       <div className="flex h-64 items-center justify-center text-slate-400">
         <Loader2 className="mr-2 animate-spin" /> Carregando painel analítico...
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-red-700">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-1 shrink-0" size={22} />
+            <div>
+              <h1 className="text-xl font-black text-red-900">Dashboard indisponivel</h1>
+              <p className="mt-1 text-sm font-semibold">{error}</p>
+            </div>
+          </div>
+          <button
+            onClick={carregarStats}
+            disabled={refreshing}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-red-700 disabled:opacity-60"
+          >
+            <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
+            Tentar novamente
+          </button>
+        </div>
       </div>
     );
   }

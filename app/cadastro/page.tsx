@@ -93,6 +93,9 @@ export default function Cadastro() {
     const { name, value } = e.target;
     const updatedForm = { ...form, [name]: value };
     setForm(updatedForm);
+    if (name === 'email' || name === 'cpf') {
+      setErrors((prev: any) => ({ ...prev, [name]: '' }));
+    }
     validateField(name, value, updatedForm);
     setServerError('');
   };
@@ -123,10 +126,25 @@ export default function Cadastro() {
     } catch (e) {}
   };
 
+  const checkEmailExist = async () => {
+    const email = form.email.trim().toLowerCase();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return;
+
+    try {
+      const res = await fetch('/api/auth/check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json();
+      if (data.errors?.email) setErrors((prev: any) => ({ ...prev, email: data.errors.email }));
+    } catch (e) {}
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (errors.nome || errors.senha || errors.cpf || errors.confirmEmail || errors.confirmSenha) return;
+    if (errors.nome || errors.email || errors.senha || errors.cpf || errors.confirmEmail || errors.confirmSenha) return;
     if (form.nome.length < 15) {
       setErrors((p: any) => ({ ...p, nome: 'Mínimo 15 caracteres.' }));
       return;
@@ -158,6 +176,14 @@ export default function Cadastro() {
       if (res.ok) {
         setStep(2);
       } else {
+        if (data.errors) {
+          setErrors((prev: any) => ({ ...prev, ...data.errors }));
+        } else if (data.field) {
+          setErrors((prev: any) => ({ ...prev, [data.field]: data.error }));
+        } else if (Array.isArray(data.fields)) {
+          const nextErrors = data.fields.reduce((acc: any, field: string) => ({ ...acc, [field]: data.error }), {});
+          setErrors((prev: any) => ({ ...prev, ...nextErrors }));
+        }
         setServerError(data.error || 'Erro ao cadastrar.');
       }
     } catch (err) {
@@ -361,12 +387,14 @@ export default function Cadastro() {
                             type="email"
                             name="email"
                             required
-                            className={`${inputBase} pl-12 ${inputDefault}`}
+                            className={`${inputBase} pl-12 ${errors.email ? inputError : inputDefault}`}
                             placeholder="seu@email.com"
                             value={form.email}
                             onChange={handleChange}
+                            onBlur={checkEmailExist}
                           />
                         </div>
+                        {errors.email && <p className="mt-1 text-xs text-red-500">{errors.email}</p>}
                       </div>
 
                       <div>

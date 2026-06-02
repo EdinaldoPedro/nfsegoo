@@ -42,6 +42,7 @@ export default function GestaoColaboradores() {
   const [editLimiteClientes, setEditLimiteClientes] = useState<number | ''>(''); // NOVO: Limite Clientes
   const [editAssinaturaAtiva, setEditAssinaturaAtiva] = useState(true);
   const [editRenovacaoAutomatica, setEditRenovacaoAutomatica] = useState(true);
+  const [novaProprietaria, setNovaProprietaria] = useState({ documento: '', razaoSocial: '' });
   const [loadingEdit, setLoadingEdit] = useState(false);
 
   const carregarDados = () => {
@@ -69,6 +70,7 @@ export default function GestaoColaboradores() {
           setSelectedUserFull(data);
           setRoleInput(data.role);
           setEditLimit(data.limiteEmpresas || 5);
+          setNovaProprietaria({ documento: '', razaoSocial: '' });
 
           // Procura o plano ativo do Parceiro para preencher os inputs de notas e clientes
           const activePlanHistory = data.planHistories?.find((h: any) => h.status === 'ATIVO');
@@ -169,6 +171,61 @@ export default function GestaoColaboradores() {
           ...prev,
           empresasContabeis: prev.empresasContabeis.filter((v: any) => v.id !== vinculoId)
       }));
+  };
+
+  const handleAddEmpresaProprietaria = async () => {
+      if (!selectedUserFull) return;
+      const cnpjLimpo = novaProprietaria.documento.replace(/\D/g, '');
+      if (cnpjLimpo.length !== 14) {
+          dialog.showAlert({ type: 'warning', description: 'Informe um CNPJ valido.' });
+          return;
+      }
+
+      try {
+          const res = await fetch(`/api/admin/users/${selectedUserFull.id}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ addEmpresaProprietaria: novaProprietaria })
+          });
+          const data = await res.json().catch(() => ({}));
+
+          if (!res.ok) {
+              dialog.showAlert({ type: 'danger', description: data.error || 'Erro ao incluir empresa proprietaria.' });
+              return;
+          }
+
+          setSelectedUserFull((prev: any) => ({
+              ...prev,
+              empresasProprietarias: [...(prev.empresasProprietarias || []).filter((e: any) => e.id !== data.empresa.id), data.empresa],
+              empresasContabeis: prev.empresasContabeis || []
+          }));
+          setNovaProprietaria({ documento: '', razaoSocial: '' });
+          dialog.showAlert({ type: 'success', description: 'Empresa proprietaria marcada para o contador.' });
+      } catch {
+          dialog.showAlert('Erro de conexao.');
+      }
+  };
+
+  const handleRemoveEmpresaProprietaria = async (empresaId: string) => {
+      if (!selectedUserFull) return;
+      if (!await dialog.showConfirm({
+          title: 'Remover propriedade?',
+          description: 'A empresa deixara de ser marcada como proprietaria deste contador.',
+          type: 'warning'
+      })) return;
+
+      const res = await fetch(`/api/admin/users/${selectedUserFull.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ removeEmpresaProprietariaId: empresaId })
+      });
+
+      if (res.ok) {
+          setSelectedUserFull((prev: any) => ({
+              ...prev,
+              empresasProprietarias: (prev.empresasProprietarias || []).filter((e: any) => e.id !== empresaId)
+          }));
+      }
   };
 
   // --- DEMITIR ---
@@ -383,6 +440,50 @@ export default function GestaoColaboradores() {
                     )}
 
                     {/* LISTA DE EMPRESAS VINCULADAS */}
+                    {roleInput === 'CONTADOR' && (
+                        <div className="rounded-2xl border border-slate-200 p-4">
+                            <h4 className="font-bold text-sm text-slate-700 mb-3 flex items-center gap-2"><Building2 size={16}/> Empresas Proprietarias ({selectedUserFull.empresasProprietarias?.length || 0})</h4>
+                            <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_1fr_auto]">
+                                <input
+                                  className="rounded-xl border border-slate-200 p-3 text-sm outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
+                                  placeholder="CNPJ"
+                                  value={novaProprietaria.documento}
+                                  onChange={e => setNovaProprietaria({ ...novaProprietaria, documento: e.target.value })}
+                                />
+                                <input
+                                  className="rounded-xl border border-slate-200 p-3 text-sm outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
+                                  placeholder="Razao social opcional"
+                                  value={novaProprietaria.razaoSocial}
+                                  onChange={e => setNovaProprietaria({ ...novaProprietaria, razaoSocial: e.target.value })}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={handleAddEmpresaProprietaria}
+                                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-black text-white transition hover:bg-blue-700"
+                                >
+                                  <Building2 size={16}/> Incluir
+                                </button>
+                            </div>
+                            <div className="mt-3 max-h-44 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50">
+                                {selectedUserFull.empresasProprietarias?.length === 0 || !selectedUserFull.empresasProprietarias ? (
+                                    <p className="p-4 text-xs text-center text-slate-400">Nenhuma empresa proprietaria marcada.</p>
+                                ) : (
+                                    selectedUserFull.empresasProprietarias?.map((empresa: any) => (
+                                        <div key={empresa.id} className="flex items-center justify-between border-b p-3 text-sm transition last:border-0 hover:bg-white">
+                                            <div>
+                                                <p className="font-bold text-slate-700">{empresa.razaoSocial}</p>
+                                                <p className="text-[10px] text-slate-500">CNPJ: {empresa.documento}</p>
+                                            </div>
+                                            <button onClick={() => handleRemoveEmpresaProprietaria(empresa.id)} className="text-red-500 hover:bg-red-50 p-1.5 rounded border border-transparent hover:border-red-200 transition" title="Remover propriedade">
+                                                <X size={14}/>
+                                            </button>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </div>
+                    )}
+
                     {roleInput === 'CONTADOR' && (
                         <div className="rounded-2xl border border-slate-200 p-4">
                             <h4 className="font-bold text-sm text-slate-700 mb-3 flex items-center gap-2"><Building2 size={16}/> Carteira de Empresas Ativas ({selectedUserFull.empresasContabeis?.length || 0})</h4>

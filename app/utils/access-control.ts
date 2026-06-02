@@ -1,6 +1,5 @@
 import type { User } from '@prisma/client';
 import { prisma } from '@/app/utils/prisma';
-import { checkIsStaff } from '@/app/utils/permissions';
 
 type AccessUser = Pick<User, 'id' | 'role' | 'empresaId'>;
 
@@ -21,7 +20,7 @@ export function isSupportTicketRole(role: string | null | undefined) {
 }
 
 export async function getAccessibleEmpresaIds(user: AccessUser): Promise<string[] | null> {
-  if (checkIsStaff(user.role)) {
+  if (isSupportRole(user.role)) {
     return null;
   }
 
@@ -31,7 +30,7 @@ export async function getAccessibleEmpresaIds(user: AccessUser): Promise<string[
     empresas.add(user.empresaId);
   }
 
-  const [empresasColaborador, vinculosContador, empresasFaturadas] = await Promise.all([
+  const [empresasColaborador, vinculosContador, empresasProprietarias] = await Promise.all([
     prisma.userCliente.findMany({
       where: { userId: user.id },
       select: { empresaId: true },
@@ -41,14 +40,14 @@ export async function getAccessibleEmpresaIds(user: AccessUser): Promise<string[
       select: { empresaId: true },
     }),
     prisma.empresa.findMany({
-      where: { donoFaturamentoId: user.id, arquivadoEm: null } as any,
+      where: { proprietarioUserId: user.id, arquivadoEm: null } as any,
       select: { id: true },
-    }),
+    })
   ]);
 
   empresasColaborador.forEach(({ empresaId }) => empresas.add(empresaId));
   vinculosContador.forEach(({ empresaId }) => empresas.add(empresaId));
-  empresasFaturadas.forEach(({ id }) => empresas.add(id));
+  empresasProprietarias.forEach(({ id }) => empresas.add(id));
 
   return Array.from(empresas);
 }

@@ -17,6 +17,12 @@ export interface PortalInscricaoInfo {
   dataConsulta: string;
 }
 
+export interface PortalInscricaoOptions {
+  navigationTimeoutMs?: number;
+  authTimeoutMs?: number;
+  actionTimeoutMs?: number;
+}
+
 function hojeSaoPaulo() {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/Sao_Paulo',
@@ -33,6 +39,7 @@ export class NfsePortalInscricaoClient {
     senhaCertificado: string,
     empresaId?: string,
     dataConsulta = hojeSaoPaulo(),
+    options: PortalInscricaoOptions = {},
   ): Promise<PortalInscricaoInfo> {
     const cpfLimpo = cpf.replace(/\D/g, '');
     if (cpfLimpo.length !== 11) {
@@ -49,6 +56,9 @@ export class NfsePortalInscricaoClient {
     });
 
     const urlConsulta = `https://www.nfse.gov.br/emissornacional/api/EmissaoDPS/RecuperarInfoInscricao/${cpfLimpo}?data=${dataConsulta}`;
+    const navigationTimeoutMs = options.navigationTimeoutMs ?? 30000;
+    const authTimeoutMs = options.authTimeoutMs ?? 20000;
+    const actionTimeoutMs = options.actionTimeoutMs ?? 5000;
 
     const browser = await chromium.launch({
       headless: true,
@@ -69,14 +79,15 @@ export class NfsePortalInscricaoClient {
       });
 
       const page = await context.newPage();
+      page.setDefaultTimeout(actionTimeoutMs);
 
       console.log('[BOT CPF] 1. Acessando pagina de login...');
-      await page.goto(URL_LOGIN, { timeout: 60000 });
+      await page.goto(URL_LOGIN, { timeout: navigationTimeoutMs, waitUntil: 'domcontentloaded' });
       await page.waitForTimeout(500);
 
       console.log("[BOT CPF] Clicando na opcao 'Certificado Digital'...");
       try {
-        await page.click("img[src*='ertificado'], a[href*='Certificado']", { timeout: 5000 });
+        await page.click("img[src*='ertificado'], a[href*='Certificado']", { timeout: actionTimeoutMs });
       } catch {
         await page.getByText('ACESSO COM CERTIFICADO DIGITAL').first().click();
       }
@@ -85,7 +96,7 @@ export class NfsePortalInscricaoClient {
       await page.waitForTimeout(1000);
 
       try {
-        await page.waitForURL((url) => !url.toString().includes('Login'), { timeout: 30000 });
+        await page.waitForURL((url) => !url.toString().includes('Login'), { timeout: authTimeoutMs });
         console.log('[BOT CPF] Login detectado.');
       } catch {
         if (page.url().includes('Login')) {

@@ -35,6 +35,10 @@ export async function POST(request: Request) {
         if (!senhaValida) return NextResponse.json({ error: "Senha incorreta." }, { status: 401 });
 
         // 2. Verifica se e-mail já existe em outra conta
+        if (emailNormalizado === user.email) {
+            return NextResponse.json({ error: "Este ja e o e-mail atual da conta." }, { status: 400 });
+        }
+
         const emailExiste = await prisma.user.findFirst({ where: { email: emailNormalizado } });
         if (emailExiste) return NextResponse.json({ error: "Este e-mail já está em uso." }, { status: 400 });
 
@@ -55,7 +59,11 @@ export async function POST(request: Request) {
         // 5. Envia E-mail
         const emailService = new EmailService();
         const html = emailService.getTemplateVerificacaoEmail(user.nome, codigo);
-        await emailService.sendEmail(emailNormalizado, "Codigo de Verificacao", html);
+        const emailResult = await emailService.sendEmail(emailNormalizado, "Codigo de Verificacao", html);
+
+        if (!emailResult.success) {
+            return NextResponse.json({ error: "Nao foi possivel enviar o codigo de verificacao. Tente novamente mais tarde." }, { status: 502 });
+        }
 
         return NextResponse.json({ success: true });
 

@@ -145,6 +145,7 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
   }
 
   const isExterior = tomador.tipo === 'EXT' || (tomador.pais && tomador.pais !== 'Brasil' && tomador.pais !== 'BR');
+  const omitirEnderecoTomador = tomador.tipo === 'PF' && (tomador as any).semEndereco === true;
   addCheck(checks, {
     id: 'tomador-documento',
     group: 'Tomador',
@@ -165,7 +166,7 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
     field: 'cliente.nome',
   });
 
-  if (!isExterior) {
+  if (!isExterior && !omitirEnderecoTomador) {
     addCheck(checks, {
       id: 'tomador-ibge',
       group: 'Tomador',
@@ -174,6 +175,16 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
       message: onlyDigits(tomador.codigoIbge).length >= 7 ? `IBGE ${tomador.codigoIbge}.` : 'Sem IBGE do tomador. O sistema usara fallback se a emissao permitir.',
       tag: 'toma/end/endNac/cMun',
       field: 'cliente.codigoIbge',
+    });
+  } else if (omitirEnderecoTomador) {
+    addCheck(checks, {
+      id: 'tomador-sem-endereco',
+      group: 'Tomador',
+      label: 'Endereco do tomador',
+      status: 'ok',
+      message: 'PF marcada para emissao sem endereco; o bloco toma/end sera omitido.',
+      tag: 'toma',
+      field: 'cliente.semEndereco',
     });
   }
 
@@ -270,15 +281,16 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
     nif: tomador.nif || undefined,
     pais: tomador.pais || undefined,
     moeda: tomador.moeda || undefined,
+    semEndereco: omitirEnderecoTomador,
     endereco: {
-      cep: tomador.cep || '',
-      logradouro: tomador.logradouro || '',
-      numero: tomador.numero || '',
+      cep: omitirEnderecoTomador ? '' : tomador.cep || '',
+      logradouro: omitirEnderecoTomador ? '' : tomador.logradouro || '',
+      numero: omitirEnderecoTomador ? '' : tomador.numero || '',
       complemento: tomador.complemento || undefined,
-      bairro: tomador.bairro || '',
-      cidade: tomador.cidade || '',
-      codigoIbge: tomador.codigoIbge || '9999999',
-      uf: tomador.uf || '',
+      bairro: omitirEnderecoTomador ? '' : tomador.bairro || '',
+      cidade: omitirEnderecoTomador ? '' : tomador.cidade || '',
+      codigoIbge: omitirEnderecoTomador ? '' : tomador.codigoIbge || '9999999',
+      uf: omitirEnderecoTomador ? '' : tomador.uf || '',
     },
   };
 

@@ -49,6 +49,8 @@ model User {
   clientes            UserCliente[]
   empresasAdicionais  Int       @default(0) 
   empresasFaturadas   Empresa[] @relation("FaturamentoEmpresa") 
+  empresasCustodiadas  Empresa[] @relation("CustodiaEmpresa")
+  empresasProprietarias Empresa[] @relation("ProprietarioEmpresa")
   eventosCrm          UserEvent[] 
   faturas         Fatura[]
   cuponsUsados    CupomLog[]
@@ -108,8 +110,19 @@ model Empresa {
   vinculadoA               UserCliente[]
   vendasRealizadas         Venda[]           @relation("VendaPrestador")
   minhaCarteira            VinculoCarteira[]
-  donoFaturamentoId String?
-  donoFaturamento   User?   @relation("FaturamentoEmpresa", fields: [donoFaturamentoId], references: [id])
+  donoFaturamentoId         String?
+  donoFaturamento           User?             @relation("FaturamentoEmpresa", fields: [donoFaturamentoId], references: [id])
+  contadorCustodianteId     String?
+  contadorCustodiante       User?             @relation("CustodiaEmpresa", fields: [contadorCustodianteId], references: [id])
+  proprietarioUserId        String?
+  proprietarioUser          User?             @relation("ProprietarioEmpresa", fields: [proprietarioUserId], references: [id])
+  modoCobranca              String            @default("RESPONSAVEL_UNICO")
+  statusPropriedade         String            @default("ORFA")
+
+  @@index([donoFaturamentoId])
+  @@index([contadorCustodianteId])
+  @@index([proprietarioUserId])
+  @@index([statusPropriedade])
 }
 
 model Cliente {
@@ -131,6 +144,7 @@ model Cliente {
   uf                 String?
   pais               String            @default("Brasil")
   codigoIbge         String?
+  semEndereco        Boolean           @default(false)
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt
   arquivadoEm        DateTime?
@@ -371,6 +385,8 @@ model ContadorVinculo {
   status     String   @default("PENDENTE")
   contadorId String
   empresaId  String
+  clientePodeAcessarPortal Boolean @default(false)
+  nivelPortal String @default("NENHUM")
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
   arquivadoEm DateTime?

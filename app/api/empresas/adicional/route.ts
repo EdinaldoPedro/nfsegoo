@@ -47,17 +47,21 @@ export async function POST(request: Request) {
         });
 
         if (empresaExistente) {
-            if (empresaExistente.donoFaturamentoId === userId) {
+            if ((empresaExistente as any).proprietarioUserId === userId || empresaExistente.donoFaturamentoId === userId) {
                  return NextResponse.json({ error: 'Você já possui esta empresa vinculada à sua conta.' }, { status: 400 });
             }
-            if (empresaExistente.donoFaturamentoId) {
+            if ((empresaExistente as any).proprietarioUserId || empresaExistente.donoFaturamentoId) {
                 return NextResponse.json({ error: 'Este CNPJ já está vinculado a outro utilizador no sistema.' }, { status: 400 });
             }
             
             // Se existir mas for orfã, assume a autoria
             await prisma.empresa.update({
                 where: { id: empresaExistente.id },
-                data: { donoFaturamentoId: userId }
+                data: {
+                    donoFaturamentoId: userId,
+                    proprietarioUserId: userId,
+                    statusPropriedade: 'PROPRIETARIA'
+                } as any
             });
 
             return NextResponse.json({ success: true, message: 'Empresa vinculada com sucesso!' }, { status: 200 });
@@ -68,9 +72,11 @@ export async function POST(request: Request) {
             data: {
                 documento: cnpjLimpo,
                 razaoSocial: razaoSocial,
-                donoFaturamentoId: userId, // A MAGIA ACONTECE AQUI!
+                donoFaturamentoId: userId,
+                proprietarioUserId: userId,
+                statusPropriedade: 'PROPRIETARIA',
                 cadastroCompleto: false
-            }
+            } as any
         });
 
         return NextResponse.json({ success: true, empresa: novaEmpresa }, { status: 201 });

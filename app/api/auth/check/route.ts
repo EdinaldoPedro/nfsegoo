@@ -19,21 +19,36 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Muitas verificacoes. Aguarde e tente novamente.' }, { status: 429 });
     }
 
+    const errors: Record<string, string> = {};
+
     if (email) {
-      await prisma.user.findUnique({
-        where: { email: String(email).trim().toLowerCase() },
+      const emailNormalizado = String(email).trim().toLowerCase();
+      const userEmail = await prisma.user.findUnique({
+        where: { email: emailNormalizado },
         select: { id: true },
       });
+
+      if (userEmail) {
+        errors.email = 'Este e-mail ja esta cadastrado.';
+      }
     }
 
     if (cpf) {
-      await prisma.user.findUnique({
-        where: { cpf: String(cpf).replace(/\D/g, '') },
+      const cpfLimpo = String(cpf).replace(/\D/g, '');
+      const userCpf = await prisma.user.findUnique({
+        where: { cpf: cpfLimpo },
         select: { id: true },
       });
+
+      if (userCpf) {
+        errors.cpf = 'Este CPF ja esta vinculado a uma conta.';
+      }
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({
+      success: Object.keys(errors).length === 0,
+      errors,
+    });
   } catch {
     return NextResponse.json({ error: 'Erro ao verificar dados.' }, { status: 500 });
   }

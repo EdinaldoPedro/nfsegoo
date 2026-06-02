@@ -1,0 +1,1 @@
+ALTER TABLE "Cliente" ADD COLUMN "semEndereco" BOOLEAN NOT NULL DEFAULT false;

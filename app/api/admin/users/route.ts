@@ -4,6 +4,7 @@ import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-m
 import { registrarEventoCrm } from '@/app/services/crmService';
 import { prisma } from '@/app/utils/prisma';
 import { stripUserSecrets } from '@/app/utils/safe-data';
+import { marcarEmpresasProprietariasDoContador } from '@/app/services/contadorOwnershipService';
 
 export async function GET(request: Request) {
   const user = await getAuthenticatedUser(request);
@@ -225,6 +226,9 @@ export async function PUT(request: Request) {
 
     if (Object.keys(dataToUpdate).length > 0) {
       await prisma.user.update({ where: { id: body.id }, data: dataToUpdate });
+      if (body.role === 'CONTADOR') {
+        await marcarEmpresasProprietariasDoContador(body.id);
+      }
       return NextResponse.json({ success: true });
     }
 
