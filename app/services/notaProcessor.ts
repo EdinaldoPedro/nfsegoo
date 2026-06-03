@@ -55,11 +55,20 @@ export async function processarRetornoNota(notaId: string, empresaId: string, ve
         
         try {
             const downloader = new NfsePortalDownloader();
-            const pdfBuffer = await downloader.downloadPdfOficial(
+            const pdfBuffer = await downloader.downloadPdfOficialComRetry(
                 nota.chaveAcesso,
                 nota.empresa.certificadoA1!,
                 nota.empresa.senhaCertificado!,
-                nota.empresa.id
+                nota.empresa.id,
+                {
+                    attempts: 3,
+                    retryDelayMs: 1500,
+                    navigationTimeoutMs: 30000,
+                    authTimeoutMs: 20000,
+                    actionTimeoutMs: 6000,
+                    downloadTimeoutMs: 30000,
+                    downloadNavigationTimeoutMs: 15000,
+                }
             );
             const pdfGzip = zlib.gzipSync(pdfBuffer);
             const pdfBase64 = pdfGzip.toString('base64');
@@ -134,11 +143,20 @@ export async function processarCancelamentoNota(notaId: string, empresaId: strin
 
         try {
             const downloader = new NfsePortalDownloader();
-            const pdfBuffer = await downloader.downloadPdfOficial(
+            const pdfBuffer = await downloader.downloadPdfOficialComRetry(
                 nota.chaveAcesso,
                 nota.empresa.certificadoA1!,
                 nota.empresa.senhaCertificado!,
-                nota.empresa.id
+                nota.empresa.id,
+                {
+                    attempts: 3,
+                    retryDelayMs: 1500,
+                    navigationTimeoutMs: 30000,
+                    authTimeoutMs: 20000,
+                    actionTimeoutMs: 6000,
+                    downloadTimeoutMs: 30000,
+                    downloadNavigationTimeoutMs: 15000,
+                }
             );
 
             // Compacta e Substitui

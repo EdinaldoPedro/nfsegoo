@@ -132,7 +132,18 @@ export async function upsertEmpresaAndLinkUser(documento: string, userId: string
       if (userRole === 'CONTADOR') {
           const proprietarioAtualId = (empresaExistente as any)?.proprietarioUserId || null;
           const temDonoReal = (!!empresaExistente?.donoUser && empresaExistente.donoUser.id !== userId) || (!!proprietarioAtualId && proprietarioAtualId !== userId);
-          const custodianteAtualId = (empresaExistente as any)?.contadorCustodianteId || null;
+          const vinculoAprovadoAtual = empresaExistente
+              ? await tx.contadorVinculo.findFirst({
+                  where: {
+                      empresaId: empresaExistente.id,
+                      status: STATUS_VINCULO.APROVADO,
+                      arquivadoEm: null,
+                      contadorId: { not: userId },
+                  } as any,
+                  orderBy: { updatedAt: 'desc' },
+              })
+              : null;
+          const custodianteAtualId = (empresaExistente as any)?.contadorCustodianteId || vinculoAprovadoAtual?.contadorId || null;
           const temOutroCustodiante = !!custodianteAtualId && custodianteAtualId !== userId;
 
           let statusVinculo: StatusVinculo = STATUS_VINCULO.APROVADO;
@@ -143,6 +154,9 @@ export async function upsertEmpresaAndLinkUser(documento: string, userId: string
           }
 
           const dadosAtualizacao: any = { ...dadosFinais, lastApiCheck: new Date() };
+          if (empresaExistente && !temDonoReal && temOutroCustodiante && !(empresaExistente as any).contadorCustodianteId) {
+              dadosAtualizacao.contadorCustodianteId = custodianteAtualId;
+          }
           if (!empresaExistente || (!temDonoReal && !temOutroCustodiante)) {
               dadosAtualizacao.contadorCustodianteId = userId;
               dadosAtualizacao.statusPropriedade = 'CUSTODIADA';

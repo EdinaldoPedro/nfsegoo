@@ -46,6 +46,15 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
       "Erro na emissão", "Serviço não prestado", "Erro de assinatura", "Duplicidade da nota", "Outros"
   ];
 
+  const marcarPdfDisponivel = (notaId: string) => {
+      setVendas((atuais) => atuais.map((venda) => ({
+          ...venda,
+          notas: venda.notas?.map((nota: any) => (
+              nota.id === notaId ? { ...nota, pdfBase64: nota.pdfBase64 || '__PDF_DISPONIVEL__' } : nota
+          )),
+      })));
+  };
+
   // Fecha menu ao rolar
   useEffect(() => {
       const handleScroll = () => setActiveMenu(null);
@@ -100,6 +109,7 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
           const blob = await fetchPdfBlob(notaId);
           const url = window.URL.createObjectURL(blob);
           viewer.location.href = url;
+          marcarPdfDisponivel(notaId);
           setActiveMenu(null);
       } catch (e: any) {
           viewer.close();
@@ -120,6 +130,9 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
           document.body.appendChild(link);
           link.click();
           document.body.removeChild(link);
+          window.URL.revokeObjectURL(url);
+          marcarPdfDisponivel(notaId);
+          setActiveMenu(null);
       } catch (e: any) { dialog.showAlert({ type: 'danger', description: "Erro: " + e.message }); } 
       finally { setDownloadingPdfId(null); }
   };
@@ -292,6 +305,13 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
   const activeVendaData = activeMenu ? vendas.find(v => v.id === activeMenu.id) : null;
   const activeNotaData = activeVendaData?.notas?.[0];
   const activeIsCancelada = activeVendaData?.status === 'CANCELADA' || activeNotaData?.status === 'CANCELADA';
+  const activePdfDisponivel = Boolean(activeNotaData?.pdfBase64);
+  const activePdfEmAndamento = activeNotaData?.id && downloadingPdfId === activeNotaData.id;
+  const activePdfLabel = activePdfEmAndamento
+      ? 'Buscando PDF...'
+      : activePdfDisponivel
+        ? (activeIsCancelada ? 'PDF Cancelamento' : 'PDF Oficial')
+        : 'Baixar PDF';
   const cancelSteps = [
       { label: 'Validando pedido', doneAt: 20 },
       { label: 'Assinando evento', doneAt: 45 },
@@ -331,9 +351,15 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
                     </button>
 
                     <button onClick={() => handleDownloadPdf(activeNotaData.id, activeNotaData.numero, activeIsCancelada)} disabled={downloadingPdfId === activeNotaData.id} 
-                        className={`w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-2 border-b border-slate-50 ${activeIsCancelada ? 'text-red-600 font-medium' : 'text-slate-700'}`}>
-                        {downloadingPdfId === activeNotaData.id ? <Loader2 size={16} className="animate-spin"/> : <Printer size={16}/>} 
-                        {downloadingPdfId === activeNotaData.id ? 'Baixando...' : (activeIsCancelada ? 'PDF Cancelamento' : 'PDF Oficial')}
+                        className={`w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-2 border-b border-slate-50 ${activePdfDisponivel && activeIsCancelada ? 'text-red-600 font-medium' : activePdfDisponivel ? 'text-slate-700' : 'text-blue-600 font-medium'}`}>
+                        {activePdfEmAndamento ? (
+                            <Loader2 size={16} className="animate-spin"/>
+                        ) : activePdfDisponivel ? (
+                            <Printer size={16}/>
+                        ) : (
+                            <RefreshCcw size={16}/>
+                        )}
+                        {activePdfLabel}
                     </button>
                     
                     {(activeNotaData.xmlBase64 || activeNotaData.xmlAutorizadoBase64) && (

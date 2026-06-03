@@ -65,6 +65,50 @@ export async function GET(request: Request) {
 
         return NextResponse.json(vinculosComResumo);
     }
+    if (mode === 'pendentes-custodia') {
+        if (!['CONTADOR', 'MASTER', 'ADMIN'].includes(user.role)) return forbidden();
+
+        const empresasCustodiadas = await prisma.empresa.findMany({
+            where: {
+                OR: [
+                    { contadorCustodianteId: user.id },
+                    {
+                        contadoresLink: {
+                            some: {
+                                contadorId: user.id,
+                                status: 'APROVADO',
+                                arquivadoEm: null,
+                            } as any,
+                        },
+                    },
+                ],
+                arquivadoEm: null,
+            } as any,
+            select: { id: true },
+        });
+        const empresaIds = empresasCustodiadas.map((empresa) => empresa.id);
+
+        if (empresaIds.length === 0) return NextResponse.json([]);
+
+        const solicitacoes = await prisma.contadorVinculo.findMany({
+            where: {
+                empresaId: { in: empresaIds },
+                contadorId: { not: user.id },
+                status: 'PENDENTE_CUSTODIANTE',
+                arquivadoEm: null,
+            } as any,
+            include: {
+                contador: { select: { id: true, nome: true, email: true, telefone: true } },
+                empresa: true,
+            },
+            orderBy: { updatedAt: 'asc' },
+        });
+
+        return NextResponse.json(solicitacoes.map((vinculo: any) => ({
+            ...vinculo,
+            empresa: stripEmpresaSecrets(vinculo.empresa),
+        })));
+    }
     if (mode === 'cliente') {
         if (!user.empresaId) return NextResponse.json([]);
         const solicitacoes = await prisma.contadorVinculo.findMany({
@@ -130,7 +174,91 @@ export async function PUT(request: Request) {
     if (!user) return unauthorized();
     try {
         const { vinculoId, acao } = await request.json();
-        const vinculo = await prisma.contadorVinculo.findUnique({ where: { id: vinculoId } });
+        const vinculo = await prisma.contadorVinculo.findUnique({
+            where: { id: vinculoId },
+            include: {
+                empresa: {
+                    select: {
+                        id: true,
+                        contadorCustodianteId: true,
+                        donoFaturamentoId: true,
+                    } as any,
+                },
+            },
+        });
+        if (!vinculo) return forbidden();
+
+        const isCustodiaTransferencia = vinculo.status === 'PENDENTE_CUSTODIANTE';
+        if (isCustodiaTransferencia) {
+            const empresa = (vinculo as any).empresa;
+            const isCustodianteDireto = empresa?.contadorCustodianteId === user.id;
+            const vinculoAprovadoDoUsuario = await prisma.contadorVinculo.findFirst({
+                where: {
+                    empresaId: vinculo.empresaId,
+                    contadorId: user.id,
+                    status: 'APROVADO',
+                    arquivadoEm: null,
+                } as any,
+                select: { id: true },
+            });
+            if (!isCustodianteDireto && !vinculoAprovadoDoUsuario && !['MASTER', 'ADMIN'].includes(user.role)) return forbidden();
+
+            if (acao === 'REJEITAR') {
+                await prisma.contadorVinculo.update({
+                    where: { id: vinculoId },
+                    data: { status: 'REJEITADO', arquivadoEm: new Date(), arquivadoPor: user.id, motivoArquivamento: 'Solicitacao rejeitada pelo contador custodiante.' } as any
+                });
+                return NextResponse.json({ success: true, message: 'Solicitacao recusada.' });
+            }
+
+            if (acao === 'LIBERAR_ACESSO') {
+                await prisma.contadorVinculo.update({
+                    where: { id: vinculoId },
+                    data: {
+                        status: 'APROVADO',
+                        arquivadoEm: null,
+                        arquivadoPor: null,
+                        motivoArquivamento: null,
+                    } as any,
+                });
+                return NextResponse.json({ success: true, message: 'Acesso concedido. A custodia principal foi mantida.' });
+            }
+
+            const custodianteAnteriorId = empresa?.contadorCustodianteId || user.id;
+            const trocarCobranca = !empresa?.donoFaturamentoId || empresa.donoFaturamentoId === custodianteAnteriorId;
+
+            await prisma.$transaction([
+                prisma.contadorVinculo.updateMany({
+                    where: {
+                        empresaId: vinculo.empresaId,
+                        contadorId: { not: vinculo.contadorId },
+                        status: 'APROVADO',
+                        arquivadoEm: null,
+                    } as any,
+                    data: {
+                        status: 'DESVINCULADO',
+                        arquivadoEm: new Date(),
+                        arquivadoPor: user.id,
+                        motivoArquivamento: 'Custodia transferida pelo contador atual.',
+                    } as any,
+                }),
+                prisma.contadorVinculo.update({
+                    where: { id: vinculoId },
+                    data: { status: 'APROVADO', arquivadoEm: null, arquivadoPor: null, motivoArquivamento: null } as any,
+                }),
+                prisma.empresa.update({
+                    where: { id: vinculo.empresaId },
+                    data: {
+                        contadorCustodianteId: vinculo.contadorId,
+                        statusPropriedade: 'CUSTODIADA',
+                        ...(trocarCobranca ? { donoFaturamentoId: vinculo.contadorId } : {}),
+                    } as any,
+                }),
+            ]);
+
+            return NextResponse.json({ success: true, message: 'Vinculo liberado e custodia transferida.' });
+        }
+
         if (!vinculo || vinculo.empresaId !== user.empresaId) return forbidden();
         
         if (acao === 'REJEITAR') {

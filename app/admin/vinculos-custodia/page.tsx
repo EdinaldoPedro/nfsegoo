@@ -71,12 +71,20 @@ export default function VinculosCustodiaAdminPage() {
     semTelefone: items.filter((item) => !item.empresa.contadorCustodiante?.telefone).length,
   }), [items]);
 
-  const resolver = async (item: VinculoCustodia, acao: 'LIBERAR' | 'NEGAR') => {
-    const phrase = acao === 'LIBERAR' ? 'LIBERAR' : 'NEGAR';
+  const resolver = async (item: VinculoCustodia, acao: 'LIBERAR_ACESSO' | 'TRANSFERIR_CUSTODIA' | 'NEGAR') => {
+    const phrase = acao === 'LIBERAR_ACESSO' ? 'ACESSO' : acao === 'TRANSFERIR_CUSTODIA' ? 'TRANSFERIR' : 'NEGAR';
+    const isAcesso = acao === 'LIBERAR_ACESSO';
+    const isTransferencia = acao === 'TRANSFERIR_CUSTODIA';
     const confirmacao = await dialog.showPrompt({
-      type: acao === 'LIBERAR' ? 'success' : 'danger',
-      title: acao === 'LIBERAR' ? 'Liberar novo contador' : 'Negar solicitacao',
-      description: `${acao === 'LIBERAR' ? 'A custodia sera transferida para' : 'A solicitacao sera rejeitada para'} ${item.contador.nome || item.contador.email}. Digite ${phrase} para confirmar.`,
+      type: isTransferencia ? 'warning' : isAcesso ? 'success' : 'danger',
+      title: isTransferencia ? 'Transferir custodia' : isAcesso ? 'Conceder acesso' : 'Negar solicitacao',
+      description: `${
+        isTransferencia
+          ? 'A custodia sera transferida para'
+          : isAcesso
+            ? 'O acesso operacional sera liberado para'
+            : 'A solicitacao sera rejeitada para'
+      } ${item.contador.nome || item.contador.email}. Digite ${phrase} para confirmar.`,
       validationText: phrase,
       placeholder: phrase,
     });
@@ -207,10 +215,17 @@ export default function VinculosCustodiaAdminPage() {
                   <div className="flex w-full flex-col gap-2 lg:w-56">
                     <button
                       disabled={processando}
-                      onClick={() => resolver(item, 'LIBERAR')}
+                      onClick={() => resolver(item, 'LIBERAR_ACESSO')}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-black text-blue-700 shadow-sm transition hover:bg-blue-100 disabled:opacity-60"
+                    >
+                      {processando ? <Loader2 className="animate-spin" size={16} /> : <CheckCircle size={16} />} Dar acesso
+                    </button>
+                    <button
+                      disabled={processando}
+                      onClick={() => resolver(item, 'TRANSFERIR_CUSTODIA')}
                       className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-black text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-60"
                     >
-                      {processando ? <Loader2 className="animate-spin" size={16} /> : <CheckCircle size={16} />} Liberar
+                      {processando ? <Loader2 className="animate-spin" size={16} /> : <CheckCircle size={16} />} Transferir
                     </button>
                     <button
                       disabled={processando}
@@ -220,7 +235,7 @@ export default function VinculosCustodiaAdminPage() {
                       <XCircle size={16} /> Negar
                     </button>
                     <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs font-semibold leading-relaxed text-slate-500">
-                      Ao liberar, o novo contador vira custodiante e o vinculo aprovado anterior e desvinculado.
+                      Dar acesso mantem o custodiante atual. Transferir muda a custodia principal e desvincula o aprovado anterior.
                     </div>
                   </div>
                 </div>

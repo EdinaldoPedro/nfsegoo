@@ -50,7 +50,7 @@ export async function PUT(request: Request) {
 
   try {
     const { vinculoId, acao, observacao } = await request.json();
-    if (!vinculoId || !['LIBERAR', 'NEGAR'].includes(acao)) {
+    if (!vinculoId || !['LIBERAR', 'LIBERAR_ACESSO', 'TRANSFERIR_CUSTODIA', 'NEGAR'].includes(acao)) {
       return NextResponse.json({ error: 'Acao invalida.' }, { status: 400 });
     }
 
@@ -94,6 +94,28 @@ export async function PUT(request: Request) {
       });
 
       return NextResponse.json({ success: true, message: 'Solicitacao negada.' });
+    }
+
+    if (acao === 'LIBERAR_ACESSO') {
+      await prisma.contadorVinculo.update({
+        where: { id: vinculoId },
+        data: {
+          status: 'APROVADO',
+          arquivadoEm: null,
+          arquivadoPor: null,
+          motivoArquivamento: null,
+        } as any,
+      });
+
+      await createLog({
+        level: 'INFO',
+        action: 'VINCULO_ACESSO_LIBERADO',
+        message: `Acesso operacional liberado para ${vinculo.contador.nome || vinculo.contador.email}.`,
+        empresaId: vinculo.empresaId,
+        details: { vinculoId, contadorSolicitanteId: vinculo.contadorId, observacao, adminId: user.id },
+      });
+
+      return NextResponse.json({ success: true, message: 'Acesso concedido sem transferir custodia.' });
     }
 
     const empresa = (vinculo as any).empresa;

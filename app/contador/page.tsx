@@ -21,6 +21,7 @@ import {
   Search,
   Send,
   ShieldCheck,
+  ShieldQuestion,
   SlidersHorizontal,
   Users,
   X,
@@ -46,10 +47,12 @@ const filtrosRapidos = [
 
 export default function ContadorDashboard() {
   const router = useRouter();
-  const { showAlert } = useDialog();
+  const { showAlert, showConfirm } = useDialog();
 
   const [empresas, setEmpresas] = useState<any[]>([]);
+  const [solicitacoesCustodia, setSolicitacoesCustodia] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [processandoSolicitacaoId, setProcessandoSolicitacaoId] = useState<string | null>(null);
   const [novoCnpj, setNovoCnpj] = useState('');
   const [processando, setProcessando] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
@@ -74,12 +77,17 @@ export default function ContadorDashboard() {
     const userId = localStorage.getItem('userId');
     if (!userId) return router.push('/login');
 
-    fetch('/api/contador/vinculo?mode=contador', {
-      headers: { 'x-user-id': userId },
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        if (Array.isArray(data)) setEmpresas(data);
+    Promise.all([
+      fetch('/api/contador/vinculo?mode=contador', {
+        headers: { 'x-user-id': userId },
+      }).then((r) => r.json()),
+      fetch('/api/contador/vinculo?mode=pendentes-custodia', {
+        headers: { 'x-user-id': userId },
+      }).then((r) => r.json()),
+    ])
+      .then(([empresasData, solicitacoesData]) => {
+        if (Array.isArray(empresasData)) setEmpresas(empresasData);
+        if (Array.isArray(solicitacoesData)) setSolicitacoesCustodia(solicitacoesData);
       })
       .finally(() => setLoading(false));
   };
@@ -250,6 +258,52 @@ export default function ContadorDashboard() {
     }
   };
 
+  const resolverSolicitacaoCustodia = async (vinculoId: string, acao: 'LIBERAR_ACESSO' | 'TRANSFERIR_CUSTODIA' | 'REJEITAR') => {
+    const isAcesso = acao === 'LIBERAR_ACESSO';
+    const isTransferencia = acao === 'TRANSFERIR_CUSTODIA';
+    const confirmar = await showConfirm({
+      type: isTransferencia ? 'warning' : isAcesso ? 'info' : 'danger',
+      title: isTransferencia ? 'Transferir custodia?' : isAcesso ? 'Conceder acesso?' : 'Recusar solicitacao?',
+      description: isTransferencia
+        ? 'O novo contador virara o custodiante principal e seu vinculo aprovado sera encerrado.'
+        : isAcesso
+          ? 'O novo contador ganhara acesso operacional, mas voce continuara como custodiante principal.'
+          : 'A solicitacao sera recusada e o contador solicitante nao tera acesso.',
+      confirmText: isTransferencia ? 'Transferir' : isAcesso ? 'Dar acesso' : 'Recusar',
+    });
+    if (!confirmar) return;
+
+    const userId = localStorage.getItem('userId');
+    setProcessandoSolicitacaoId(vinculoId);
+    try {
+      const res = await fetch('/api/contador/vinculo', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': userId || '',
+        },
+        body: JSON.stringify({ vinculoId, acao }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erro ao resolver solicitacao.');
+
+      await showAlert({
+        type: 'success',
+        title: 'Solicitacao atualizada',
+        description: data.message || 'Solicitacao resolvida.',
+      });
+      carregar();
+    } catch (error: any) {
+      showAlert({
+        type: 'danger',
+        title: 'Falha',
+        description: error.message || 'Nao foi possivel resolver a solicitacao.',
+      });
+    } finally {
+      setProcessandoSolicitacaoId(null);
+    }
+  };
+
   const acessarEmpresa = (empresaId: string, status: string) => {
     if (status !== 'APROVADO') {
       showAlert({
@@ -370,6 +424,74 @@ export default function ContadorDashboard() {
             </div>
           </div>
         </section>
+
+        {solicitacoesCustodia.length > 0 && (
+          <section className="mb-6 rounded-[28px] border border-amber-200 bg-amber-50 p-4 shadow-sm sm:p-5">
+            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-3">
+                <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-amber-600 ring-1 ring-amber-200">
+                  <ShieldQuestion size={23} />
+                </span>
+                <div>
+                  <h3 className="font-black text-slate-900">Solicitacoes de transferencia</h3>
+                  <p className="text-sm font-medium text-amber-800">Outros contadores solicitaram acesso a empresas sob sua custodia.</p>
+                </div>
+              </div>
+              <span className="w-fit rounded-full bg-white px-3 py-1 text-xs font-black text-amber-700 ring-1 ring-amber-200">
+                {solicitacoesCustodia.length} pendente{solicitacoesCustodia.length > 1 ? 's' : ''}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+              {solicitacoesCustodia.map((solicitacao) => {
+                const empresa = solicitacao.empresa || {};
+                const contador = solicitacao.contador || {};
+                const processandoSolicitacao = processandoSolicitacaoId === solicitacao.id;
+
+                return (
+                  <div key={solicitacao.id} className="rounded-2xl border border-amber-200 bg-white p-4 shadow-sm">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p className="font-mono text-[11px] font-black text-slate-400">{formatarDocumento(empresa.documento)}</p>
+                        <h4 className="mt-1 font-black text-slate-900">{empresa.razaoSocial || 'Empresa sem nome'}</h4>
+                        <p className="mt-1 text-sm font-medium text-slate-500">
+                          Solicitante: {contador.nome || contador.email || 'contador nao identificado'}
+                        </p>
+                        {contador.email && <p className="text-xs font-bold text-slate-400">{contador.email}</p>}
+                      </div>
+
+                      <div className="flex shrink-0 gap-2">
+                        <button
+                          disabled={processandoSolicitacao}
+                          onClick={() => resolverSolicitacaoCustodia(solicitacao.id, 'REJEITAR')}
+                          className="inline-flex items-center justify-center rounded-xl border border-red-200 px-3 py-2 text-xs font-black text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Recusar
+                        </button>
+                        <button
+                          disabled={processandoSolicitacao}
+                          onClick={() => resolverSolicitacaoCustodia(solicitacao.id, 'LIBERAR_ACESSO')}
+                          className="inline-flex min-w-[96px] items-center justify-center gap-1 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-black text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {processandoSolicitacao ? <Loader2 className="animate-spin" size={14} /> : <ShieldCheck size={14} />}
+                          Dar acesso
+                        </button>
+                        <button
+                          disabled={processandoSolicitacao}
+                          onClick={() => resolverSolicitacaoCustodia(solicitacao.id, 'TRANSFERIR_CUSTODIA')}
+                          className="inline-flex min-w-[106px] items-center justify-center gap-1 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {processandoSolicitacao ? <Loader2 className="animate-spin" size={14} /> : <CheckCircle size={14} />}
+                          Transferir
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
 
         <section className="mb-5 rounded-[28px] border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">

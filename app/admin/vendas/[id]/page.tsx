@@ -360,6 +360,7 @@ export default function DetalheVendaCompleto() {
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
   const [inspecionando, setInspecionando] = useState(false);
+  const [reprocessandoPdf, setReprocessandoPdf] = useState(false);
   const [inspecao, setInspecao] = useState<any>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>('resumo');
@@ -539,6 +540,36 @@ export default function DetalheVendaCompleto() {
     setActiveTab('validacao');
   };
 
+  const reprocessarPdf = async () => {
+    const confirmar = await dialog.showConfirm({
+      type: 'info',
+      title: 'Atualizar PDF?',
+      description: 'A bancada vai chamar o robo do Portal Nacional para baixar e salvar o PDF desta venda.',
+      confirmText: 'Atualizar PDF',
+    });
+
+    if (!confirmar) return;
+
+    setReprocessandoPdf(true);
+    try {
+      const res = await fetch(`/api/admin/vendas/${vendaId}/reprocessar-pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Nao foi possivel atualizar o PDF.');
+
+      await dialog.showAlert({ type: 'success', title: 'PDF atualizado', description: data.message || 'PDF salvo com sucesso.' });
+      fetchVenda(true);
+      setActiveTab('logs');
+    } catch (error: any) {
+      dialog.showAlert({ type: 'danger', title: 'Falha no PDF', description: error.message });
+      fetchVenda(true);
+    } finally {
+      setReprocessandoPdf(false);
+    }
+  };
+
   const xmlData = useMemo(() => {
     if (!venda) return { prettyPayload: '// Payload indisponível', xmlExibicao: '', xmlDownload: '' };
 
@@ -597,6 +628,13 @@ export default function DetalheVendaCompleto() {
   const notaAtual = venda.notas?.[0];
   const nomeTomador = venda.cliente?.nome || venda.cliente?.razaoSocial || 'Tomador não informado';
   const ultimaMensagemErro = retornoLogs[0]?.message;
+  const integridadePdf = {
+    chaveOk: Boolean(notaAtual?.chaveAcesso),
+    xmlOk: Boolean(notaAtual?.xmlAutorizadoBase64 || notaAtual?.xmlBase64),
+    pdfOk: Boolean(notaAtual?.pdfBase64),
+    notaAutorizada: venda.status === 'CONCLUIDA' || venda.status === 'CANCELADA' || notaAtual?.status === 'AUTORIZADA' || notaAtual?.status === 'CANCELADA',
+  };
+  const podeReprocessarPdf = integridadePdf.notaAutorizada && integridadePdf.chaveOk && integridadePdf.xmlOk && !integridadePdf.pdfOk;
 
   const tabs: Array<{ id: ActiveTab; label: string; icon: any; color: string }> = [
     { id: 'resumo', label: 'Resumo', icon: ClipboardList, color: 'blue' },
@@ -1067,6 +1105,30 @@ export default function DetalheVendaCompleto() {
               <button onClick={() => setActiveTab('retornos')} className="w-full rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-700 hover:bg-amber-100 flex items-center justify-center gap-2">
                 <ListChecks size={16} /> Ver retornos
               </button>
+            </div>
+          </SectionShell>
+
+          <SectionShell title="Integridade fiscal" icon={FileText}>
+            <div className="space-y-3">
+              <InfoItem label="Chave de acesso" value={integridadePdf.chaveOk ? 'OK' : 'Pendente'} />
+              <InfoItem label="XML oficial" value={integridadePdf.xmlOk ? 'OK' : 'Pendente'} />
+              <InfoItem label="PDF salvo" value={integridadePdf.pdfOk ? 'OK' : 'Ausente'} />
+              {podeReprocessarPdf ? (
+                <button
+                  onClick={reprocessarPdf}
+                  disabled={reprocessandoPdf}
+                  className="w-full rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60 flex items-center justify-center gap-2"
+                >
+                  {reprocessandoPdf ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                  {reprocessandoPdf ? 'Atualizando PDF...' : 'Atualizar PDF'}
+                </button>
+              ) : (
+                <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500">
+                  {integridadePdf.pdfOk
+                    ? 'PDF ja esta salvo para esta venda.'
+                    : 'O botao sera liberado quando a nota tiver chave e XML oficial.'}
+                </p>
+              )}
             </div>
           </SectionShell>
 
