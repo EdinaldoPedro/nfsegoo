@@ -1,12 +1,8 @@
-import { chromium } from 'playwright';
+import https from 'https';
 import { openEmpresaCertificate } from '@/app/services/certificateVault';
 
 export interface PdfDownloadOptions {
-  navigationTimeoutMs?: number;
-  authTimeoutMs?: number;
-  actionTimeoutMs?: number;
-  downloadTimeoutMs?: number;
-  downloadNavigationTimeoutMs?: number;
+  requestTimeoutMs?: number;
 }
 
 export interface PdfDownloadRetryOptions extends PdfDownloadOptions {
@@ -14,8 +10,71 @@ export interface PdfDownloadRetryOptions extends PdfDownloadOptions {
   retryDelayMs?: number;
 }
 
+interface PdfApiResult {
+  statusCode: number;
+  contentType: string;
+  body: Buffer;
+}
+
+const ADN_DANFSE_BASE_URL = 'https://adn.nfse.gov.br/danfse';
+const RETRYABLE_STATUS = new Set([429, 502, 503, 504]);
+
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function sleepWithJitter(tentativa: number, baseDelayMs: number) {
+  const linearDelay = Math.min(baseDelayMs + tentativa * 1500, 15000);
+  const jitter = Math.floor(Math.random() * 1000);
+  return delay(linearDelay + jitter);
+}
+
+function isPdf(buffer: Buffer) {
+  return buffer.subarray(0, 4).toString('utf8') === '%PDF';
+}
+
+function resumirResposta(buffer: Buffer) {
+  return buffer
+    .subarray(0, 500)
+    .toString('utf8')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function requestPdfViaAdn(url: string, cert: string, key: string, timeoutMs: number): Promise<PdfApiResult> {
+  return new Promise((resolve, reject) => {
+    const req = https.get(
+      url,
+      {
+        cert,
+        key,
+        timeout: timeoutMs,
+        headers: {
+          Accept: 'application/pdf',
+          Connection: 'close',
+          'User-Agent': 'nfsegoo-danfse/1.0',
+        },
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+
+        res.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+        res.on('end', () => {
+          resolve({
+            statusCode: res.statusCode || 0,
+            contentType: String(res.headers['content-type'] || ''),
+            body: Buffer.concat(chunks),
+          });
+        });
+      },
+    );
+
+    req.on('timeout', () => {
+      req.destroy(new Error(`Timeout ${timeoutMs}ms ao chamar API ADN DANFSe.`));
+    });
+
+    req.on('error', reject);
+  });
 }
 
 export class NfsePortalDownloader {
@@ -26,24 +85,24 @@ export class NfsePortalDownloader {
     empresaId?: string,
     options: PdfDownloadRetryOptions = {},
   ): Promise<Buffer> {
-    const attempts = Math.max(1, options.attempts ?? 3);
-    const retryDelayMs = options.retryDelayMs ?? 1500;
+    const attempts = Math.max(1, options.attempts ?? 5);
+    const retryDelayMs = options.retryDelayMs ?? 2000;
     let ultimoErro: any = null;
 
     for (let tentativa = 1; tentativa <= attempts; tentativa += 1) {
       try {
-        console.log(`[BOT PDF] Tentativa ${tentativa}/${attempts} para chave ${chaveAcesso}.`);
+        console.log(`[PDF ADN] Tentativa ${tentativa}/${attempts} para chave ${chaveAcesso}.`);
         return await this.downloadPdfOficial(chaveAcesso, pfxBase64, senhaCertificado, empresaId, options);
       } catch (error: any) {
         ultimoErro = error;
-        console.warn(`[BOT PDF] Tentativa ${tentativa}/${attempts} falhou: ${error.message}`);
+        console.warn(`[PDF ADN] Tentativa ${tentativa}/${attempts} falhou: ${error.message}`);
         if (tentativa < attempts) {
-          await delay(retryDelayMs);
+          await sleepWithJitter(tentativa, retryDelayMs);
         }
       }
     }
 
-    throw new Error(`Portal Nacional instavel: nao foi possivel baixar o PDF apos ${attempts} tentativas. ${ultimoErro?.message || ''}`.trim());
+    throw new Error(`API ADN instavel: nao foi possivel baixar o PDF apos ${attempts} tentativas. ${ultimoErro?.message || ''}`.trim());
   }
 
   async downloadPdfOficial(
@@ -53,7 +112,10 @@ export class NfsePortalDownloader {
     empresaId?: string,
     options: PdfDownloadOptions = {},
   ): Promise<Buffer> {
-    console.log(`[BOT] Iniciando download oficial para chave: ${chaveAcesso}`);
+    const chaveLimpa = String(chaveAcesso || '').replace(/\D/g, '');
+    if (!chaveLimpa) {
+      throw new Error('Chave de acesso ausente para download do DANFSe.');
+    }
 
     const credenciais = openEmpresaCertificate({
       empresaId,
@@ -62,85 +124,24 @@ export class NfsePortalDownloader {
       purpose: 'DOWNLOAD_PDF',
     });
 
-    const URL_LOGIN = 'https://www.nfse.gov.br/EmissorNacional/Login?ReturnUrl=%2fEmissorNacional';
-    const URL_DOWNLOAD = `https://www.nfse.gov.br/EmissorNacional/Notas/Download/DANFSe/${chaveAcesso}`;
-    const navigationTimeoutMs = options.navigationTimeoutMs ?? 30000;
-    const authTimeoutMs = options.authTimeoutMs ?? 20000;
-    const actionTimeoutMs = options.actionTimeoutMs ?? 6000;
-    const downloadTimeoutMs = options.downloadTimeoutMs ?? 30000;
-    const downloadNavigationTimeoutMs = options.downloadNavigationTimeoutMs ?? 15000;
+    const url = `${ADN_DANFSE_BASE_URL}/${chaveLimpa}`;
+    const timeoutMs = options.requestTimeoutMs ?? 40000;
 
-    const browser = await chromium.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    });
+    console.log(`[PDF ADN] Baixando DANFSe via API: ${url}`);
+    const resposta = await requestPdfViaAdn(url, credenciais.cert, credenciais.key, timeoutMs);
+    console.log(`[PDF ADN] HTTP ${resposta.statusCode} | content-type: ${resposta.contentType} | bytes: ${resposta.body.length}`);
 
-    try {
-      const context = await browser.newContext({
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        ignoreHTTPSErrors: false,
-        clientCertificates: [
-          {
-            origin: 'https://www.nfse.gov.br',
-            cert: Buffer.from(credenciais.cert),
-            key: Buffer.from(credenciais.key),
-          },
-        ],
-      });
-
-      const page = await context.newPage();
-      page.setDefaultTimeout(actionTimeoutMs);
-
-      console.log('[BOT] 1. Acessando pagina de Login...');
-      await page.goto(URL_LOGIN, { timeout: navigationTimeoutMs, waitUntil: 'domcontentloaded' });
-      await page.waitForTimeout(500);
-
-      console.log("[BOT] Clicando na opcao 'Certificado Digital'...");
-      try {
-        await page.click("img[src*='ertificado'], a[href*='Certificado']", { timeout: actionTimeoutMs });
-      } catch {
-        await page.getByText('ACESSO COM CERTIFICADO DIGITAL').first().click();
+    if (resposta.statusCode === 200) {
+      if (!isPdf(resposta.body)) {
+        throw new Error(`API ADN retornou HTTP 200, mas o conteudo nao parece PDF. content-type=${resposta.contentType}; inicio=${resumirResposta(resposta.body)}`);
       }
-
-      console.log('[BOT] Aguardando autenticacao...');
-      await page.waitForTimeout(1000);
-
-      try {
-        await page.waitForURL((url) => !url.toString().includes('Login'), { timeout: authTimeoutMs });
-        console.log('[BOT] Login detectado.');
-      } catch {
-        if (page.url().includes('Login')) {
-          throw new Error('Falha no Login: o sistema nao saiu da tela de autenticacao.');
-        }
-      }
-
-      console.log(`[BOT] 2. Acessando link direto: ${URL_DOWNLOAD}`);
-
-      const downloadPromise = page.waitForEvent('download', { timeout: downloadTimeoutMs });
-
-      try {
-        await page.goto(URL_DOWNLOAD, { timeout: downloadNavigationTimeoutMs, waitUntil: 'domcontentloaded' });
-      } catch {
-        console.log('[BOT] Navegacao interrompida pelo inicio do download.');
-      }
-
-      const download = await downloadPromise;
-      const fileStream = await download.createReadStream();
-      const chunks = [];
-
-      for await (const chunk of fileStream) {
-        chunks.push(chunk);
-      }
-
-      const pdfBuffer = Buffer.concat(chunks);
-      console.log(`[BOT] PDF capturado (${pdfBuffer.length} bytes).`);
-
-      return pdfBuffer;
-    } catch (error: any) {
-      console.error('[BOT CRITICAL]', error.message);
-      throw new Error(`Erro no robo: ${error.message}`);
-    } finally {
-      await browser.close();
+      return resposta.body;
     }
+
+    if (RETRYABLE_STATUS.has(resposta.statusCode)) {
+      throw new Error(`API ADN retornou status temporario ${resposta.statusCode}. content-type=${resposta.contentType}; inicio=${resumirResposta(resposta.body)}`);
+    }
+
+    throw new Error(`API ADN retornou status ${resposta.statusCode}. content-type=${resposta.contentType}; inicio=${resumirResposta(resposta.body)}`);
   }
 }

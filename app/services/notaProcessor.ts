@@ -63,11 +63,7 @@ export async function processarRetornoNota(notaId: string, empresaId: string, ve
                 {
                     attempts: 3,
                     retryDelayMs: 1500,
-                    navigationTimeoutMs: 30000,
-                    authTimeoutMs: 20000,
-                    actionTimeoutMs: 6000,
-                    downloadTimeoutMs: 30000,
-                    downloadNavigationTimeoutMs: 15000,
+                    requestTimeoutMs: 40000,
                 }
             );
             const pdfGzip = zlib.gzipSync(pdfBuffer);
@@ -151,11 +147,7 @@ export async function processarCancelamentoNota(notaId: string, empresaId: strin
                 {
                     attempts: 3,
                     retryDelayMs: 1500,
-                    navigationTimeoutMs: 30000,
-                    authTimeoutMs: 20000,
-                    actionTimeoutMs: 6000,
-                    downloadTimeoutMs: 30000,
-                    downloadNavigationTimeoutMs: 15000,
+                    requestTimeoutMs: 40000,
                 }
             );
 

@@ -51,11 +51,7 @@ export async function POST(request: Request) {
         {
           attempts: 3,
           retryDelayMs: 1500,
-          navigationTimeoutMs: 30000,
-          authTimeoutMs: 20000,
-          actionTimeoutMs: 6000,
-          downloadTimeoutMs: 30000,
-          downloadNavigationTimeoutMs: 15000,
+          requestTimeoutMs: 40000,
         },
       );
     } catch (error: any) {
