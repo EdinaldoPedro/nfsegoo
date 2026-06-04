@@ -42,6 +42,7 @@ export default function Cadastro() {
   const [serverError, setServerError] = useState('');
   const [showSenha, setShowSenha] = useState(false);
   const [showConfirmSenha, setShowConfirmSenha] = useState(false);
+  const [acceptedPolicies, setAcceptedPolicies] = useState(false);
 
   const inputBase = 'w-full rounded-2xl border bg-white px-4 py-3.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:ring-4';
   const inputDefault = 'border-slate-200 focus:border-blue-500 focus:ring-blue-100';
@@ -156,6 +157,10 @@ export default function Cadastro() {
     }
     if (form.senha !== form.confirmSenha) {
       setErrors((p: any) => ({ ...p, confirmSenha: 'As senhas não coincidem.' }));
+      return;
+    }
+    if (!acceptedPolicies) {
+      setServerError('Para criar a conta, aceite os Termos de Uso e a Politica de Privacidade.');
       return;
     }
 
@@ -466,8 +471,31 @@ export default function Cadastro() {
                       </div>
                     </div>
 
+                    <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left transition hover:border-blue-200 hover:bg-blue-50/60">
+                      <input
+                        type="checkbox"
+                        checked={acceptedPolicies}
+                        onChange={(e) => {
+                          setAcceptedPolicies(e.target.checked);
+                          if (e.target.checked) setServerError('');
+                        }}
+                        className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="text-sm font-semibold leading-6 text-slate-600">
+                        Li e aceito os{" "}
+                        <Link href="/termos-de-uso" target="_blank" className="font-black text-blue-700 hover:text-blue-900">
+                          Termos de Uso
+                        </Link>{" "}
+                        e a{" "}
+                        <Link href="/politica-de-privacidade" target="_blank" className="font-black text-blue-700 hover:text-blue-900">
+                          Politica de Privacidade
+                        </Link>
+                        .
+                      </span>
+                    </label>
+
                     <button
-                      disabled={loading}
+                      disabled={loading || !acceptedPolicies}
                       className="flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-4 text-sm font-black text-white shadow-xl shadow-blue-600/20 transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
                     >
                       {loading ? <Loader2 className="animate-spin" /> : 'Continuar'} <ArrowRight size={20} />

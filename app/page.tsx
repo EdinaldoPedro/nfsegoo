@@ -505,6 +505,11 @@ export default function LandingPage() {
                 </p>
             </Reveal>
             <Reveal delay={200}>
+                <div className="mb-8 flex flex-wrap items-center justify-center gap-4 text-sm font-bold text-slate-500">
+                    <Link href="/termos-de-uso" className="transition hover:text-blue-300">Termos de Uso</Link>
+                    <Link href="/politica-de-privacidade" className="transition hover:text-blue-300">Privacidade</Link>
+                    <Link href="/politica-de-cookies" className="transition hover:text-blue-300">Cookies</Link>
+                </div>
                 <div className="border-t border-slate-800/50 pt-8 text-slate-600 text-sm font-medium">
                     © {new Date().getFullYear()} NFSe Goo. Todos os direitos reservados.
                 </div>

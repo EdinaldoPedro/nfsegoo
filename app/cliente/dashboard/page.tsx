@@ -168,7 +168,7 @@ export default function ClienteDashboard() {
     };
   })();
 
-  const exibirOrientacaoFiscal = perfilCarregado && (
+  const exibirSaudeFiscal = perfilCarregado && (
     isBloqueado ||
     checklistFiscal.some((item) => !item.ok || item.warning)
   );
@@ -246,11 +246,12 @@ export default function ClienteDashboard() {
                 </div>
             )}
             
-            {/* Botões Rápidos */}
-            {exibirOrientacaoFiscal && (
-                <div className="grid grid-cols-1 2xl:grid-cols-[minmax(320px,0.9fr)_minmax(520px,1.1fr)] gap-6">
-                    <ProximaAcaoCard data={proximaAcao} />
+            {/* Orientacao fiscal e chamada principal */}
+            {perfilCarregado && (
+                <div className={`grid grid-cols-1 gap-6 ${exibirSaudeFiscal ? '2xl:grid-cols-[minmax(320px,0.9fr)_minmax(520px,1.1fr)]' : 'lg:grid-cols-2'}`}>
+                    <ProximaAcaoCard data={proximaAcao} bloqueado={isBloqueado} />
 
+                    {exibirSaudeFiscal && (
                     <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
                         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
                             <div>
@@ -268,39 +269,13 @@ export default function ClienteDashboard() {
                             ))}
                         </div>
                     </div>
+                    )}
+
+                    {!exibirSaudeFiscal && <MinhasNotasCard />}
                 </div>
             )}
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                <Link href={isBloqueado ? "/configuracoes/minha-conta" : "/emitir"} onClick={(e) => { if(isBloqueado) { e.preventDefault(); alert("Ação bloqueada! Verifique seu plano."); window.location.href="/configuracoes/minha-conta"; } }}>
-                    <div className={`tour-emitir-card group p-8 border rounded-2xl transition shadow-sm h-full flex flex-col justify-between relative overflow-hidden ${isBloqueado ? 'bg-gray-100 border-gray-300 cursor-not-allowed grayscale' : 'bg-blue-600 border-blue-600 hover:bg-blue-700 hover:shadow-md text-white cursor-pointer'}`}>
-                        <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition transform group-hover:scale-110">
-                            <svg width="120" height="120" viewBox="0 0 24 24" fill="currentColor"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
-                        </div>
-                        <div>
-                            <h2 className="text-2xl font-bold mb-2 flex items-center gap-2 drop-shadow-sm">
-                                {isBloqueado && <Lock size={24}/>} Emitir Nova Nota
-                            </h2>
-                            <p className={`${isBloqueado ? 'text-gray-500' : 'text-blue-100'} text-sm font-medium`}>Integração com Portal Nacional.</p>
-                        </div>
-                        <div className={`mt-6 flex items-center gap-2 font-bold text-sm w-fit px-4 py-2 rounded-full backdrop-blur-sm ${isBloqueado ? 'bg-gray-200 text-gray-500' : 'bg-white/20'}`}>
-                            {isBloqueado ? 'Bloqueado' : 'Começar Agora ➜'}
-                        </div>
-                    </div>
-                </Link>
-
-                <Link href="/cliente/notas"> 
-                    <div className="tour-minhas-notas group p-8 border border-slate-200 rounded-2xl bg-white hover:border-blue-300 hover:shadow-md cursor-pointer transition h-full flex flex-col justify-between">
-                        <div>
-                            <h2 className="text-2xl font-bold text-slate-800 mb-2">Minhas Notas</h2>
-                            <p className="text-slate-500 text-sm">Consulte histórico completo. (Visualização liberada)</p>
-                        </div>
-                        <div className="mt-6 text-blue-600 font-bold group-hover:underline">
-                            Ver todas as notas ➜
-                        </div>
-                    </div>
-                </Link>
-            </div>
+            {exibirSaudeFiscal && <MinhasNotasCard />}
 
             {/* Área de Atividade Recente */}
             <div className="bg-white p-6 md:p-8 border border-slate-200 rounded-2xl shadow-sm">
@@ -317,7 +292,7 @@ export default function ClienteDashboard() {
   );
 }
 
-function ProximaAcaoCard({ data }: { data: any }) {
+function ProximaAcaoCard({ data, bloqueado }: { data: any; bloqueado: boolean }) {
   const Icon = data.icon;
   const tones: Record<string, string> = {
     blue: 'bg-blue-600 text-white border-blue-600 shadow-blue-200',
@@ -345,11 +320,36 @@ function ProximaAcaoCard({ data }: { data: any }) {
         <p className="mt-4 text-sm leading-6 opacity-80">{data.description}</p>
       </div>
 
-      <Link href={data.href} className={`mt-6 inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-black transition w-full sm:w-fit ${buttonTones[data.tone] || buttonTones.blue}`}>
+      <Link
+        href={data.href}
+        onClick={(e) => {
+          if (bloqueado && data.href === '/emitir') {
+            e.preventDefault();
+            window.location.href = '/configuracoes/minha-conta';
+          }
+        }}
+        className={`mt-6 inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-black transition w-full sm:w-fit ${buttonTones[data.tone] || buttonTones.blue}`}
+      >
         {data.action}
         <ArrowRight size={17} />
       </Link>
     </div>
+  );
+}
+
+function MinhasNotasCard() {
+  return (
+    <Link href="/cliente/notas">
+      <div className="tour-minhas-notas group p-8 border border-slate-200 rounded-2xl bg-white hover:border-blue-300 hover:shadow-md cursor-pointer transition h-full flex flex-col justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-800 mb-2">Minhas Notas</h2>
+          <p className="text-slate-500 text-sm">Consulte histórico completo. (Visualização liberada)</p>
+        </div>
+        <div className="mt-6 text-blue-600 font-bold group-hover:underline">
+          Ver todas as notas ➜
+        </div>
+      </div>
+    </Link>
   );
 }
 

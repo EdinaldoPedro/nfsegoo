@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, Suspense } from "react";
-import { CheckCircle, ArrowRight, ArrowLeft, Building2, Calculator, FileCheck, Briefcase, Loader2, Home, UserPlus, AlertTriangle, Send, FileSearch, FileCode2, BadgeCheck, ServerCog } from "lucide-react";
+import { CheckCircle, ArrowRight, ArrowLeft, Building2, Calculator, FileCheck, Briefcase, Loader2, Home, UserPlus, AlertTriangle, Send, FileSearch, FileCode2, BadgeCheck, ServerCog, FileClock, Trash2 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useDialog } from "@/app/contexts/DialogContext";
 import Link from "next/link";
@@ -29,6 +29,17 @@ interface ClienteDB {
   moeda?: string;
 }
 
+interface NotaRascunho {
+  id: string;
+  motivo: string;
+  motivoTipo: string;
+  createdAt: string;
+  payload: {
+    nfData: any;
+    retencoes: any;
+  };
+}
+
 function EmitirNotaContent() {
   const router = useRouter();
   const searchParams = useSearchParams(); 
@@ -38,6 +49,9 @@ function EmitirNotaContent() {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [loadingRetry, setLoadingRetry] = useState(false);
+  const [rascunhos, setRascunhos] = useState<NotaRascunho[]>([]);
+  const [loadingRascunhos, setLoadingRascunhos] = useState(false);
+  const [activeRascunhoId, setActiveRascunhoId] = useState<string | null>(null);
   
   const [progressStatus, setProgressStatus] = useState("Iniciando...");
   const [progressPercent, setProgressPercent] = useState(0);
@@ -59,7 +73,9 @@ function EmitirNotaContent() {
     aliquota: "", 
     issRetido: false,
     inssRetido: false,
-    dataCompetencia: new Date().toLocaleDateString('en-CA') 
+    dataCompetencia: new Date().toLocaleDateString('en-CA'),
+    numeroDPS: "",
+    serieDPS: "",
   });
 
   // Estado das retenções agora guarda os números formatados como string (sem a trava do checkbox)
@@ -71,10 +87,100 @@ function EmitirNotaContent() {
       ir: { aliquota: '0.00', valor: '0.00' }
   });
 
+  const getAuthHeaders = () => {
+      const userId = localStorage.getItem('userId');
+      const contextId = localStorage.getItem('empresaContextId');
+      return {
+          'Content-Type': 'application/json',
+          'x-user-id': userId || '',
+          'x-empresa-id': contextId || ''
+      };
+  };
+
+  const carregarRascunhos = async () => {
+      const userId = localStorage.getItem('userId');
+      if (!userId) return;
+
+      setLoadingRascunhos(true);
+      try {
+          const res = await fetch('/api/notas/rascunhos', { headers: getAuthHeaders() });
+          const data = await res.json();
+          setRascunhos(Array.isArray(data.data) ? data.data : []);
+      } catch {
+          setRascunhos([]);
+      } finally {
+          setLoadingRascunhos(false);
+      }
+  };
+
+  const montarPayloadRascunho = () => ({
+      nfData,
+      retencoes,
+      savedStep: 3,
+  });
+
+  const salvarRascunhoFalha = async (respostaErro: any) => {
+      try {
+          const res = await fetch('/api/notas/rascunhos', {
+              method: 'POST',
+              headers: getAuthHeaders(),
+              body: JSON.stringify({
+                  motivo: respostaErro.userAction || respostaErro.error || 'Falha corrigivel na emissao.',
+                  motivoTipo: respostaErro.draftReasonType || 'RETORNO_CORRIGIVEL',
+                  payload: montarPayloadRascunho(),
+              })
+          });
+          if (!res.ok) return false;
+          await carregarRascunhos();
+          return true;
+      } catch {
+          return false;
+      }
+  };
+
+  const excluirRascunho = async (id: string, silencioso = false) => {
+      try {
+          const res = await fetch(`/api/notas/rascunhos?id=${id}`, {
+              method: 'DELETE',
+              headers: getAuthHeaders(),
+          });
+          if (!res.ok && !silencioso) {
+              const data = await res.json().catch(() => ({}));
+              throw new Error(data.error || 'Nao foi possivel excluir o rascunho.');
+          }
+          setRascunhos((atuais) => atuais.filter((item) => item.id !== id));
+          if (activeRascunhoId === id) setActiveRascunhoId(null);
+      } catch (error: any) {
+          if (!silencioso) dialog.showAlert({ type: 'danger', title: 'Falha', description: error.message });
+      }
+  };
+
+  const retomarRascunho = (rascunho: NotaRascunho) => {
+      if (!rascunho.payload?.nfData) return;
+      setNfData((prev) => ({ ...prev, ...rascunho.payload.nfData }));
+      if (rascunho.payload.retencoes) setRetencoes(rascunho.payload.retencoes);
+      setActiveRascunhoId(rascunho.id);
+      setStep(3);
+  };
+
   // === TRATAMENTO DE ERROS ===
   const tratarErroEmissao = async (respostaErro: any) => {
       if (respostaErro.userAction) {
           const actionText = respostaErro.userAction;
+          const rascunhoSalvo = respostaErro.draftEligible ? await salvarRascunhoFalha(respostaErro) : false;
+          const hintRascunho = rascunhoSalvo ? '\n\nSalvei um rascunho para voce retomar pela lateral desta tela.' : '';
+
+          if (rascunhoSalvo) {
+              if (respostaErro.draftReasonType === 'INSCRICAO_MUNICIPAL') {
+                  const irConfig = await dialog.showConfirm({ type: 'danger', title: 'Inscricao Municipal (I.M)', description: `${actionText}${hintRascunho}`, confirmText: 'Atualizar I.M Agora', cancelText: 'Ficar na revisao' });
+                  if (irConfig) router.push('/configuracoes');
+                  else setStep(3);
+                  return;
+              }
+              await dialog.showAlert({ type: 'warning', title: 'Rascunho salvo', description: `${actionText}${hintRascunho}` });
+              setStep(3);
+              return;
+          }
 
           if (actionText.includes("Certificado Digital") || actionText.includes("Cadastro incompleto")) {
               const irConfig = await dialog.showConfirm({ type: 'danger', title: 'Atenção ao Cadastro', description: actionText, confirmText: 'Ir para Configurações', cancelText: 'Mais tarde' });
@@ -307,6 +413,7 @@ function EmitirNotaContent() {
     const userId = localStorage.getItem('userId');
     const contextId = localStorage.getItem('empresaContextId');
     if(!userId) { router.push('/login'); return; }
+    carregarRascunhos();
 
     fetch('/api/perfil', { headers: { 'x-user-id': userId, 'x-empresa-id': contextId || '' } })
       .then(res => res.json())
@@ -509,6 +616,8 @@ function EmitirNotaContent() {
           aliquota: nfData.aliquota,
           issRetido: nfData.issRetido,
           dataCompetencia: nfData.dataCompetencia,
+          numeroDPS: nfData.numeroDPS || undefined,
+          serieDPS: nfData.serieDPS || undefined,
           retencoes: payloadRetencoes
         })
       });
@@ -516,6 +625,7 @@ function EmitirNotaContent() {
       const resposta = await res.json();
       
       if (res.ok) {
+        if (activeRascunhoId) await excluirRascunho(activeRascunhoId, true);
         if (resposta.isHomologation) {
             setProgressPercent(100);
             setProgressStatus("Validação concluída.");
@@ -586,7 +696,7 @@ function EmitirNotaContent() {
   ];
 
   return (
-    <div className="max-w-4xl mx-auto py-10 relative">
+    <div className="max-w-7xl mx-auto py-10 px-4 relative">
       {loading && (
         <div className="fixed inset-0 z-[9999] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-xl bg-white rounded-xl shadow-2xl border border-blue-100 overflow-hidden">
@@ -662,6 +772,64 @@ function EmitirNotaContent() {
           </div>
         ))}
       </div>
+
+      {step === 1 && (
+        <aside className="mb-6 bg-white border border-slate-200 rounded-xl shadow-sm p-5 lg:fixed lg:left-6 lg:top-44 lg:w-[290px] lg:max-h-[calc(100vh-190px)] lg:overflow-y-auto">
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-600">Rascunhos</p>
+              <h3 className="text-lg font-black text-slate-900">Notas pendentes</h3>
+            </div>
+            <div className="h-10 w-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+              <FileClock size={20} />
+            </div>
+          </div>
+
+          {loadingRascunhos ? (
+            <div className="flex items-center gap-2 text-sm font-bold text-slate-500">
+              <Loader2 className="animate-spin" size={16} /> Carregando...
+            </div>
+          ) : rascunhos.length === 0 ? (
+            <p className="rounded-lg bg-slate-50 border border-slate-100 p-3 text-sm text-slate-500">
+              Rascunhos aparecem aqui quando uma emissao falha por algo corrigivel.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {rascunhos.map((rascunho) => {
+                const draftData = rascunho.payload?.nfData || {};
+                const cliente = draftData.clienteNome || 'Tomador';
+                const valorDraft = Number(draftData.valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+                const ativo = activeRascunhoId === rascunho.id;
+
+                return (
+                  <div key={rascunho.id} className={`rounded-xl border p-3 transition ${ativo ? 'border-blue-300 bg-blue-50' : 'border-slate-200 bg-white'}`}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-black text-slate-800">{cliente}</p>
+                        <p className="text-xs font-bold text-slate-500 mt-0.5">{valorDraft}</p>
+                      </div>
+                      <button
+                        onClick={() => excluirRascunho(rascunho.id)}
+                        className="shrink-0 rounded-lg p-1.5 text-red-500 hover:bg-red-50"
+                        title="Excluir rascunho"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                    <p className="mt-2 line-clamp-2 text-xs text-slate-500 cursor-help" title={rascunho.motivo}>{rascunho.motivo}</p>
+                    <button
+                      onClick={() => retomarRascunho(rascunho)}
+                      className="mt-3 w-full rounded-lg bg-blue-600 px-3 py-2 text-xs font-black text-white hover:bg-blue-700"
+                    >
+                      Retomar na revisao
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </aside>
+      )}
 
       <div className="bg-white p-8 rounded-xl shadow-lg border border-slate-200">
         
@@ -865,7 +1033,7 @@ function EmitirNotaContent() {
                       />
                   </div>
               </div>
-              
+
               {/* === DESCRIÇÃO LADO A LADO === */}
               <div className="flex justify-between border-b border-slate-200 pb-3 gap-4">
                   <span className="text-slate-500 text-sm whitespace-nowrap">Descrição:</span>

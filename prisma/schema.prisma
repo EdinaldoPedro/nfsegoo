@@ -194,6 +194,20 @@ model Venda {
   empresa   Empresa      @relation("VendaPrestador", fields: [empresaId], references: [id])
 }
 
+model NotaRascunho {
+  id          String   @id @default(uuid())
+  userId      String
+  empresaId   String
+  clienteId   String?
+  motivo      String
+  motivoTipo  String
+  payloadJson String   @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId, empresaId, createdAt])
+}
+
 model UserCliente {
   id        String   @id @default(uuid())
   userId    String

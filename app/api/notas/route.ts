@@ -257,6 +257,8 @@ export async function POST(request: Request) {
     if (!resultado.sucesso) {
         let customUserAction = null;
         let apagarVenda = false; 
+        let draftEligible = false;
+        let draftReasonType = null;
         const errorStr = JSON.stringify(resultado.erros).toLowerCase();
 
         if (errorStr.includes('e999')) {
@@ -266,10 +268,14 @@ export async function POST(request: Request) {
         else if (errorStr.includes('inscrição municipal') || errorStr.includes('im ') || errorStr.includes('e0180') || errorStr.includes('e0183') || errorStr.includes('e0184')) {
             customUserAction = "Sua Inscrição Municipal está ausente ou incorreta. Por favor, acesse as Configurações da Empresa e atualize o número da sua I.M.";
             apagarVenda = true; 
+            draftEligible = true;
+            draftReasonType = 'INSCRICAO_MUNICIPAL';
         } 
         else if (errorStr.includes('já utilizado') || errorStr.includes('já existe') || errorStr.includes('duplicado') || errorStr.includes('e0171') || errorStr.includes('e0041')) {
             customUserAction = `O número de DPS ${dpsFinal} já foi utilizado. Por favor, altere o número do DPS para o próximo sequencial disponível.`;
             apagarVenda = true; 
+            draftEligible = true;
+            draftReasonType = 'DPS_DUPLICADO';
         }
 
         if (customUserAction && apagarVenda) {
@@ -287,7 +293,9 @@ export async function POST(request: Request) {
         return NextResponse.json({ 
             error: "Emissão falhou.", 
             details: resultado.erros,
-            userAction: customUserAction 
+            userAction: customUserAction,
+            draftEligible,
+            draftReasonType,
         }, { status: 400 });
     }
 

@@ -25,7 +25,10 @@ export async function GET(request: Request) {
     const where: any = {};
 
     if (search) {
-      where.nome = { contains: search };
+      where.OR = [
+        { nome: { contains: search } },
+        { uf: { contains: search.toUpperCase() } },
+      ];
     }
     if (regime) where.regime = regime;
     if (uf) where.uf = uf;
@@ -36,7 +39,7 @@ export async function GET(request: Request) {
       if (authError) return authError;
 
       const skip = (page - 1) * limit;
-      const [lista, total] = await prisma.$transaction([
+      const [lista, total, todosMunicipios] = await prisma.$transaction([
         prisma.municipioHomologado.findMany({
           where,
           skip,
@@ -44,15 +47,31 @@ export async function GET(request: Request) {
           orderBy: [{ uf: 'asc' }, { nome: 'asc' }],
         }),
         prisma.municipioHomologado.count({ where }),
+        prisma.municipioHomologado.findMany({
+          select: { uf: true, regime: true, status: true },
+          orderBy: [{ uf: 'asc' }, { nome: 'asc' }],
+        }),
       ]);
+
+      const ufs = Array.from(new Set(todosMunicipios.map((item) => item.uf).filter(Boolean))).sort();
+      const regimes = Array.from(new Set(todosMunicipios.map((item) => item.regime).filter(Boolean))).sort();
+      const statusCounts = todosMunicipios.reduce((acc: Record<string, number>, item) => {
+        const key = String(item.status);
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+      }, {});
 
       return NextResponse.json({
         data: lista,
         meta: {
           total,
+          totalGeral: todosMunicipios.length,
           page,
           limit,
           totalPages: Math.ceil(total / limit),
+          ufs,
+          regimes,
+          statusCounts,
         },
       });
     }
