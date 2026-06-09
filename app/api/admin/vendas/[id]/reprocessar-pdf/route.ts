@@ -81,8 +81,8 @@ export async function POST(request: Request, { params }: { params: { id: string 
       venda.empresa.senhaCertificado,
       venda.empresa.id,
       {
-        attempts: 3,
-        retryDelayMs: 1500,
+        attempts: 10,
+        retryDelayMs: 2000,
         requestTimeoutMs: 40000,
       },
     );

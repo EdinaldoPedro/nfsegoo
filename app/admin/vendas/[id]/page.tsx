@@ -152,6 +152,24 @@ function fieldValue(value: any) {
   return value || value === 0 ? String(value) : 'Não informado';
 }
 
+function logIndicaErroTemporario(log: any) {
+  const details = safeJson(log?.details) || log?.details || {};
+  const texto = `${log?.message || ''} ${typeof details === 'string' ? details : JSON.stringify(details)}`.toLowerCase();
+  return Boolean(details?.dpsPreservada) || [
+    '503',
+    '502',
+    '504',
+    'service unavailable',
+    'bad gateway',
+    'gateway timeout',
+    'econnreset',
+    'timeout',
+    'timed out',
+    'portal nacional indisponivel',
+    'portal nacional indisponível',
+  ].some((sinal) => texto.includes(sinal));
+}
+
 function statusStyle(status: string) {
   if (status === 'ERRO_EMISSAO') return 'bg-red-100 text-red-700 border-red-200';
   if (status === 'CONCLUIDA') return 'bg-emerald-100 text-emerald-700 border-emerald-200';
@@ -361,6 +379,7 @@ export default function DetalheVendaCompleto() {
   const [processing, setProcessing] = useState(false);
   const [inspecionando, setInspecionando] = useState(false);
   const [reprocessandoPdf, setReprocessandoPdf] = useState(false);
+  const [sincronizandoRetorno, setSincronizandoRetorno] = useState(false);
   const [inspecao, setInspecao] = useState<any>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>('resumo');
@@ -570,6 +589,40 @@ export default function DetalheVendaCompleto() {
     }
   };
 
+  const sincronizarRetorno = async () => {
+    const confirmar = await dialog.showConfirm({
+      type: 'info',
+      title: 'Sincronizar nota?',
+      description: 'A bancada vai consultar o Portal Nacional pela chave de acesso e atualizar numero, XML e status desta venda sem reenviar a nota.',
+      confirmText: 'Sincronizar',
+    });
+
+    if (!confirmar) return;
+
+    setSincronizandoRetorno(true);
+    try {
+      const res = await fetch(`/api/admin/vendas/${vendaId}/sincronizar-retorno`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Nao foi possivel sincronizar o retorno fiscal.');
+
+      await dialog.showAlert({
+        type: 'success',
+        title: 'Nota sincronizada',
+        description: data.message || 'Retorno fiscal atualizado com sucesso.',
+      });
+      fetchVenda(true);
+      setActiveTab('logs');
+    } catch (error: any) {
+      dialog.showAlert({ type: 'danger', title: 'Falha na sincronizacao', description: error.message });
+      fetchVenda(true);
+    } finally {
+      setSincronizandoRetorno(false);
+    }
+  };
+
   const xmlData = useMemo(() => {
     if (!venda) return { prettyPayload: '// Payload indisponível', xmlExibicao: '', xmlDownload: '' };
 
@@ -625,16 +678,24 @@ export default function DetalheVendaCompleto() {
 
   if (!venda) return <div className="p-8">Venda não encontrada.</div>;
 
-  const notaAtual = venda.notas?.[0];
+  const notasOrdenadas = venda.notas || [];
+  const notaAtual =
+    notasOrdenadas.find((nota: any) => ['AUTORIZADA', 'CANCELADA'].includes(nota.status) && nota.chaveAcesso) ||
+    notasOrdenadas.find((nota: any) => nota.chaveAcesso) ||
+    notasOrdenadas[0];
   const nomeTomador = venda.cliente?.nome || venda.cliente?.razaoSocial || 'Tomador não informado';
   const ultimaMensagemErro = retornoLogs[0]?.message;
+  const erroTemporarioPortal = retornoLogs.some(logIndicaErroTemporario);
   const integridadePdf = {
     chaveOk: Boolean(notaAtual?.chaveAcesso),
     xmlOk: Boolean(notaAtual?.xmlAutorizadoBase64 || notaAtual?.xmlBase64),
     pdfOk: Boolean(notaAtual?.pdfBase64),
     notaAutorizada: venda.status === 'CONCLUIDA' || venda.status === 'CANCELADA' || notaAtual?.status === 'AUTORIZADA' || notaAtual?.status === 'CANCELADA',
+    notaCancelada: venda.status === 'CANCELADA' || notaAtual?.status === 'CANCELADA',
+    eventoCancelamentoOk: Boolean(notaAtual?.xmlCancelamentoEventoBase64),
   };
   const podeReprocessarPdf = integridadePdf.notaAutorizada && integridadePdf.chaveOk && integridadePdf.xmlOk && !integridadePdf.pdfOk;
+  const podeSincronizarRetorno = integridadePdf.chaveOk;
 
   const tabs: Array<{ id: ActiveTab; label: string; icon: any; color: string }> = [
     { id: 'resumo', label: 'Resumo', icon: ClipboardList, color: 'blue' },
@@ -707,15 +768,21 @@ export default function DetalheVendaCompleto() {
                   </div>
                   <div>
                     <p className="text-[11px] font-black uppercase tracking-[0.18em] text-red-600">Falha na emissão</p>
-                    <h2 className="mt-1 text-lg font-black text-red-950">Retorno do Portal precisa de correção técnica</h2>
-                    <p className="mt-1 text-sm leading-relaxed text-red-800">{ultimaMensagemErro || 'A emissão falhou. Consulte Retornos, Validação, XML e Logs.'}</p>
+                    <h2 className="mt-1 text-lg font-black text-red-950">
+                      {erroTemporarioPortal ? 'Portal Nacional indisponível no momento' : 'Retorno do Portal precisa de correção técnica'}
+                    </h2>
+                    <p className="mt-1 text-sm leading-relaxed text-red-800">
+                      {erroTemporarioPortal
+                        ? 'A DPS foi preservada. Aguarde alguns minutos e tente reenviar sem alterar a numeração.'
+                        : ultimaMensagemErro || 'A emissão falhou. Consulte Retornos, Validação, XML e Logs.'}
+                    </p>
                   </div>
                 </div>
                 <button
                   onClick={startCorrection}
                   className="rounded-xl bg-red-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-red-700 inline-flex items-center justify-center gap-2"
                 >
-                  <RefreshCw size={16} /> Abrir correção
+                  <RefreshCw size={16} /> {erroTemporarioPortal ? 'Tentar reenviar' : 'Abrir correção'}
                 </button>
               </div>
             </section>
@@ -1112,7 +1179,20 @@ export default function DetalheVendaCompleto() {
             <div className="space-y-3">
               <InfoItem label="Chave de acesso" value={integridadePdf.chaveOk ? 'OK' : 'Pendente'} />
               <InfoItem label="XML oficial" value={integridadePdf.xmlOk ? 'OK' : 'Pendente'} />
-              <InfoItem label="PDF salvo" value={integridadePdf.pdfOk ? 'OK' : 'Ausente'} />
+              {integridadePdf.notaCancelada && (
+                <InfoItem label="Evento cancelamento" value={integridadePdf.eventoCancelamentoOk ? 'OK' : 'Pendente'} />
+              )}
+              <InfoItem label={integridadePdf.notaCancelada ? 'PDF cancelado' : 'PDF salvo'} value={integridadePdf.pdfOk ? 'OK' : 'Ausente'} />
+              {podeSincronizarRetorno && (
+                <button
+                  onClick={sincronizarRetorno}
+                  disabled={sincronizandoRetorno}
+                  className="w-full rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60 flex items-center justify-center gap-2"
+                >
+                  {sincronizandoRetorno ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                  {sincronizandoRetorno ? 'Sincronizando nota...' : 'Sincronizar nota'}
+                </button>
+              )}
               {podeReprocessarPdf ? (
                 <button
                   onClick={reprocessarPdf}

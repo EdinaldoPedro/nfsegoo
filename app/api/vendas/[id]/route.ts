@@ -18,7 +18,9 @@ export async function GET(request: Request, { params }: { params: { id: string }
       where: { id: params.id },
       include: { 
           cliente: true,
-          notas: true,
+          notas: {
+              orderBy: { createdAt: 'desc' },
+          },
           logs: {
               where: { action: 'EMISSAO_INICIADA' }, // <--- CORREÇÃO 1: Nome da Ação do Log
               orderBy: { createdAt: 'desc' },

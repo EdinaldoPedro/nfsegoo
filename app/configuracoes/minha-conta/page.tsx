@@ -1,8 +1,9 @@
 'use client';
 
+import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { User, Save, ArrowLeft, Mail, Phone, CreditCard, Settings, Monitor, X, RefreshCcw, Calendar, TrendingUp, Building2, Plus, KeyRound, Lock, CheckCircle, Loader2 } from 'lucide-react';
+import { User, Save, ArrowLeft, Mail, CreditCard, Settings, Monitor, X, Calendar, TrendingUp, Building2, Plus, KeyRound, Lock, CheckCircle, Loader2 } from 'lucide-react';
 import PlanSelector from '@/components/PlanSelector';
 import { useAppConfig } from '@/app/contexts/AppConfigContext';
 import AppHeader from '@/components/AppHeader';
@@ -20,6 +21,11 @@ export default function MinhaContaPage() {
   const [emailLoading, setEmailLoading] = useState(false);
   const [emailError, setEmailError] = useState('');
   const [emailForm, setEmailForm] = useState({ newEmail: '', password: '', code: '' });
+  const [passwordLoading, setPasswordLoading] = useState(false);
+  const [passwordError, setPasswordError] = useState('');
+  const [passwordSuccess, setPasswordSuccess] = useState('');
+  const [showPasswordForm, setShowPasswordForm] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
   
   // === ESTADOS PARA NOVA EMPRESA ===
   const [showAddPJ, setShowAddPJ] = useState(false);
@@ -195,6 +201,40 @@ export default function MinhaContaPage() {
       }
   };
 
+  const handleChangePassword = async () => {
+      setPasswordLoading(true);
+      setPasswordError('');
+      setPasswordSuccess('');
+
+      if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+          setPasswordError('A nova senha e a confirmacao nao coincidem.');
+          setPasswordLoading(false);
+          return;
+      }
+
+      try {
+          const res = await fetch('/api/auth/change-password', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(passwordForm)
+          });
+          const response = await res.json().catch(() => ({}));
+
+          if (!res.ok) {
+              setPasswordError(response.error || 'Nao foi possivel alterar a senha.');
+              return;
+          }
+
+          setPasswordSuccess(response.message || 'Senha alterada com sucesso.');
+          setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+          setTimeout(() => setPasswordSuccess(''), 4000);
+      } catch {
+          setPasswordError('Erro de conexao.');
+      } finally {
+          setPasswordLoading(false);
+      }
+  };
+
   const handleCreatePJ = async (e: React.FormEvent) => {
       e.preventDefault();
       setAddingPJ(true);
@@ -226,6 +266,8 @@ export default function MinhaContaPage() {
   // Lógica de limite de PJs
   const empresasExtrasUsadas = data.listaEmpresas.filter(e => !e.isPrimary).length;
   const limiteAtingido = empresasExtrasUsadas >= data.empresasAdicionais;
+  const senhaForte = passwordForm.newPassword.length >= 8 && /[A-Z]/.test(passwordForm.newPassword) && /[0-9]/.test(passwordForm.newPassword) && /[^A-Za-z0-9]/.test(passwordForm.newPassword);
+  const senhaPodeSalvar = Boolean(passwordForm.currentPassword && senhaForte && passwordForm.newPassword === passwordForm.confirmPassword);
 
   if (loading) return (
     <div className="saas-shell flex items-center justify-center">
@@ -383,7 +425,7 @@ export default function MinhaContaPage() {
          </div>
       )}
 
-      <div className="saas-container max-w-6xl">
+      <div className="saas-container max-w-7xl">
         <div className="hidden">
         <div className="flex justify-between items-center mb-8">
             <div className="flex items-center gap-4">
@@ -396,31 +438,50 @@ export default function MinhaContaPage() {
         </div>
 
         <form onSubmit={handleSalvar}>
-          <div className="grid grid-cols-1 lg:grid-cols-[340px_minmax(0,1fr)] gap-6">
-            <div className="space-y-6">
+          <div className="grid grid-cols-1 xl:grid-cols-[360px_minmax(0,1fr)] gap-6 items-start">
+            <div className="space-y-6 xl:sticky xl:top-6">
               
-              <div className="saas-card p-6 text-center dark:bg-slate-800 dark:border-slate-700">
-                <div className="w-24 h-24 bg-gradient-to-br from-blue-600 to-cyan-500 rounded-3xl flex items-center justify-center mx-auto mb-4 text-white text-3xl font-black shadow-lg shadow-blue-200">
-                   {data.nome.charAt(0)}
+              <div className="saas-card overflow-hidden dark:bg-slate-800 dark:border-slate-700">
+                <div className="bg-gradient-to-br from-blue-600 via-blue-700 to-slate-950 p-6 text-white">
+                  <div className="flex items-center gap-4">
+                    <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-3xl bg-white/15 text-3xl font-black ring-1 ring-white/20">
+                      {data.nome.charAt(0)}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-100">Conta</p>
+                      <h2 className="mt-1 truncate text-xl font-black">{data.nome}</h2>
+                      <p className="mt-1 text-sm text-blue-100">{data.perfil.cargo || 'Cliente'}</p>
+                    </div>
+                  </div>
                 </div>
-                <h2 className="font-black text-lg text-gray-800 dark:text-white">{data.nome}</h2>
-                <p className="text-sm text-gray-500 dark:text-gray-400">{data.perfil.cargo || 'Cliente'}</p>
-                <div className="mt-5 rounded-2xl bg-slate-50 p-3 text-left text-xs text-slate-500 ring-1 ring-slate-100">
-                  <p className="font-bold text-slate-700">Email</p>
-                  <p className="mt-1 truncate">{data.email}</p>
+                <div className="space-y-3 p-5">
+                  <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4 text-xs text-slate-500 ring-1 ring-slate-100 dark:bg-slate-900 dark:border-slate-700">
+                    <p className="font-black uppercase tracking-wider text-slate-400">Email principal</p>
+                    <p className="mt-1 truncate font-bold text-slate-800 dark:text-slate-100">{data.email}</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-2xl border border-slate-100 bg-white p-4 dark:bg-slate-900 dark:border-slate-700">
+                      <p className="text-xs font-black uppercase text-slate-400">CPF</p>
+                      <p className="mt-1 truncate text-sm font-bold text-slate-800 dark:text-slate-100">{data.cpf || '-'}</p>
+                    </div>
+                    <div className="rounded-2xl border border-slate-100 bg-white p-4 dark:bg-slate-900 dark:border-slate-700">
+                      <p className="text-xs font-black uppercase text-slate-400">Telefone</p>
+                      <p className="mt-1 truncate text-sm font-bold text-slate-800 dark:text-slate-100">{data.telefone || '-'}</p>
+                    </div>
+                  </div>
                 </div>
               </div>
 
               {/* CARD DE ASSINATURA */}
-              <div className="saas-card p-6 relative overflow-hidden dark:bg-slate-800 dark:border-slate-700 flex flex-col gap-4">
+              <div className="saas-card p-6 relative overflow-hidden dark:bg-slate-800 dark:border-slate-700 flex flex-col gap-5">
                 <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-blue-600 via-cyan-400 to-emerald-400"></div>
-                <div className="flex justify-between items-center">
-                    <h3 className="text-sm font-bold text-gray-400 uppercase flex items-center gap-2 dark:text-gray-500"><CreditCard size={14}/> Assinatura</h3>
+                <div className="flex justify-between items-start gap-4">
+                  <div>
+                    <h3 className="text-sm font-black text-gray-400 uppercase tracking-wider flex items-center gap-2 dark:text-gray-500"><CreditCard size={14}/> Assinatura</h3>
+                    <p className="mt-2 text-2xl font-black text-slate-800 dark:text-white">{p.nome || 'Plano não definido'}</p>
+                    <p className="text-xs font-black text-slate-400 uppercase tracking-widest">{data.planoCiclo}</p>
+                  </div>
                     <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase ${p.status === 'ATIVO' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{p.status}</span>
-                </div>
-                <div>
-                    <p className="text-2xl font-black text-slate-800 dark:text-white">{p.nome}</p>
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">{data.planoCiclo}</p>
                 </div>
                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 text-sm space-y-4 dark:bg-slate-900 dark:border-slate-700">
                     
@@ -463,13 +524,16 @@ export default function MinhaContaPage() {
               {/* === NOVO: CARD DE MÚLTIPLAS EMPRESAS === */}
               {data.empresasAdicionais > 0 && (
                   <div className="saas-card p-6 dark:bg-slate-800 dark:border-slate-700 flex flex-col gap-4">
-                      <div className="flex justify-between items-center">
-                          <h3 className="text-sm font-bold text-gray-400 uppercase flex items-center gap-2 dark:text-gray-500"><Building2 size={14}/> CNPJs Extras</h3>
+                      <div className="flex justify-between items-start gap-4">
+                          <div>
+                            <h3 className="text-sm font-black text-gray-400 uppercase tracking-wider flex items-center gap-2 dark:text-gray-500"><Building2 size={14}/> CNPJs extras</h3>
+                            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Empresas adicionais vinculadas ao plano.</p>
+                          </div>
+                          <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">{empresasExtrasUsadas}/{data.empresasAdicionais}</span>
                       </div>
-                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 dark:bg-slate-900 dark:border-slate-700">
-                          <div className="flex justify-between items-center mb-1">
-                              <span className="text-xs font-bold text-slate-500">Limites em Uso</span>
-                              <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{empresasExtrasUsadas} / {data.empresasAdicionais}</span>
+                      <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 dark:bg-slate-900 dark:border-slate-700">
+                          <div className="h-2 rounded-full bg-slate-200 dark:bg-slate-700">
+                            <div className="h-2 rounded-full bg-blue-600" style={{ width: `${Math.min(100, (empresasExtrasUsadas / Math.max(1, data.empresasAdicionais)) * 100)}%` }}></div>
                           </div>
                       </div>
                       <button 
@@ -486,8 +550,146 @@ export default function MinhaContaPage() {
 
             </div>
 
-            <div className="space-y-6">
-              <div className="saas-card p-8 dark:bg-slate-800 dark:border-slate-700">
+            <div className="grid grid-cols-1 gap-6">
+              <div className="saas-card order-2 p-6 dark:bg-slate-800 dark:border-slate-700">
+                <div className={`flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between ${showPasswordForm ? 'mb-6' : ''}`}>
+                    <h3 className="saas-section-title flex items-center gap-2 dark:text-white"><Lock size={20}/> Segurança da conta</h3>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">Atualize sua senha apenas quando necessário.</p>
+                    {!showPasswordForm && (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setPasswordError('');
+                                setPasswordSuccess('');
+                                setShowPasswordForm(true);
+                            }}
+                            className="saas-btn-secondary justify-center"
+                        >
+                            <KeyRound size={18}/>
+                            Alterar senha
+                        </button>
+                    )}
+                </div>
+
+                {false && !showPasswordForm && (
+                    <div className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-[1fr_1fr_auto] md:items-center">
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
+                            <p className="text-xs font-black uppercase tracking-wider text-slate-400">Senha</p>
+                            <p className="mt-1 text-sm font-bold text-slate-800 dark:text-slate-100">Protegida</p>
+                        </div>
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
+                            <p className="text-xs font-black uppercase tracking-wider text-slate-400">Recomendação</p>
+                            <p className="mt-1 text-sm font-bold text-slate-800 dark:text-slate-100">Use uma senha forte</p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setPasswordError('');
+                                setPasswordSuccess('');
+                                setShowPasswordForm(true);
+                            }}
+                            className="saas-btn-secondary justify-center"
+                        >
+                            <KeyRound size={18}/>
+                            Alterar senha
+                        </button>
+                    </div>
+                )}
+
+                {showPasswordForm && (
+                <>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Senha atual</label>
+                        <input
+                            type="password"
+                            className="saas-input dark:bg-slate-900 dark:border-slate-600 dark:text-white"
+                            value={passwordForm.currentPassword}
+                            onChange={e => setPasswordForm({...passwordForm, currentPassword: e.target.value})}
+                            autoComplete="current-password"
+                            placeholder="Senha atual"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Nova senha</label>
+                        <input
+                            type="password"
+                            className="saas-input dark:bg-slate-900 dark:border-slate-600 dark:text-white"
+                            value={passwordForm.newPassword}
+                            onChange={e => setPasswordForm({...passwordForm, newPassword: e.target.value})}
+                            autoComplete="new-password"
+                            placeholder="Nova senha"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Confirmar senha</label>
+                        <input
+                            type="password"
+                            className="saas-input dark:bg-slate-900 dark:border-slate-600 dark:text-white"
+                            value={passwordForm.confirmPassword}
+                            onChange={e => setPasswordForm({...passwordForm, confirmPassword: e.target.value})}
+                            autoComplete="new-password"
+                            placeholder="Repita a senha"
+                        />
+                    </div>
+                </div>
+
+                <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:bg-slate-900 dark:border-slate-700">
+                    <div className="flex flex-col gap-2 text-xs font-bold text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+                        <span className={passwordForm.newPassword.length >= 8 ? 'text-emerald-600' : ''}>8+ caracteres</span>
+                        <span className={/[A-Z]/.test(passwordForm.newPassword) ? 'text-emerald-600' : ''}>1 maiúscula</span>
+                        <span className={/[0-9]/.test(passwordForm.newPassword) ? 'text-emerald-600' : ''}>1 número</span>
+                        <span className={/[^A-Za-z0-9]/.test(passwordForm.newPassword) ? 'text-emerald-600' : ''}>1 especial</span>
+                    </div>
+                    {(passwordError || passwordSuccess) && (
+                        <p className={`text-sm font-bold ${passwordError ? 'text-red-600' : 'text-emerald-600'}`}>
+                            {passwordError || passwordSuccess}
+                        </p>
+                    )}
+                </div>
+
+                <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:justify-end">
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setShowPasswordForm(false);
+                            setPasswordError('');
+                            setPasswordSuccess('');
+                            setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+                        }}
+                        className="saas-btn-secondary justify-center"
+                    >
+                        Cancelar
+                    </button>
+                    <button
+                        type="button"
+                        onClick={handleChangePassword}
+                        disabled={passwordLoading || !senhaPodeSalvar}
+                        className="saas-btn-primary justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        {passwordLoading ? <Loader2 className="animate-spin" size={18}/> : <KeyRound size={18}/>}
+                        Confirmar alteração
+                    </button>
+                </div>
+                </>
+                )}
+              </div>
+
+              <div className="saas-card order-4 p-8 dark:bg-slate-800 dark:border-slate-700">
+                <h3 className="saas-section-title mb-4 flex items-center gap-2 dark:text-white"><CheckCircle size={20}/> Documentos e termos</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <Link href="/termos-de-uso" className="rounded-2xl border border-slate-200 bg-white p-4 text-sm font-bold text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-200">
+                        Termos de uso
+                        <p className="mt-1 text-xs font-medium text-slate-500">Condições de acesso, uso da plataforma e responsabilidades.</p>
+                    </Link>
+                    <Link href="/politica-de-privacidade" className="rounded-2xl border border-slate-200 bg-white p-4 text-sm font-bold text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-200">
+                        Política de privacidade
+                        <p className="mt-1 text-xs font-medium text-slate-500">Tratamento de dados pessoais, fiscais e certificados digitais.</p>
+                    </Link>
+                </div>
+              </div>
+
+              <div className="saas-card order-1 p-8 dark:bg-slate-800 dark:border-slate-700">
                 <h3 className="saas-section-title mb-6 flex items-center gap-2 dark:text-white"><User size={20}/> Dados pessoais</h3>
                 {/* ... Campos de dados pessoais (iguais aos que você já tinha) ... */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -523,7 +725,7 @@ export default function MinhaContaPage() {
                 </div>
               </div>
 
-              <div className="saas-card p-8 dark:bg-slate-800 dark:border-slate-700">
+              <div className="saas-card order-3 p-8 dark:bg-slate-800 dark:border-slate-700">
                 <h3 className="saas-section-title mb-6 flex items-center gap-2 dark:text-white"><Settings size={20}/> Preferências</h3>
                 <div className="space-y-4">
                     <div className="flex items-center justify-between p-4 border rounded-2xl cursor-pointer hover:bg-slate-50 transition dark:border-slate-600" onClick={() => toggleDarkMode(!darkMode)}>
@@ -547,9 +749,9 @@ export default function MinhaContaPage() {
                 </div>
               </div>
 
-              <div className="flex justify-between items-center pt-4">
-                <span className={`text-sm font-medium transition-opacity ${msg ? 'opacity-100' : 'opacity-0'} ${msg.toLowerCase().includes('erro') ? 'text-red-600' : 'text-green-600'}`}>{msg}</span>
-                <button type="submit" disabled={saving} className="saas-btn-primary disabled:opacity-70 dark:shadow-none">
+              <div className="order-5 sticky bottom-4 z-10 flex flex-col gap-3 rounded-3xl border border-slate-200 bg-white/95 p-4 shadow-xl shadow-slate-200/70 backdrop-blur md:flex-row md:items-center md:justify-between dark:border-slate-700 dark:bg-slate-800/95 dark:shadow-none">
+                <span className={`text-sm font-bold transition-opacity ${msg ? 'opacity-100' : 'opacity-70'} ${msg.toLowerCase().includes('erro') ? 'text-red-600' : 'text-slate-500 dark:text-slate-300'}`}>{msg || 'Altere os dados necessários e confirme para salvar sua conta.'}</span>
+                <button type="submit" disabled={saving} className="saas-btn-primary justify-center disabled:opacity-70 dark:shadow-none">
                   {saving ? 'Salvando...' : <><Save size={20} /> Salvar Alterações</>}
                 </button>
               </div>

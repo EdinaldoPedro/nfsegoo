@@ -61,7 +61,7 @@ export async function processarRetornoNota(notaId: string, empresaId: string, ve
                 nota.empresa.senhaCertificado!,
                 nota.empresa.id,
                 {
-                    attempts: 3,
+                    attempts: 5,
                     retryDelayMs: 1500,
                     requestTimeoutMs: 40000,
                 }
@@ -145,7 +145,7 @@ export async function processarCancelamentoNota(notaId: string, empresaId: strin
                 nota.empresa.senhaCertificado!,
                 nota.empresa.id,
                 {
-                    attempts: 3,
+                    attempts: 5,
                     retryDelayMs: 1500,
                     requestTimeoutMs: 40000,
                 }

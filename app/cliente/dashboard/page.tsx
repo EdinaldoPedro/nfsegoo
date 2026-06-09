@@ -271,11 +271,11 @@ export default function ClienteDashboard() {
                     </div>
                     )}
 
-                    {!exibirSaudeFiscal && <MinhasNotasCard />}
+                    {!exibirSaudeFiscal && <MinhasNotasCard variant="hero" />}
                 </div>
             )}
 
-            {exibirSaudeFiscal && <MinhasNotasCard />}
+            {exibirSaudeFiscal && <MinhasNotasCard variant="wide" />}
 
             {/* Área de Atividade Recente */}
             <div className="bg-white p-6 md:p-8 border border-slate-200 rounded-2xl shadow-sm">
@@ -337,10 +337,12 @@ function ProximaAcaoCard({ data, bloqueado }: { data: any; bloqueado: boolean })
   );
 }
 
-function MinhasNotasCard() {
+function MinhasNotasCard({ variant = 'wide' }: { variant?: 'hero' | 'wide' }) {
+  const sizing = variant === 'hero' ? 'min-h-[230px]' : 'min-h-[150px]';
+
   return (
-    <Link href="/cliente/notas">
-      <div className="tour-minhas-notas group p-8 border border-slate-200 rounded-2xl bg-white hover:border-blue-300 hover:shadow-md cursor-pointer transition h-full flex flex-col justify-between">
+    <Link href="/cliente/notas" className="block">
+      <div className={`tour-minhas-notas group p-8 border border-slate-200 rounded-2xl bg-white hover:border-blue-300 hover:shadow-md cursor-pointer transition flex flex-col justify-between ${sizing}`}>
         <div>
           <h2 className="text-2xl font-bold text-slate-800 mb-2">Minhas Notas</h2>
           <p className="text-slate-500 text-sm">Consulte histórico completo. (Visualização liberada)</p>

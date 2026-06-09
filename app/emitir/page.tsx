@@ -200,6 +200,12 @@ function EmitirNotaContent() {
               return;
           }
 
+          if (actionText.toLowerCase().includes('portal nacional indisponivel') || actionText.toLowerCase().includes('portal nacional indispon')) {
+              await dialog.showAlert({ type: 'warning', title: 'Portal instável', description: actionText });
+              router.push('/cliente/dashboard');
+              return;
+          }
+
           await dialog.showAlert({ type: 'warning', title: 'Atenção', description: actionText });
           router.push('/cliente/dashboard');
           return;

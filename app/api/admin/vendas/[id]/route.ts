@@ -31,7 +31,9 @@ export async function GET(request: Request, { params }: { params: { id: string }
       include: {
         empresa: true,
         cliente: true,
-        notas: true,
+        notas: {
+          orderBy: { createdAt: 'desc' },
+        },
         logs: {
           orderBy: { createdAt: 'desc' },
         },

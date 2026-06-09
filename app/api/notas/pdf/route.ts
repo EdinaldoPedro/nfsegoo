@@ -49,7 +49,7 @@ export async function POST(request: Request) {
         empresa.senhaCertificado,
         empresa.id,
         {
-          attempts: 3,
+          attempts: 5,
           retryDelayMs: 1500,
           requestTimeoutMs: 40000,
         },
