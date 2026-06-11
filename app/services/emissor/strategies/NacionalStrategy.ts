@@ -177,10 +177,15 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
                  else if (!protocoloRecuperado) protocoloRecuperado = chave;
             }
 
+            const xmlNormalizado = xmlRetorno.toLowerCase();
             let situacaoAtual: 'AUTORIZADA' | 'CANCELADA' = 'AUTORIZADA';
             if (xmlRetorno.includes('<cSit>2</cSit>') || 
                 xmlRetorno.includes('<cSit>3</cSit>') || 
-                xmlRetorno.includes('<e101101>')) {
+                xmlRetorno.includes('<e101101>') ||
+                xmlNormalizado.includes('<tpevento>101101</tpevento>') ||
+                xmlNormalizado.includes('cancelamento de nfs-e') ||
+                xmlNormalizado.includes('cancelamento nfse') ||
+                xmlNormalizado.includes('cancelada')) {
                 situacaoAtual = 'CANCELADA';
             }
 

@@ -41,6 +41,10 @@ function erroTransitavel(motivo?: string | null) {
   ].some((sinal) => texto.includes(sinal));
 }
 
+function temEventoCancelamentoLocal(nota: any) {
+  return Boolean(nota?.xmlCancelamentoEventoBase64) || nota?.status === 'CANCELADA';
+}
+
 async function consultarComRetry(strategy: any, chaveAcesso: string, empresa: any, attempts = 5) {
   let ultimaResposta: any = null;
 
@@ -147,56 +151,60 @@ export async function POST(request: Request, { params }: { params: { id: string 
 
     if (numeroRecuperado > 0) dadosNota.numero = numeroRecuperado;
     if (consultaRes.protocolo) dadosNota.protocolo = consultaRes.protocolo;
-    if (consultaRes.situacao === 'CANCELADA') {
+    const situacaoEfetiva = temEventoCancelamentoLocal(nota) ? 'CANCELADA' : consultaRes.situacao;
+
+    if (situacaoEfetiva === 'CANCELADA') {
       const xmlAutorizadoOriginal = nota.xmlAutorizadoBase64 || nota.xmlBase64;
       dadosNota.status = 'CANCELADA';
-      dadosNota.pdfBase64 = null;
 
       if (xmlAutorizadoOriginal) {
         dadosNota.xmlAutorizadoBase64 = xmlAutorizadoOriginal;
       }
 
-      if (consultaRes.xmlDistribuicao) {
+      if (consultaRes.situacao === 'CANCELADA' && consultaRes.xmlDistribuicao) {
         dadosNota.xmlBase64 = consultaRes.xmlDistribuicao;
         dadosNota.xmlCancelamentoEventoBase64 = consultaRes.xmlDistribuicao;
       }
 
-      try {
-        const downloader = new NfsePortalDownloader();
-        const pdfBuffer = await downloader.downloadPdfOficialComRetry(
-          nota.chaveAcesso,
-          venda.empresa.certificadoA1,
-          venda.empresa.senhaCertificado,
-          venda.empresa.id,
-          {
-            attempts: 5,
-            retryDelayMs: 1500,
-            requestTimeoutMs: 40000,
-          },
-        );
+      if (consultaRes.situacao === 'CANCELADA' || !nota.pdfBase64) {
+        dadosNota.pdfBase64 = null;
+        try {
+          const downloader = new NfsePortalDownloader();
+          const pdfBuffer = await downloader.downloadPdfOficialComRetry(
+            nota.chaveAcesso,
+            venda.empresa.certificadoA1,
+            venda.empresa.senhaCertificado,
+            venda.empresa.id,
+            {
+              attempts: 5,
+              retryDelayMs: 1500,
+              requestTimeoutMs: 40000,
+            },
+          );
 
-        dadosNota.pdfBase64 = zlib.gzipSync(pdfBuffer).toString('base64');
-        pdfAtualizado = true;
-      } catch (error: any) {
-        pdfErro = error.message || 'Nao foi possivel atualizar o PDF cancelado.';
-        await createLog({
-          level: 'ALERTA',
-          action: 'SYNC_CANCELAMENTO_EXTERNO_PDF_FALHA',
-          message: 'Cancelamento externo detectado, mas o PDF cancelado nao foi baixado agora.',
-          details: {
-            notaId: nota.id,
-            chaveAcesso: nota.chaveAcesso,
-            erro: pdfErro,
-          },
-          empresaId: venda.empresaId,
-          vendaId: venda.id,
-        });
+          dadosNota.pdfBase64 = zlib.gzipSync(pdfBuffer).toString('base64');
+          pdfAtualizado = true;
+        } catch (error: any) {
+          pdfErro = error.message || 'Nao foi possivel atualizar o PDF cancelado.';
+          await createLog({
+            level: 'ALERTA',
+            action: 'SYNC_CANCELAMENTO_EXTERNO_PDF_FALHA',
+            message: 'Cancelamento externo detectado, mas o PDF cancelado nao foi baixado agora.',
+            details: {
+              notaId: nota.id,
+              chaveAcesso: nota.chaveAcesso,
+              erro: pdfErro,
+            },
+            empresaId: venda.empresaId,
+            vendaId: venda.id,
+          });
+        }
       }
     } else if (consultaRes.xmlDistribuicao) {
       dadosNota.xmlBase64 = consultaRes.xmlDistribuicao;
       dadosNota.xmlAutorizadoBase64 = consultaRes.xmlDistribuicao;
     }
-    if (consultaRes.situacao === 'AUTORIZADA') dadosNota.status = 'AUTORIZADA';
+    if (situacaoEfetiva === 'AUTORIZADA') dadosNota.status = 'AUTORIZADA';
 
     if (Object.keys(dadosNota).length > 0) {
       await prisma.notaFiscal.update({
@@ -206,9 +214,9 @@ export async function POST(request: Request, { params }: { params: { id: string 
     }
 
     const statusVenda =
-      consultaRes.situacao === 'CANCELADA'
+      situacaoEfetiva === 'CANCELADA'
         ? 'CANCELADA'
-        : consultaRes.situacao === 'AUTORIZADA'
+        : situacaoEfetiva === 'AUTORIZADA'
           ? 'CONCLUIDA'
           : venda.status;
 
@@ -225,9 +233,11 @@ export async function POST(request: Request, { params }: { params: { id: string 
         notaId: nota.id,
         numeroAnterior: nota.numero,
         numeroRecuperado: dadosNota.numero || nota.numero,
-        situacao: consultaRes.situacao,
+        situacao: situacaoEfetiva,
+        situacaoPortal: consultaRes.situacao,
+        cancelamentoLocalPreservado: situacaoEfetiva === 'CANCELADA' && consultaRes.situacao === 'AUTORIZADA',
         xmlAtualizado: Boolean(consultaRes.xmlDistribuicao),
-        eventoCancelamentoAtualizado: consultaRes.situacao === 'CANCELADA' && Boolean(consultaRes.xmlDistribuicao),
+        eventoCancelamentoAtualizado: situacaoEfetiva === 'CANCELADA' && Boolean(consultaRes.xmlDistribuicao),
         pdfAtualizado,
         pdfErro,
         tentativas,
@@ -241,9 +251,10 @@ export async function POST(request: Request, { params }: { params: { id: string 
       message: 'Retorno fiscal sincronizado com sucesso.',
       notaId: nota.id,
       numero: dadosNota.numero || nota.numero,
-      situacao: consultaRes.situacao,
+      situacao: situacaoEfetiva,
+      situacaoPortal: consultaRes.situacao,
       xmlAtualizado: Boolean(consultaRes.xmlDistribuicao),
-      eventoCancelamentoAtualizado: consultaRes.situacao === 'CANCELADA' && Boolean(consultaRes.xmlDistribuicao),
+      eventoCancelamentoAtualizado: situacaoEfetiva === 'CANCELADA' && Boolean(consultaRes.xmlDistribuicao),
       pdfAtualizado,
       pdfErro,
       tentativas,

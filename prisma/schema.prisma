@@ -208,6 +208,40 @@ model NotaRascunho {
   @@index([userId, empresaId, createdAt])
 }
 
+model EmissaoJob {
+  id                    String    @id @default(uuid())
+  empresaId             String
+  clienteId             String
+  vendaId               String?
+  actorUserId           String
+  billingUserId         String?
+  payloadJson           String    @db.Text
+  status                String    @default("PENDENTE")
+  statusMessage         String?
+  attempts              Int       @default(0)
+  maxAttempts           Int       @default(5)
+  partitionKey          Int       @default(0)
+  idempotencyKey        String
+  reservedPlanHistoryId String?
+  reservedDpsNumero     Int?
+  serieDPS              String?
+  lockedAt              DateTime?
+  lockedBy              String?
+  nextAttemptAt         DateTime?
+  startedAt             DateTime?
+  finishedAt            DateTime?
+  lastError             String?   @db.Text
+  resultNotaId          String?
+  source                String    @default("WEB")
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@unique([empresaId, idempotencyKey])
+  @@index([empresaId, status, createdAt])
+  @@index([partitionKey, status, nextAttemptAt])
+  @@index([vendaId])
+}
+
 model UserCliente {
   id        String   @id @default(uuid())
   userId    String

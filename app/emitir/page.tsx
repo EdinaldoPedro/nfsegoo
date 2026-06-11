@@ -585,6 +585,46 @@ function EmitirNotaContent() {
       throw new Error('A nota foi autorizada, mas os arquivos ainda não ficaram disponíveis. Verifique novamente em instantes.');
   };
 
+  const aguardarJobEmissao = async (jobId: string, headers: HeadersInit) => {
+      const tentativas = 120;
+
+      for (let tentativa = 1; tentativa <= tentativas; tentativa++) {
+          const jobRes = await fetch(`/api/notas/jobs/${jobId}`, { headers });
+          const job = await jobRes.json();
+
+          if (!jobRes.ok) {
+              throw new Error(job.error || 'Nao foi possivel acompanhar a fila de emissao.');
+          }
+
+          if (job.status === 'PENDENTE') {
+              setProgressPercent(Math.min(45, 25 + tentativa));
+              setProgressStatus("Nota na fila de emissao...");
+              setProgressDetail(job.statusMessage || "Aguardando uma janela segura para transmitir esta empresa.");
+          } else if (job.status === 'PROCESSANDO') {
+              setProgressPercent(Math.min(62, 42 + tentativa));
+              setProgressStatus("Transmitindo para o Portal Nacional...");
+              setProgressDetail(job.statusMessage || "A DPS esta sendo assinada e enviada ao ambiente nacional.");
+          } else if (job.status === 'ERRO_TEMPORARIO') {
+              setProgressPercent(55);
+              setProgressStatus("Portal Nacional instavel...");
+              setProgressDetail(job.statusMessage || "Vamos tentar novamente automaticamente sem trocar a DPS.");
+          } else if (job.status === 'AUTORIZADA') {
+              setProgressPercent(64);
+              setProgressStatus(job.isHomologation ? "Validacao concluida." : "Autorizacao recebida.");
+              setProgressDetail(job.statusMessage || "A nota foi autorizada e agora sera sincronizada.");
+              return job;
+          } else if (job.status === 'ERRO_FINAL') {
+              const erro: any = new Error(job.userAction || job.error || job.statusMessage || 'A emissao falhou.');
+              erro.respostaEmissao = job;
+              throw erro;
+          }
+
+          await sleep(2000);
+      }
+
+      throw new Error('A emissao entrou na fila, mas ainda nao concluiu. Verifique suas notas novamente em instantes.');
+  };
+
   const handleEmitir = async () => {
     if (!nfData.codigoCnae) { dialog.showAlert("Selecione uma Atividade (CNAE)."); return; }
     
@@ -609,9 +649,13 @@ function EmitirNotaContent() {
       setProgressStatus("Transmitindo para o Portal Nacional...");
       setProgressDetail("Enviando a DPS assinada e aguardando autorização.");
 
+      const idempotencyKey = retryId
+        ? `retry-${retryId}-${Date.now()}`
+        : (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+
       const res = await fetch('/api/notas', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '', 'x-empresa-id': contextId || '' },
+        headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '', 'x-empresa-id': contextId || '', 'x-idempotency-key': idempotencyKey },
         body: JSON.stringify({
           vendaId: retryId || null, 
           clienteId: nfData.clienteId,
@@ -632,7 +676,37 @@ function EmitirNotaContent() {
       
       if (res.ok) {
         if (activeRascunhoId) await excluirRascunho(activeRascunhoId, true);
-        if (resposta.isHomologation) {
+        if (resposta.emissaoJobId) {
+            const jobFinal = await aguardarJobEmissao(resposta.emissaoJobId, {
+                'x-user-id': userId || '',
+                'x-empresa-id': contextId || ''
+            });
+
+            if (jobFinal.isHomologation) {
+                setProgressPercent(100);
+                setProgressStatus("Validacao concluida.");
+                setProgressDetail("A configuracao foi aceita no ambiente de homologacao.");
+                const irConfig = await dialog.showConfirm({ type: 'success', title: 'Tudo certo em Homologacao!', description: 'As configuracoes da sua nota estao perfeitas. Mude para PRODUCAO nas configuracoes.', confirmText: 'Mudar para Producao', cancelText: 'Voltar ao Inicio' });
+                if (irConfig) router.push('/configuracoes');
+                else router.push('/cliente/dashboard');
+                return;
+            }
+
+            if (!jobFinal.vendaId) {
+                throw new Error('Nota autorizada, mas a venda nao foi localizada para sincronizacao.');
+            }
+
+            setProgressPercent(68);
+            setProgressStatus("Autorizacao recebida.");
+            setProgressDetail("Agora vamos finalizar a sincronizacao antes de liberar a tela.");
+            await aguardarConclusaoDaNota(jobFinal.vendaId, {
+                'x-user-id': userId || '',
+                'x-empresa-id': contextId || ''
+            });
+            await sleep(500);
+            await dialog.showAlert({ type: 'success', title: 'Sucesso Total!', description: 'Nota emitida, autorizada e disponivel para download.' });
+            router.push('/cliente/dashboard');
+        } else if (resposta.isHomologation) {
             setProgressPercent(100);
             setProgressStatus("Validação concluída.");
             setProgressDetail("A configuração foi aceita no ambiente de homologação.");
@@ -655,6 +729,10 @@ function EmitirNotaContent() {
         await tratarErroEmissao(resposta);
       }
     } catch (error: any) { 
+        if (error?.respostaEmissao) {
+            await tratarErroEmissao(error.respostaEmissao);
+            return;
+        }
         await dialog.showAlert({ type: 'danger', title: 'Processamento interrompido', description: error?.message || "Erro de conexão. Verifique sua internet." }); 
         router.push('/cliente/dashboard');
     } 

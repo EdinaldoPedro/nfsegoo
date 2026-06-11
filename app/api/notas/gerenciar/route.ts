@@ -28,6 +28,10 @@ function erroTransitavel(motivo?: string | null) {
   ].some((sinal) => texto.includes(sinal));
 }
 
+function temEventoCancelamentoLocal(nota: any) {
+  return Boolean(nota?.xmlCancelamentoEventoBase64) || nota?.status === 'CANCELADA';
+}
+
 async function executarComRetry<T extends { sucesso: boolean; motivo?: string }>(
   fn: () => Promise<T>,
   attempts = 5,
@@ -93,6 +97,18 @@ export async function POST(request: Request) {
 
       if (!notaAtiva || !notaAtiva.chaveAcesso) {
         return NextResponse.json({ error: 'NÃ£o hÃ¡ nota autorizada vÃ¡lida para processar.' }, { status: 400 });
+      }
+
+      if (temEventoCancelamentoLocal(notaAtiva)) {
+        await prisma.notaFiscal.update({
+          where: { id: notaAtiva.id },
+          data: { status: 'CANCELADA' },
+        });
+        await prisma.venda.update({ where: { id: vendaId }, data: { status: 'CANCELADA' } });
+        if (!notaAtiva.pdfBase64) {
+          await processarCancelamentoNota(notaAtiva.id, venda.empresaId, venda.id);
+        }
+        return NextResponse.json({ success: true, message: 'Nota ja estava cancelada. Status sincronizado.' });
       }
 
       const chaveAcesso = notaAtiva.chaveAcesso;
