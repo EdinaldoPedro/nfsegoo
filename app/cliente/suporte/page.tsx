@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Plus, MessageSquare, Clock, CheckCircle, UserCheck, Check, X, AlertTriangle, ArrowLeft, Search, Filter } from 'lucide-react';
+import { Plus, MessageSquare, Clock, CheckCircle, UserCheck, Check, X, AlertTriangle, ArrowLeft, Search, Filter, BadgeHelp, ArrowRight } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -148,6 +148,28 @@ export default function MeusChamados() {
         </div>
 
         {/* ÁREA DE SOLICITAÇÕES */}
+        <div className="rounded-xl border border-blue-100 bg-blue-50 p-5 shadow-sm">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div className="flex items-start gap-4">
+                    <div className="rounded-2xl bg-white p-3 text-blue-600 shadow-sm">
+                        <BadgeHelp size={24} />
+                    </div>
+                    <div>
+                        <h2 className="text-lg font-black text-slate-800">Antes de abrir chamado</h2>
+                        <p className="mt-1 text-sm leading-6 text-slate-600">
+                            Consulte os guias rápidos sobre emissão, certificado, DPS, PDF/XML e cancelamento.
+                        </p>
+                    </div>
+                </div>
+                <Link
+                    href="/cliente/ajuda"
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-black text-blue-700 shadow-sm ring-1 ring-blue-100 transition hover:bg-blue-600 hover:text-white"
+                >
+                    Abrir Central de Ajuda <ArrowRight size={16} />
+                </Link>
+            </div>
+        </div>
+
         {solicitacoes.length > 0 && (
             <div className="bg-white border-l-4 border-orange-500 rounded-xl shadow-sm p-6 animate-in fade-in slide-in-from-top-4">
                 <div className="flex items-start gap-4 mb-4">

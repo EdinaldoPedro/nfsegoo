@@ -18,8 +18,10 @@ import {
   FileCheck,
   Power
 } from 'lucide-react';
-import { checkIsStaff, ROLE_LABELS } from '@/app/utils/permissions';
+import { ROLE_LABELS, STAFF_ROLES } from '@/app/utils/permissions';
 import { useDialog } from '@/app/contexts/DialogContext';
+
+const MANAGED_COLLAB_ROLES = [...STAFF_ROLES, 'CONTADOR'];
 
 export default function GestaoColaboradores() {
   const dialog = useDialog();
@@ -50,8 +52,8 @@ export default function GestaoColaboradores() {
     .then(r => r.json())
     .then(data => {
         if (Array.isArray(data)) {
-            setColabs(data.filter((u: any) => checkIsStaff(u.role)));
-            setCandidatos(data.filter((u: any) => !checkIsStaff(u.role)));
+            setColabs(data.filter((u: any) => MANAGED_COLLAB_ROLES.includes(u.role)));
+            setCandidatos(data.filter((u: any) => !MANAGED_COLLAB_ROLES.includes(u.role)));
         }
     });
   };

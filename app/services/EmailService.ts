@@ -19,7 +19,6 @@ export class EmailService {
             user: config.smtpUser || '',
             pass: smtpPass,
           },
-          tls: { rejectUnauthorized: false },
         }),
         remetente: config.emailRemetente || config.smtpUser || 'nao-responda@seusistema.com.br',
       };
@@ -110,5 +109,62 @@ export class EmailService {
                 <p style="font-size: 12px; color: #666;">Se nÃ£o foi vocÃª, altere sua senha imediatamente.</p>
             </div>
         `;
+  }
+
+  getTemplateContratacaoManual(params: {
+    nome: string;
+    titulo: string;
+    mensagem: string;
+    pedidoId?: string;
+    ticketProtocolo?: number | string | null;
+    plano?: string | null;
+    valor?: string | null;
+    link?: string;
+    motivo?: string | null;
+  }) {
+    const rows = [
+      params.pedidoId ? `<p><strong>Pedido:</strong> ${params.pedidoId.slice(0, 8)}</p>` : '',
+      params.ticketProtocolo ? `<p><strong>Ticket:</strong> #${params.ticketProtocolo}</p>` : '',
+      params.plano ? `<p><strong>Plano:</strong> ${params.plano}</p>` : '',
+      params.valor ? `<p><strong>Valor estimado:</strong> ${params.valor}</p>` : '',
+      params.motivo ? `<p><strong>Observacao:</strong> ${params.motivo}</p>` : '',
+    ].filter(Boolean).join('');
+
+    return `
+      <div style="font-family: Arial, sans-serif; color: #1e293b; max-width: 620px; margin: auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 14px;">
+        <h2 style="color:#2563eb;margin:0 0 10px;">NFSeGoo</h2>
+        <h3 style="margin:0 0 16px;color:#0f172a;">${params.titulo}</h3>
+        <p>Ola, <strong>${params.nome}</strong>.</p>
+        <p style="line-height:1.6;">${params.mensagem}</p>
+        ${rows ? `<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px;margin:18px 0;">${rows}</div>` : ''}
+        ${params.link ? `<div style="text-align:center;margin:24px 0;"><a href="${params.link}" style="background:#2563eb;color:white;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:bold;display:inline-block;">Abrir no NFSeGoo</a></div>` : ''}
+        <p style="font-size:12px;color:#64748b;margin-top:24px;">Este e-mail e automatico. Para enviar documentos ou responder a equipe, use o suporte dentro da plataforma.</p>
+      </div>
+    `;
+  }
+
+  getTemplateRespostaSuporte(params: {
+    nome: string;
+    protocolo: number | string;
+    assunto: string;
+    trecho: string;
+    link?: string;
+    remetente?: string;
+  }) {
+    return `
+      <div style="font-family: Arial, sans-serif; color: #1e293b; max-width: 620px; margin: auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 14px;">
+        <h2 style="color:#2563eb;margin:0 0 10px;">NFSeGoo</h2>
+        <h3 style="margin:0 0 16px;color:#0f172a;">Nova resposta no suporte</h3>
+        <p>Ola, <strong>${params.nome}</strong>.</p>
+        <p>Ha uma nova resposta no ticket <strong>#${params.protocolo}</strong>.</p>
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px;margin:18px 0;">
+          <p><strong>Assunto:</strong> ${params.assunto}</p>
+          ${params.remetente ? `<p><strong>Respondido por:</strong> ${params.remetente}</p>` : ''}
+          <p style="line-height:1.6;"><strong>Trecho:</strong> ${params.trecho}</p>
+        </div>
+        ${params.link ? `<div style="text-align:center;margin:24px 0;"><a href="${params.link}" style="background:#2563eb;color:white;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:bold;display:inline-block;">Abrir ticket</a></div>` : ''}
+        <p style="font-size:12px;color:#64748b;margin-top:24px;">Para proteger seus dados, detalhes sensiveis ficam disponiveis apenas dentro da plataforma.</p>
+      </div>
+    `;
   }
 }

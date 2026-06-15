@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, LifeBuoy, ShieldAlert } from 'lucide-react';
-import AppTour from '@/components/AppTour';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,8 +37,6 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
 
   return (
     <div className={`min-h-screen ${isSupport ? 'bg-amber-50' : ''}`}>
-      <AppTour />
-
       {isSupport && (
         <div className="sticky top-0 z-50 border-b border-amber-200 bg-amber-50/95 px-4 py-2 shadow-sm backdrop-blur md:px-8">
           <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-4">

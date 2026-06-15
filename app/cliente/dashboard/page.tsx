@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { ArrowRight, CalendarDays, CheckCircle2, Clock, FileText, Lock, MapPin, Server, Settings, ShieldCheck } from 'lucide-react';
+import { ArrowRight, Bell, CalendarDays, CheckCircle2, Clock, FileText, Info, Lock, MapPin, Megaphone, Server, Settings, ShieldCheck, TriangleAlert, XCircle } from 'lucide-react';
 import AppHeader from '@/components/AppHeader';
 import Sidebar from '@/components/Sidebar';
 import ListaVendas from '@/components/ListaVendas';
@@ -13,6 +13,8 @@ export default function ClienteDashboard() {
   const [planoDetalhes, setPlanoDetalhes] = useState<any>(null);
   const [perfilEmpresa, setPerfilEmpresa] = useState<any>(null);
   const [perfilCarregado, setPerfilCarregado] = useState(false);
+  const [comunicadosSistema, setComunicadosSistema] = useState<any[]>([]);
+  const [pedidoContratacao, setPedidoContratacao] = useState<any>(null);
 
   useEffect(() => {
     const userId = localStorage.getItem('userId');
@@ -43,6 +45,28 @@ export default function ClienteDashboard() {
         })
         .catch(console.error)
         .finally(() => setPerfilCarregado(true));
+
+        fetch('/api/avisos', {
+            headers: {
+                'x-user-id': userId,
+                'x-empresa-id': contextId || ''
+            },
+            cache: 'no-store'
+        })
+        .then(res => res.ok ? res.json() : [])
+        .then(data => setComunicadosSistema(Array.isArray(data) ? data : []))
+        .catch(() => setComunicadosSistema([]));
+
+        fetch('/api/checkout', {
+            headers: {
+                'x-user-id': userId,
+                'x-empresa-id': contextId || ''
+            },
+            cache: 'no-store'
+        })
+        .then(res => res.ok ? res.json() : null)
+        .then(data => setPedidoContratacao(data?.pedido || null))
+        .catch(() => setPedidoContratacao(null));
     }
   }, []);
   
@@ -148,16 +172,6 @@ export default function ClienteDashboard() {
         icon: ShieldCheck,
       };
     }
-    if (certificadoVencendo) {
-      return {
-        title: 'Certificado perto do vencimento',
-        description: `Seu certificado vence em ${diasCertificado} dias. Antecipe a renovação para evitar bloqueios.`,
-        href: '/configuracoes',
-        action: 'Ver certificado',
-        tone: 'amber',
-        icon: CalendarDays,
-      };
-    }
     return {
       title: 'Você já pode emitir',
       description: 'Cadastro, IBGE e certificado estão prontos para a emissão de NFS-e.',
@@ -170,8 +184,22 @@ export default function ClienteDashboard() {
 
   const exibirSaudeFiscal = perfilCarregado && (
     isBloqueado ||
-    checklistFiscal.some((item) => !item.ok || item.warning)
+    checklistFiscal.some((item) => !item.ok)
   );
+
+  const avisosDashboard = [
+    ...comunicadosSistema,
+    ...(certificadoVencendo
+      ? [{
+          title: 'Certificado perto do vencimento',
+          description: `Seu certificado vence em ${diasCertificado} dias. Antecipe a renovação para evitar bloqueios.`,
+          href: '/configuracoes',
+          action: 'Ver certificado',
+          tone: 'amber',
+          icon: CalendarDays,
+        }]
+      : []),
+  ];
 
   return (
     <div className="saas-shell">
@@ -201,8 +229,11 @@ export default function ClienteDashboard() {
         
         {/* === VITRINE (MARGEM ESQUERDA) === */}
         <div className="w-full xl:w-[320px] shrink-0">
-            <div className="xl:sticky xl:top-32 h-[450px]">
+            <div className="xl:sticky xl:top-32 space-y-6">
+              <div className="h-[450px]">
                 <Vitrine />
+              </div>
+              {perfilCarregado && <CentralAvisos avisos={avisosDashboard} />}
             </div>
         </div>
 
@@ -247,6 +278,9 @@ export default function ClienteDashboard() {
             )}
             
             {/* Orientacao fiscal e chamada principal */}
+            {pedidoContratacao && <PedidoContratacaoBanner pedido={pedidoContratacao} />}
+
+            {/* Orientacao fiscal e chamada principal */}
             {perfilCarregado && (
                 <div className={`grid grid-cols-1 gap-6 ${exibirSaudeFiscal ? '2xl:grid-cols-[minmax(320px,0.9fr)_minmax(520px,1.1fr)]' : 'lg:grid-cols-2'}`}>
                     <ProximaAcaoCard data={proximaAcao} bloqueado={isBloqueado} />
@@ -255,8 +289,8 @@ export default function ClienteDashboard() {
                     <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
                         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
                             <div>
-                                <h2 className="text-xl font-black text-slate-800">Saúde fiscal da empresa</h2>
-                                <p className="text-sm text-slate-500 mt-1">Checklist dos pontos críticos para emissão.</p>
+                                <h2 className="text-xl font-black text-slate-800">Prontidão para emissão</h2>
+                                <p className="text-sm text-slate-500 mt-1">Itens que liberam a transmissão da NFS-e.</p>
                             </div>
                             <span className="text-xs font-black text-slate-500 bg-slate-100 px-3 py-1.5 rounded-full">
                                 {checklistFiscal.filter((item) => item.ok).length}/{checklistFiscal.length} prontos
@@ -289,6 +323,144 @@ export default function ClienteDashboard() {
         </div>
       </div>
     </div>
+  );
+}
+
+function PedidoContratacaoBanner({ pedido }: { pedido: any }) {
+  const ticketId = pedido.detalhes?.ticketId;
+  const precisaComprovante = pedido.status === 'AGUARDANDO_COMPROVANTE';
+
+  return (
+    <section className="rounded-2xl border border-blue-200 bg-blue-50 p-5 shadow-sm">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <p className="text-xs font-black uppercase tracking-[0.16em] text-blue-700">Contratacao em andamento</p>
+          <h2 className="mt-1 text-xl font-black text-slate-900">Solicitacao de contratacao #{pedido.id.slice(0, 8)}</h2>
+          <p className="mt-1 text-sm text-slate-600">
+            {pedido.detalhes?.planoNome || pedido.planoSlug} - {pedido.statusLabel || pedido.status} - criada em {new Date(pedido.createdAt).toLocaleDateString()}
+          </p>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          {precisaComprovante && (
+            <Link href="/checkout" className="rounded-xl bg-blue-600 px-4 py-3 text-sm font-black text-white hover:bg-blue-700">
+              Enviar comprovante
+            </Link>
+          )}
+          {ticketId && (
+            <Link href={`/suporte/${ticketId}`} className="rounded-xl border border-blue-200 bg-white px-4 py-3 text-sm font-black text-blue-700 hover:bg-blue-50">
+              Acompanhar suporte
+            </Link>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function CentralAvisos({ avisos }: { avisos: any[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const visibleAvisos = expanded ? avisos : avisos.slice(0, 2);
+
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div>
+          <p className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.16em] text-blue-600">
+            <Bell size={14} /> Avisos
+          </p>
+          <h2 className="mt-1 text-lg font-black text-slate-900">Central de notificações</h2>
+        </div>
+        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-black text-slate-500">
+          {avisos.length}
+        </span>
+      </div>
+
+      {avisos.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4">
+          <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-white text-slate-500">
+            <Megaphone size={18} />
+          </div>
+          <p className="text-sm font-black text-slate-800">Sem avisos no momento</p>
+          <p className="mt-1 text-xs leading-5 text-slate-500">
+            Comunicados importantes e alertas automáticos aparecerão aqui.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {visibleAvisos.map((aviso) => {
+            const Icon = aviso.icon || getAvisoIcon(aviso.tone);
+            const toneClass = getAvisoToneClass(aviso.tone);
+
+            return (
+              <div key={aviso.id || aviso.title} className={`block rounded-xl border p-4 transition hover:shadow-sm ${toneClass}`}>
+                <div className="flex items-start gap-3">
+                  <div className="rounded-xl bg-white/75 p-2">
+                    <Icon size={18} />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-black">{aviso.title}</h3>
+                    <p className="mt-1 text-xs leading-5 opacity-80">{aviso.description}</p>
+                    <AvisoAction aviso={aviso} />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          {avisos.length > 2 && (
+            <button
+              onClick={() => setExpanded((value) => !value)}
+              className="w-full rounded-xl border border-slate-200 px-4 py-2 text-xs font-black text-slate-600 transition hover:bg-slate-50"
+            >
+              {expanded ? 'Mostrar menos' : `Ver mais ${avisos.length - 2} aviso(s)`}
+            </button>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function getAvisoToneClass(tone?: string) {
+  if (tone === 'red') return 'border-red-200 bg-red-50 text-red-900';
+  if (tone === 'amber') return 'border-amber-200 bg-amber-50 text-amber-900';
+  if (tone === 'emerald') return 'border-emerald-200 bg-emerald-50 text-emerald-900';
+  return 'border-blue-200 bg-blue-50 text-blue-900';
+}
+
+function getAvisoIcon(tone?: string) {
+  if (tone === 'red') return XCircle;
+  if (tone === 'amber') return TriangleAlert;
+  if (tone === 'emerald') return CheckCircle2;
+  return Info;
+}
+
+function AvisoAction({ aviso }: { aviso: any }) {
+  const commonClass = "mt-3 inline-flex items-center gap-1 text-xs font-black hover:underline";
+  const label = aviso.action || 'Ver aviso';
+  const href = aviso.href || '#';
+
+  if (aviso.attachmentBase64) {
+    return (
+      <a href={aviso.attachmentBase64} download={aviso.attachmentName || 'anexo'} className={commonClass}>
+        {label}
+        <ArrowRight size={14} />
+      </a>
+    );
+  }
+
+  if (href && href !== '#') {
+    return (
+      <Link href={href} className={commonClass}>
+        {label}
+        <ArrowRight size={14} />
+      </Link>
+    );
+  }
+
+  return (
+    <span className={`${commonClass} opacity-80`}>
+      {label}
+    </span>
   );
 }
 

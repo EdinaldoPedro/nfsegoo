@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { 
     Search, LogIn, CreditCard, Edit, Save, X, Building2, Unlink, 
     RefreshCw, KeyRound, AtSign, AlertTriangle, ShieldCheck, 
-    History, Clock, CheckCircle, UserCog, User, PackagePlus 
+    History, Clock, CheckCircle, UserCog, User, PackagePlus, FileCheck2, Download, XCircle
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useDialog } from '@/app/contexts/DialogContext';
@@ -27,6 +27,9 @@ export default function GestaoClientes() {
   const [adminPassword, setAdminPassword] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [pendingContractAction, setPendingContractAction] = useState<'plano' | 'pacote' | null>(null);
+  const [pedidoEmEdicao, setPedidoEmEdicao] = useState<any>(null);
+  const [recusaPedido, setRecusaPedido] = useState<any>(null);
+  const [motivoRecusa, setMotivoRecusa] = useState('');
 
   // === ESTADOS PARA HISTÓRICO DE PLANOS ===
   const [historyUser, setHistoryUser] = useState<any>(null);
@@ -98,6 +101,9 @@ export default function GestaoClientes() {
   const handleConfirmChange = async () => {
       if(!justificativa || justificativa.length < 5) return dialog.showAlert({type:'warning', description: 'Digite uma justificativa válida.'});
       if(!adminPassword) return dialog.showAlert({type:'warning', description: 'Digite sua senha.'});
+      if (pedidoEmEdicao && !pedidoEmEdicao.temComprovante && justificativa.length < 10) {
+          return dialog.showAlert({type:'warning', description: 'Sem comprovante, informe uma justificativa mais detalhada.'});
+      }
 
       if (!pendingContractAction) return;
 
@@ -116,7 +122,8 @@ export default function GestaoClientes() {
                   plano: slug,
                   planoCiclo: ciclo,
                   justification: justificativa,
-                  adminPassword: adminPassword
+                  adminPassword: adminPassword,
+                  pedidoId: pedidoEmEdicao?.id || null
               })
           });
 
@@ -124,6 +131,7 @@ export default function GestaoClientes() {
               setShowConfirmModal(false);
               setPendingContractAction(null);
               setEditingUser(null);
+              setPedidoEmEdicao(null);
               setJustificativa('');
               setAdminPassword('');
               carregarUsuarios();
@@ -161,6 +169,7 @@ export default function GestaoClientes() {
       setEditingUser({ ...user, planoCombinado: `${slug}|${ciclo}`, pacoteCombinado: '' });
       setNovoCnpj(user.empresa ? user.empresa.documento : '');
       setJustificativa(''); setAdminPassword(''); setPendingContractAction(null);
+      setPedidoEmEdicao(null);
   }
 
   const abrirEdicaoPorSolicitacao = (pedido: any) => {
@@ -169,7 +178,14 @@ export default function GestaoClientes() {
           return dialog.showAlert({ type: 'warning', description: 'Cliente nao encontrado na lista atual.' });
       }
 
-      abrirEdicao(cliente);
+      const ciclo = pedido.ciclo || cliente.planoCiclo || 'MENSAL';
+      const slug = pedido.planoSlug === 'SEM_PLANO' ? (cliente.plano || 'GRATUITO') : pedido.planoSlug;
+      setEditingUser({ ...cliente, planoCombinado: `${slug}|${ciclo}`, pacoteCombinado: '' });
+      setPedidoEmEdicao(pedido);
+      setNovoCnpj(cliente.empresa ? cliente.empresa.documento : '');
+      setJustificativa(pedido.temComprovante ? 'Pagamento manual conferido para ativacao do pedido.' : '');
+      setAdminPassword('');
+      setPendingContractAction(null);
   };
 
   const marcarSolicitacao = async (pedidoId: string) => {
@@ -192,6 +208,40 @@ export default function GestaoClientes() {
           carregarSolicitacoes();
       } catch (error) {
           dialog.showAlert("Erro de conexao.");
+      }
+  };
+
+  const atualizarStatusPedido = async (pedidoId: string, status: string, extra: any = {}) => {
+      try {
+          const res = await fetch('/api/admin/pedidos', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: pedidoId, status, ...extra })
+          });
+
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+              return dialog.showAlert({ type: 'danger', title: 'Erro', description: data.error || 'Nao foi possivel atualizar a solicitacao.' });
+          }
+
+          dialog.showAlert({ type: 'success', title: 'Atualizado', description: 'Solicitacao atualizada com sucesso.' });
+          carregarSolicitacoes();
+      } catch (error) {
+          dialog.showAlert("Erro de conexao.");
+      }
+  };
+
+  const baixarComprovante = async (anexo: any) => {
+      try {
+          const res = await fetch(anexo.downloadUrl);
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Falha ao baixar comprovante.');
+          const link = document.createElement('a');
+          link.href = data.conteudoBase64;
+          link.download = data.nomeArquivo || 'comprovante';
+          link.click();
+      } catch (error: any) {
+          dialog.showAlert({ type: 'danger', title: 'Comprovante', description: error.message || 'Nao foi possivel baixar.' });
       }
   };
 
@@ -283,9 +333,9 @@ export default function GestaoClientes() {
       <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-5">
         <div className="flex items-center justify-between gap-4 mb-4">
           <div>
-            <h2 className="text-lg font-bold text-amber-900">Solicitacoes manuais pendentes</h2>
+            <h2 className="text-lg font-bold text-amber-900">Solicitacoes de contratacao</h2>
             <p className="text-sm text-amber-800">
-              Pedidos feitos no checkout em desenvolvimento. Libere o plano e os pacotes no cadastro do cliente e depois marque a solicitacao como atendida.
+              Pedidos enviados pelo cliente para conferencia manual. Analise comprovante, suporte e libere o plano pelo cadastro do cliente.
             </p>
           </div>
           <button
@@ -309,7 +359,8 @@ export default function GestaoClientes() {
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div className="space-y-2">
                     <div className="flex flex-wrap items-center gap-2 text-xs">
-                      <span className="rounded-full bg-amber-100 px-2 py-1 font-bold text-amber-800">Pedido manual</span>
+                      <span className="rounded-full bg-amber-100 px-2 py-1 font-bold text-amber-800">Contratacao manual</span>
+                      <span className="rounded-full bg-blue-50 px-2 py-1 font-bold text-blue-700">{pedido.statusLabel || pedido.status}</span>
                       <span className="font-mono text-amber-700">{pedido.id.slice(0, 8)}</span>
                       <span className="text-slate-500">{new Date(pedido.createdAt).toLocaleString()}</span>
                     </div>
@@ -325,10 +376,39 @@ export default function GestaoClientes() {
                       <p><strong>Ciclos:</strong> {pedido.detalhes?.qtdCiclos || 1}</p>
                       <p><strong>Pacotes:</strong> {pedido.detalhes?.pacotes?.length ? pedido.detalhes.pacotes.map((pacote: any) => `${pacote.quantidade}x ${pacote.nome}`).join(', ') : 'Nenhum pacote adicional'}</p>
                       <p><strong>Valor estimado:</strong> {Number(pedido.valorTotal).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
+                      <p className="flex items-center gap-1">
+                        <strong>Comprovante:</strong>
+                        {pedido.temComprovante ? (
+                          <span className="inline-flex items-center gap-1 text-green-700"><FileCheck2 size={14}/> {pedido.anexos?.length || 1} arquivo(s)</span>
+                        ) : (
+                          <span className="text-amber-700">Ainda nao enviado</span>
+                        )}
+                      </p>
+                      {pedido.anexos?.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {pedido.anexos.map((anexo: any) => (
+                            <button
+                              key={anexo.id}
+                              onClick={() => baixarComprovante(anexo)}
+                              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-bold text-slate-700 hover:bg-slate-100"
+                            >
+                              <Download size={13}/> {anexo.nomeArquivo}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
 
                   <div className="flex flex-col gap-2 lg:w-52">
+                    {pedido.status !== 'EM_ANALISE' && (
+                      <button
+                        onClick={() => atualizarStatusPedido(pedido.id, 'EM_ANALISE')}
+                        className="rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 text-sm font-bold text-blue-700 hover:bg-blue-100 transition"
+                      >
+                        Iniciar analise
+                      </button>
+                    )}
                     <button
                       onClick={() => abrirEdicaoPorSolicitacao(pedido)}
                       className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-bold text-white hover:bg-blue-700 transition"
@@ -344,10 +424,10 @@ export default function GestaoClientes() {
                       </button>
                     )}
                     <button
-                      onClick={() => marcarSolicitacao(pedido.id)}
-                      className="rounded-lg border border-green-300 bg-green-50 px-3 py-2 text-sm font-bold text-green-700 hover:bg-green-100 transition"
+                      onClick={() => setRecusaPedido(pedido)}
+                      className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm font-bold text-red-700 hover:bg-red-100 transition"
                     >
-                      Marcar atendida
+                      Recusar pedido
                     </button>
                   </div>
                 </div>
@@ -356,6 +436,48 @@ export default function GestaoClientes() {
           </div>
         )}
       </div>
+
+      {recusaPedido && (
+        <div className="fixed inset-0 bg-black/50 z-[75] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl">
+            <div className="mb-4 flex items-center gap-3 text-red-600">
+              <XCircle size={26} />
+              <div>
+                <h3 className="font-bold text-lg text-slate-900">Recusar solicitacao</h3>
+                <p className="text-sm text-slate-500">Informe o motivo para o cliente acompanhar pelo suporte.</p>
+              </div>
+            </div>
+            <textarea
+              value={motivoRecusa}
+              onChange={(e) => setMotivoRecusa(e.target.value)}
+              rows={4}
+              className="w-full rounded-lg border border-slate-300 p-3 text-sm outline-none focus:ring-2 focus:ring-red-200"
+              placeholder="Ex: comprovante ilegivel, valor divergente, dados incompletos..."
+            />
+            <div className="mt-5 flex gap-2">
+              <button
+                onClick={() => {
+                  setRecusaPedido(null);
+                  setMotivoRecusa('');
+                }}
+                className="flex-1 rounded-lg border border-slate-200 px-4 py-2 font-bold text-slate-600 hover:bg-slate-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={async () => {
+                  await atualizarStatusPedido(recusaPedido.id, 'RECUSADO', { motivo: motivoRecusa });
+                  setRecusaPedido(null);
+                  setMotivoRecusa('');
+                }}
+                className="flex-1 rounded-lg bg-red-600 px-4 py-2 font-bold text-white hover:bg-red-700"
+              >
+                Confirmar recusa
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {historyUser && (
         <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
@@ -498,8 +620,18 @@ export default function GestaoClientes() {
             <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
                 <div className="flex justify-between mb-4">
                     <h3 className="font-bold text-lg text-slate-800">Gerenciar Cliente</h3>
-                    <button onClick={() => setEditingUser(null)}><X size={20}/></button>
+                    <button onClick={() => { setEditingUser(null); setPedidoEmEdicao(null); }}><X size={20}/></button>
                 </div>
+
+                {pedidoEmEdicao && (
+                    <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+                        <p className="font-bold">Pedido #{pedidoEmEdicao.id.slice(0, 8)} vinculado</p>
+                        <p className="mt-1 text-xs leading-5">
+                            Plano e ciclo foram preselecionados pela solicitacao. Ao confirmar o plano, o pedido sera marcado como ativado.
+                            {!pedidoEmEdicao.temComprovante && ' Sem comprovante, a justificativa precisa explicar a liberacao.'}
+                        </p>
+                    </div>
+                )}
                 
                 <div className="space-y-6">
                     {/* DADOS PESSOAIS */}

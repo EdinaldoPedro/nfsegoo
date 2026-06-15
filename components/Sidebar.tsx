@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Menu, X, User, Briefcase, FileText, Settings, LogOut, Phone, Shield, ArrowLeft, Building2, Search, ChevronDown } from 'lucide-react';
+import { Menu, X, User, Briefcase, FileText, Settings, LogOut, Phone, Shield, ArrowLeft, Building2, Search, ChevronDown, BadgeHelp } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { checkIsStaff } from '@/app/utils/permissions';
@@ -160,7 +160,7 @@ export default function Sidebar() {
   };
 
   const statusCert = getStatusCertificado();
-  const showAdminPanel = checkIsStaff(userRole) && userRole !== 'CONTADOR' && !isSupportMode;
+  const showAdminPanel = checkIsStaff(userRole) && !isSupportMode;
   const supportHref =
     !isSupportMode && ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(userRole)
       ? '/admin/suporte'
@@ -329,6 +329,9 @@ export default function Sidebar() {
                 </Link>
                 <Link href="/relatorios" onClick={() => setIsOpen(false)} className="flex items-center gap-2 rounded-xl p-3 font-semibold text-gray-700 transition hover:bg-blue-50 hover:text-blue-700 dark:text-gray-300 dark:hover:bg-slate-800">
                     <FileText size={18} /> Relatórios
+                </Link>
+                <Link href="/cliente/ajuda" onClick={() => setIsOpen(false)} className="flex items-center gap-2 rounded-xl p-3 font-semibold text-gray-700 transition hover:bg-blue-50 hover:text-blue-700 dark:text-gray-300 dark:hover:bg-slate-800">
+                    <BadgeHelp size={18} /> Central de Ajuda
                 </Link>
             </div>
           </section>

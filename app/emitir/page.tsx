@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, Suspense } from "react";
-import { CheckCircle, ArrowRight, ArrowLeft, Building2, Calculator, FileCheck, Briefcase, Loader2, Home, UserPlus, AlertTriangle, Send, FileSearch, FileCode2, BadgeCheck, ServerCog, FileClock, Trash2 } from "lucide-react";
+import { CheckCircle, ArrowRight, ArrowLeft, Building2, Calculator, FileCheck, Briefcase, Loader2, Home, UserPlus, AlertTriangle, Send, FileSearch, FileCode2, BadgeCheck, ServerCog, FileClock, Trash2, HelpCircle, Info } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useDialog } from "@/app/contexts/DialogContext";
 import Link from "next/link";
@@ -857,6 +857,8 @@ function EmitirNotaContent() {
         ))}
       </div>
 
+      <GuiaEmissao step={step} ambiente={perfilEmpresa?.ambiente} />
+
       {step === 1 && (
         <aside className="mb-6 bg-white border border-slate-200 rounded-xl shadow-sm p-5 lg:fixed lg:left-6 lg:top-44 lg:w-[290px] lg:max-h-[calc(100vh-190px)] lg:overflow-y-auto">
           <div className="flex items-center justify-between gap-3 mb-4">
@@ -1210,6 +1212,63 @@ function EmitirNotaContent() {
         </div>
       </div>
     </div>
+  );
+}
+
+function GuiaEmissao({ step, ambiente }: { step: number; ambiente?: string }) {
+  const orientacoes: Record<number, { title: string; description: string; tips: string[]; tone: string }> = {
+    1: {
+      title: 'Escolha o tomador correto',
+      description: 'A nota herda os dados fiscais do cliente selecionado. Se for PF sem endereco, use o cadastro preparado para esse caso.',
+      tips: ['Confira CPF/CNPJ antes de avancar.', 'Se o cliente nao existir, cadastre primeiro.', 'Rascunhos aparecem aqui quando uma emissao falha por algo corrigivel.'],
+      tone: 'blue',
+    },
+    2: {
+      title: 'Preencha o servico com calma',
+      description: 'CNAE, valor e descricao definem a tributacao enviada ao Portal Nacional.',
+      tips: ['Use o CNAE correto para evitar rejeicao.', 'Retencoes aparecem conforme regra fiscal cadastrada.', 'O valor precisa ser maior que zero.'],
+      tone: 'slate',
+    },
+    3: {
+      title: ambiente === 'HOMOLOGACAO' ? 'Revise antes de validar' : 'Revise antes de emitir',
+      description: ambiente === 'HOMOLOGACAO'
+        ? 'Em homologacao a nota e apenas validada, sem valor fiscal.'
+        : 'Depois de autorizada, cancelamento exige justificativa e fica registrado no Portal Nacional.',
+      tips: ['A data de competencia pode ser ajustada dentro do limite permitido.', 'DPS fica automatico; altere apenas se o Portal pedir.', 'Acompanhe o processamento ate a nota aparecer no historico.'],
+      tone: ambiente === 'HOMOLOGACAO' ? 'amber' : 'green',
+    },
+  };
+
+  const atual = orientacoes[step] || orientacoes[1];
+  const toneClass: Record<string, string> = {
+    blue: 'border-blue-100 bg-blue-50 text-blue-900',
+    slate: 'border-slate-200 bg-white text-slate-800',
+    green: 'border-emerald-100 bg-emerald-50 text-emerald-900',
+    amber: 'border-amber-200 bg-amber-50 text-amber-900',
+  };
+
+  return (
+    <section className={`mb-6 rounded-2xl border p-4 shadow-sm ${toneClass[atual.tone]}`}>
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div className="flex gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/80">
+            <HelpCircle size={19} />
+          </div>
+          <div>
+            <h3 className="text-sm font-black">{atual.title}</h3>
+            <p className="mt-1 text-sm leading-6 opacity-80">{atual.description}</p>
+          </div>
+        </div>
+        <div className="grid gap-2 text-xs font-semibold opacity-80 md:min-w-[330px]">
+          {atual.tips.map((tip) => (
+            <span key={tip} className="flex items-start gap-2">
+              <Info size={14} className="mt-0.5 shrink-0" />
+              {tip}
+            </span>
+          ))}
+        </div>
+      </div>
+    </section>
   );
 }
 

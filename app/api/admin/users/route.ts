@@ -5,6 +5,8 @@ import { registrarEventoCrm } from '@/app/services/crmService';
 import { prisma } from '@/app/utils/prisma';
 import { stripUserSecrets } from '@/app/utils/safe-data';
 import { marcarEmpresasProprietariasDoContador } from '@/app/services/contadorOwnershipService';
+import { EmailService } from '@/app/services/EmailService';
+import { parsePedidoMetadata } from '@/app/utils/manual-contracting';
 
 export async function GET(request: Request) {
   const user = await getAuthenticatedUser(request);
@@ -170,6 +172,58 @@ export async function PUT(request: Request) {
           'Plano Alterado',
           `Mudou para o plano ${novoPlano.name}. Justificativa: ${body.justification}`,
         );
+
+        if (body.pedidoId) {
+          const pedido = await prisma.pedido.findUnique({
+            where: { id: body.pedidoId },
+            include: { user: true },
+          });
+
+          if (pedido && pedido.userId === body.id) {
+            const detalhes = parsePedidoMetadata(pedido.gatewayId);
+            await prisma.pedido.update({
+              where: { id: pedido.id },
+              data: {
+                status: 'ATIVADO_MANUALMENTE',
+                gatewayId: JSON.stringify({
+                  ...detalhes,
+                  ativadoPor: userAuth.id,
+                  ativadoEm: new Date().toISOString(),
+                  justificativaAtivacao: body.justification,
+                }),
+              },
+            });
+
+            await prisma.systemLog.create({
+              data: {
+                level: 'INFO',
+                action: 'PEDIDO_CONTRATACAO_ATIVADO',
+                message: `Pedido de contratacao ${pedido.id} ativado junto com plano.`,
+                details: JSON.stringify({
+                  adminId: userAuth.id,
+                  pedidoId: pedido.id,
+                  userId: body.id,
+                  plan: novoPlano.slug,
+                }),
+              },
+            });
+
+            const emailService = new EmailService();
+            await emailService.sendEmail(
+              pedido.user.email,
+              'Seu plano foi ativado',
+              emailService.getTemplateContratacaoManual({
+                nome: pedido.user.nome,
+                titulo: 'Seu plano foi ativado',
+                mensagem: 'A contratacao foi conferida e seu acesso ja foi liberado na plataforma.',
+                pedidoId: pedido.id,
+                ticketProtocolo: detalhes.ticketProtocolo,
+                plano: novoPlano.name,
+                link: process.env.NEXT_PUBLIC_APP_URL ? `${process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, '')}/cliente/dashboard` : '/cliente/dashboard',
+              }),
+            );
+          }
+        }
         return NextResponse.json({ success: true, message: 'Plano atualizado.' });
       }
 

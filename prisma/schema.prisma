@@ -54,6 +54,7 @@ model User {
   eventosCrm          UserEvent[] 
   faturas         Fatura[]
   cuponsUsados    CupomLog[]
+  pedidoAnexos    PedidoAnexo[]
 }
 
 model PendingRegistration {
@@ -307,6 +308,29 @@ model ConfiguracaoSistema {
   emailRemetente String?
 }
 
+model GlobalNotice {
+  id               String    @id @default(uuid())
+  titulo           String
+  mensagem         String    @db.Text
+  tipo             String    @default("INFO")
+  status           String    @default("RASCUNHO")
+  publico          String    @default("TODOS")
+  iniciaEm         DateTime?
+  terminaEm        DateTime?
+  linkLabel        String?
+  linkHref         String?
+  anexoNome        String?
+  anexoBase64      String?   @db.Text
+  criadoPorId      String?
+  publicadoEm      DateTime?
+  arquivadoEm      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([status, iniciaEm, terminaEm])
+  @@index([publico])
+}
+
 model GlobalCnae {
   id                       String   @id @default(uuid())
   codigo                   String   @unique
@@ -484,6 +508,23 @@ model Pedido {
   arquivadoPor    String?
   motivoArquivamento String?
   user            User     @relation(fields: [userId], references: [id])
+  anexos          PedidoAnexo[]
+}
+
+model PedidoAnexo {
+  id             String   @id @default(uuid())
+  pedidoId       String
+  userId         String
+  nomeArquivo    String
+  mimeType       String
+  tamanho        Int
+  conteudoBase64 String   @db.Text
+  createdAt      DateTime @default(now())
+  pedido         Pedido   @relation(fields: [pedidoId], references: [id], onDelete: Cascade)
+  user           User     @relation(fields: [userId], references: [id])
+
+  @@index([pedidoId, createdAt])
+  @@index([userId, createdAt])
 }
 
 enum Role {

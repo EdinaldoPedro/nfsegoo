@@ -4,7 +4,7 @@ import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { 
     ArrowLeft, ShoppingCart, ShieldCheck, 
-    Loader2, Calendar, Ticket, PackagePlus, ChevronDown, Tag
+    Loader2, Calendar, Ticket, PackagePlus, ChevronDown, Tag, FileUp, CheckCircle2, Headphones
 } from 'lucide-react';
 
 interface Plan {
@@ -30,6 +30,18 @@ interface CupomAtivo {
     planosValidos: string | null; // <--- NOVA PROPRIEDADE
 }
 
+interface PedidoContratacao {
+    id: string;
+    planoSlug: string;
+    status: string;
+    statusLabel: string;
+    valorTotal: number;
+    ciclo: string;
+    createdAt: string;
+    detalhes?: any;
+    anexos?: any[];
+}
+
 function CheckoutContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
@@ -43,8 +55,11 @@ function CheckoutContent() {
     const [pacotesDisponiveis, setPacotesDisponiveis] = useState<Plan[]>([]); 
 
     const [processing, setProcessing] = useState(false);
-    const [loadingText, setLoadingText] = useState('Solicitar Ativação Manual');
+    const [loadingText, setLoadingText] = useState('Solicitar Contratacao');
     const [requestSent, setRequestSent] = useState('');
+    const [pedidoCriado, setPedidoCriado] = useState<PedidoContratacao | null>(null);
+    const [uploadingProof, setUploadingProof] = useState(false);
+    const [proofError, setProofError] = useState('');
     const [, setStep] = useState<1 | 2>(1);
     const [, setCopiado] = useState(false);
     
@@ -95,6 +110,18 @@ function CheckoutContent() {
                 setLoading(false);
             });
     }, [planSlug, searchParams]);
+
+    useEffect(() => {
+        fetch('/api/checkout', { cache: 'no-store' })
+            .then(res => res.ok ? res.json() : null)
+            .then(data => {
+                if (data?.pedido) {
+                    setPedidoCriado(data.pedido);
+                    setRequestSent('Voce ja tem uma solicitacao de contratacao em andamento.');
+                }
+            })
+            .catch(() => {});
+    }, []);
 
     if (loading) return <div className="h-screen flex items-center justify-center"><Loader2 className="animate-spin text-blue-600" size={40}/></div>;
 
@@ -262,19 +289,74 @@ function CheckoutContent() {
 
             if (!res.ok) {
                 alert(data.error || 'Erro ao registrar a solicitacao.');
-                setLoadingText('Solicitar Ativacao Manual');
+                setLoadingText('Solicitar Contratacao');
                 setProcessing(false);
                 return;
             }
 
-            setRequestSent('Solicitacao registrada. O checkout automatico esta em desenvolvimento. Para agilizar, fale com o administrador por um contato conhecido ou pelo suporte.');
+            setPedidoCriado(data.pedido);
+            setRequestSent(data.mensagem || 'Solicitacao de contratacao registrada.');
             setLoadingText('Solicitacao enviada');
             setProcessing(false);
         } catch (error) {
             console.error(error);
             alert('Erro de conexao ao registrar a solicitacao.');
-            setLoadingText('Solicitar Ativacao Manual');
+            setLoadingText('Solicitar Contratacao');
             setProcessing(false);
+        }
+    };
+
+    const handleProofUpload = async (file: File | null) => {
+        if (!file || !pedidoCriado) return;
+        setProofError('');
+
+        const allowed = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp'];
+        if (!allowed.includes(file.type)) {
+            setProofError('Envie PDF, PNG, JPG ou WEBP.');
+            return;
+        }
+        if (file.size > 5 * 1024 * 1024) {
+            setProofError('O comprovante deve ter ate 5 MB.');
+            return;
+        }
+
+        setUploadingProof(true);
+        try {
+            const conteudoBase64 = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(String(reader.result || ''));
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+
+            const res = await fetch('/api/checkout/comprovante', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    pedidoId: pedidoCriado.id,
+                    nomeArquivo: file.name,
+                    mimeType: file.type,
+                    tamanho: file.size,
+                    conteudoBase64,
+                }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                setProofError(data.error || 'Nao foi possivel enviar o comprovante.');
+                return;
+            }
+
+            setPedidoCriado(prev => prev ? {
+                ...prev,
+                status: data.status || 'COMPROVANTE_ENVIADO',
+                statusLabel: 'Comprovante enviado',
+                anexos: [data.anexo, ...(prev.anexos || [])],
+            } : prev);
+            setRequestSent('Comprovante recebido. A equipe vai analisar sua contratacao.');
+        } catch {
+            setProofError('Erro de conexao ao enviar comprovante.');
+        } finally {
+            setUploadingProof(false);
         }
     };
 
@@ -518,7 +600,15 @@ function CheckoutContent() {
                             </div>
                         </div>
 
-                        {requestSent && (
+                        {pedidoCriado ? (
+                            <PedidoContratacaoCard
+                                pedido={pedidoCriado}
+                                message={requestSent}
+                                uploading={uploadingProof}
+                                error={proofError}
+                                onUpload={handleProofUpload}
+                            />
+                        ) : requestSent && (
                             <div className="mb-4 rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-800">
                                 {requestSent}
                             </div>
@@ -530,15 +620,73 @@ function CheckoutContent() {
                             className="w-full py-4 bg-blue-600 text-white rounded-xl font-bold text-lg hover:bg-blue-700 transition shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {processing ? <Loader2 className="animate-spin"/> : <ShieldCheck size={20}/>}
-                            {processing ? loadingText : 'Solicitar Ativação Manual'}
+                            {processing ? loadingText : 'Solicitar Contratacao'}
                         </button>
                         <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
-                            <p className="text-[11px] font-bold uppercase tracking-wide text-amber-800">Em desenvolvimento</p>
+                            <p className="text-[11px] font-bold uppercase tracking-wide text-amber-800">Ativacao manual</p>
                             <p className="mt-1 text-xs leading-relaxed text-amber-900">
-                                O checkout automatico ainda esta em desenvolvimento. Para contratar ou ativar um plano ou pacote, entre em contato com o administrador por um canal conhecido ou abra um chamado no suporte.
+                                A contratacao sera conferida pela equipe interna. Envie o comprovante para agilizar a ativacao do plano.
                             </p>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function PedidoContratacaoCard({
+    pedido,
+    message,
+    uploading,
+    error,
+    onUpload,
+}: {
+    pedido: PedidoContratacao;
+    message: string;
+    uploading: boolean;
+    error: string;
+    onUpload: (file: File | null) => void;
+}) {
+    const ticketId = pedido.detalhes?.ticketId;
+    const ticketProtocolo = pedido.detalhes?.ticketProtocolo;
+    const temComprovante = (pedido.anexos?.length || 0) > 0;
+
+    return (
+        <div className="mb-4 rounded-2xl border border-green-200 bg-green-50 p-4 text-sm text-green-900">
+            <div className="flex items-start gap-3">
+                <div className="rounded-xl bg-white p-2 text-green-600">
+                    <CheckCircle2 size={20} />
+                </div>
+                <div className="min-w-0 flex-1">
+                    <p className="font-black">Solicitacao de contratacao em andamento</p>
+                    <p className="mt-1 text-xs leading-5 text-green-800">{message}</p>
+                    <div className="mt-3 space-y-1 rounded-xl bg-white/80 p-3 text-xs text-slate-700">
+                        <p><strong>Pedido:</strong> #{pedido.id.slice(0, 8)}</p>
+                        {ticketProtocolo && <p><strong>Ticket:</strong> #{ticketProtocolo}</p>}
+                        <p><strong>Plano:</strong> {pedido.detalhes?.planoNome || pedido.planoSlug}</p>
+                        <p><strong>Ciclo:</strong> {pedido.ciclo}</p>
+                        <p><strong>Valor:</strong> {Number(pedido.valorTotal || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
+                        <p><strong>Status:</strong> {pedido.statusLabel || pedido.status}</p>
+                    </div>
+
+                    <label className="mt-3 flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-green-300 bg-white px-3 py-3 text-xs font-black text-green-700 hover:bg-green-50">
+                        {uploading ? <Loader2 className="animate-spin" size={16} /> : <FileUp size={16} />}
+                        {uploading ? 'Enviando comprovante...' : temComprovante ? 'Enviar novo comprovante' : 'Enviar comprovante'}
+                        <input
+                            type="file"
+                            accept=".pdf,.png,.jpg,.jpeg,.webp,application/pdf,image/png,image/jpeg,image/webp"
+                            className="hidden"
+                            disabled={uploading}
+                            onChange={(event) => onUpload(event.target.files?.[0] || null)}
+                        />
+                    </label>
+                    {error && <p className="mt-2 text-xs font-bold text-red-600">{error}</p>}
+                    {ticketId && (
+                        <a href={`/suporte/${ticketId}`} className="mt-3 inline-flex items-center gap-1 text-xs font-black text-blue-700 hover:underline">
+                            <Headphones size={14} /> Acompanhar suporte
+                        </a>
+                    )}
                 </div>
             </div>
         </div>

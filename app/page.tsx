@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState, useEffect, useRef, ReactNode } from "react";
-import { CheckCircle, ArrowRight, MapPin, Info, Loader2, Zap, Package, Shield, Smartphone, Users, Cloud, ChevronLeft, ChevronRight,ChevronDown, Briefcase, Calculator, Handshake } from "lucide-react";
+import { CheckCircle, ArrowRight, MapPin, Info, Loader2, Zap, Shield, Users, ChevronLeft, ChevronRight, ChevronDown, Briefcase, Calculator, Handshake, RefreshCw, FileDown, LifeBuoy, Bell, ClipboardCheck, Building2 } from "lucide-react";
 
 // === COMPONENTE DE ANIMAÇÃO DE ROLAGEM (SCROLL REVEAL) ===
 function Reveal({ children, delay = 0, className = "" }: { children: ReactNode, delay?: number, className?: string }) {
@@ -120,13 +120,13 @@ export default function LandingPage() {
   const ufsDisponiveis = Array.from(new Set(cidadesDoRegime.map((c: any) => c.uf))).sort();
   useEffect(() => { setFiltroUf('TODOS'); }, [regime]);
 
-  const featuresList = [
-      { title: "Emissão Rápida", desc: "Emita suas notas fiscais em poucos segundos, sem burocracia.", icon: Zap, corTexto: "text-amber-600", corFundo: "bg-amber-100" },
-      { title: "Pacotes Avulsos", desc: "Aumentou o volume este mês? Compre pacotes extras de notas a qualquer momento.", icon: Package, corTexto: "text-blue-600", corFundo: "bg-blue-100" },
-      { title: "Gestão de Clientes", desc: "Mantenha o cadastro dos seus tomadores de serviço organizado.", icon: Users, corTexto: "text-indigo-600", corFundo: "bg-indigo-100" },
-      { title: "Suporte Web e Mobile", desc: "Acesse nosso painel de qualquer dispositivo com design responsivo.", icon: Smartphone, corTexto: "text-emerald-600", corFundo: "bg-emerald-100" },
-      { title: "Backup em Nuvem", desc: "Suas notas e cadastros salvos com segurança nos melhores servidores.", icon: Cloud, corTexto: "text-sky-600", corFundo: "bg-sky-100" },
-      { title: "Certificado A1", desc: "Integração transparente com o seu Certificado Digital e-CNPJ A1.", icon: Shield, corTexto: "text-rose-600", corFundo: "bg-rose-100" },
+  const productFeatures = [
+      { title: "Emissão em poucos passos", desc: "Cadastre o tomador, revise os dados e transmita sua NFS-e com uma experiência guiada do início ao fim.", icon: Zap, corTexto: "text-amber-600", corFundo: "bg-amber-100" },
+      { title: "Retomada inteligente", desc: "Se o Portal pedir algum ajuste, seus dados ficam salvos para continuar de onde parou, sem redigitar tudo.", icon: RefreshCw, corTexto: "text-blue-600", corFundo: "bg-blue-100" },
+      { title: "Clientes sempre prontos", desc: "Organize tomadores PJ, PF, exterior e PF sem endereço para emitir com mais agilidade no dia a dia.", icon: Users, corTexto: "text-indigo-600", corFundo: "bg-indigo-100" },
+      { title: "Arquivos fiscais organizados", desc: "PDF, XML, eventos e cancelamentos ficam acessíveis no mesmo lugar, sempre que você precisar.", icon: FileDown, corTexto: "text-emerald-600", corFundo: "bg-emerald-100" },
+      { title: "Ajuda dentro da plataforma", desc: "Guias rápidos e visuais mostram o caminho certo para cada rotina, sem depender de tentativa e erro.", icon: LifeBuoy, corTexto: "text-sky-600", corFundo: "bg-sky-100" },
+      { title: "Certificado A1 monitorado", desc: "Acompanhe validade, envio e uso do certificado digital com alertas antes de virar urgência.", icon: Shield, corTexto: "text-rose-600", corFundo: "bg-rose-100" },
   ];
 
   return (
@@ -143,6 +143,29 @@ export default function LandingPage() {
         .animate-blob { animation: blob 7s infinite; }
         .animation-delay-2000 { animation-delay: 2s; }
         .animation-delay-4000 { animation-delay: 4s; }
+      `}} />
+      <style dangerouslySetInnerHTML={{__html: `
+        @keyframes scanLine {
+          0% { transform: translateX(-100%); opacity: 0; }
+          20% { opacity: 1; }
+          100% { transform: translateX(100%); opacity: 0; }
+        }
+        @keyframes statusPulse {
+          0%, 100% { transform: scale(1); opacity: 0.9; }
+          50% { transform: scale(1.04); opacity: 1; }
+        }
+        @keyframes auroraDrift {
+          0%, 100% { transform: translate3d(-2%, -1%, 0) scale(1); }
+          50% { transform: translate3d(3%, 2%, 0) scale(1.06); }
+        }
+        @keyframes gridDrift {
+          0% { transform: translate3d(0, 0, 0); }
+          100% { transform: translate3d(42px, 42px, 0); }
+        }
+        .animate-scan-line { animation: scanLine 3.8s ease-in-out infinite; }
+        .animate-status-pulse { animation: statusPulse 2.4s ease-in-out infinite; }
+        .animate-aurora-drift { animation: auroraDrift 14s ease-in-out infinite; }
+        .animate-grid-drift { animation: gridDrift 18s linear infinite; }
       `}} />
 
       {/* === HEADER === */}
@@ -206,30 +229,41 @@ export default function LandingPage() {
 
       <main className="pt-32 relative">
         
-        {/* === BLOBS FLUTUANTES NO FUNDO (EFEITO VIVO) === */}
+        {/* === BACKGROUND ANIMADO DISCRETO === */}
         <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none z-0">
-            <div className="absolute top-20 left-10 w-72 h-72 bg-blue-400/20 rounded-full mix-blend-multiply filter blur-3xl opacity-70 animate-blob"></div>
-            <div className="absolute top-40 right-20 w-72 h-72 bg-purple-400/20 rounded-full mix-blend-multiply filter blur-3xl opacity-70 animate-blob animation-delay-2000"></div>
-            <div className="absolute -bottom-8 left-40 w-72 h-72 bg-indigo-400/20 rounded-full mix-blend-multiply filter blur-3xl opacity-70 animate-blob animation-delay-4000"></div>
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_15%,rgba(37,99,235,0.12),transparent_32%),radial-gradient(circle_at_80%_8%,rgba(16,185,129,0.10),transparent_30%),linear-gradient(180deg,#f8fbff_0%,#eef4fb_46%,#f8fafc_100%)]"></div>
+            <div className="absolute left-1/2 top-8 h-[520px] w-[980px] -translate-x-1/2 rounded-full bg-blue-300/12 blur-3xl animate-aurora-drift"></div>
+            <div className="absolute right-[-140px] top-24 h-[420px] w-[420px] rounded-full bg-emerald-300/12 blur-3xl animate-aurora-drift" style={{ animationDelay: '3s' }}></div>
+            <div
+              className="absolute inset-0 opacity-[0.16] animate-grid-drift"
+              style={{
+                backgroundImage: 'linear-gradient(rgba(37,99,235,0.12) 1px, transparent 1px), linear-gradient(90deg, rgba(37,99,235,0.12) 1px, transparent 1px)',
+                backgroundSize: '42px 42px',
+              }}
+            />
+            <div className="absolute inset-x-0 top-0 h-px bg-blue-200/80"></div>
+            <div className="absolute left-1/2 top-28 h-px w-[720px] -translate-x-1/2 overflow-hidden opacity-60">
+              <div className="h-px w-1/2 bg-blue-500/60 animate-scan-line" />
+            </div>
         </div>
 
         {/* === HERO SECTION === */}
         <div className="max-w-7xl mx-auto px-6 pb-20 pt-10 text-center relative z-10">
             <Reveal delay={100}>
-                <span className="bg-white text-blue-700 px-5 py-2 rounded-full text-xs font-bold uppercase tracking-wider mb-8 inline-block border border-blue-100 shadow-md shadow-blue-100/50 hover:scale-105 transition-transform cursor-default">
-                    🚀 Versão 1.2 Beta Lançada
+                <span className="bg-white text-blue-700 px-5 py-2 rounded-full text-xs font-bold uppercase tracking-wider mb-8 inline-flex items-center gap-2 border border-blue-100 shadow-md shadow-blue-100/50 hover:scale-105 transition-transform cursor-default">
+                    <ClipboardCheck size={15} /> Emissão de NFS-e simples, guiada e segura
                 </span>
             </Reveal>
             
             <Reveal delay={200}>
                 <h1 className="text-4xl md:text-6xl lg:text-7xl font-black text-slate-900 mb-6 leading-tight tracking-tight">
-                Emita Notas Fiscais Nacionais <br /> <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-indigo-600">sem dor de cabeça</span>
+                Emita NFS-e com rapidez <br /> <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-indigo-600">sem depender do Portal</span>
                 </h1>
             </Reveal>
 
             <Reveal delay={300}>
-                <p className="text-lg md:text-xl text-slate-600 mb-10 max-w-2xl mx-auto leading-relaxed">
-                O sistema ideal para prestadores de serviço e MEIs. Simples, rápido e integrado ao novo Portal Nacional da Receita Federal.
+                <p className="text-lg md:text-xl text-slate-600 mb-10 max-w-3xl mx-auto leading-relaxed">
+                Uma plataforma para prestadores, empresas e contadores emitirem, acompanharem e organizarem notas com clientes, certificado A1, PDF, XML, cancelamento e suporte em um fluxo simples.
                 </p>
             </Reveal>
 
@@ -243,6 +277,10 @@ export default function LandingPage() {
                 </a>
                 </div>
             </Reveal>
+
+            <Reveal delay={520} className="mt-14">
+                <ProductShowcase />
+            </Reveal>
         </div>
        
 
@@ -250,13 +288,13 @@ export default function LandingPage() {
         <div className="max-w-7xl mx-auto px-6 py-12 mb-10 relative z-10">
             <Reveal>
                 <div className="text-center mb-16">
-                    <h2 className="text-3xl md:text-4xl font-bold text-slate-800">Tudo o que você precisa em um só lugar</h2>
-                    <p className="text-slate-500 mt-4 text-lg">Nossa plataforma foi desenhada para descomplicar a sua rotina fiscal.</p>
+                    <h2 className="text-3xl md:text-4xl font-bold text-slate-800">Tudo pronto para emitir com tranquilidade</h2>
+                    <p className="text-slate-500 mt-4 text-lg">Do cadastro do tomador ao download dos arquivos oficiais, o SaaS simplifica o ciclo da NFS-e.</p>
                 </div>
             </Reveal>
             
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {featuresList.map((item, i) => {
+            {productFeatures.map((item, i) => {
                 const IconComponent = item.icon;
                 return (
                 <Reveal key={i} delay={i * 100}>
@@ -521,6 +559,120 @@ export default function LandingPage() {
 }
 
 // Componentes Visuais de Apoio
+function ProductShowcase() {
+    const checklist = [
+        { label: 'Cadastro da empresa', status: 'OK' },
+        { label: 'Certificado A1', status: 'Vence em 15 dias' },
+        { label: 'Código IBGE', status: 'OK' },
+        { label: 'Ambiente', status: 'Produção' },
+    ];
+
+    return (
+        <div className="relative mx-auto max-w-6xl rounded-[32px] border border-slate-200 bg-white/90 p-4 text-left shadow-2xl shadow-slate-200/70 backdrop-blur">
+            <div className="pointer-events-none absolute inset-x-6 top-0 h-px overflow-hidden">
+                <div className="h-px w-1/2 bg-blue-500/70 animate-scan-line" />
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-[270px_minmax(0,1fr)]">
+                <aside className="rounded-3xl bg-slate-950 p-5 text-white">
+                    <div className="flex items-center gap-3">
+                        <img src="/icons/G.png" alt="NFSeGoo" className="h-10 w-10 rounded-2xl bg-white p-1.5" />
+                        <div>
+                            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-blue-300">Dashboard</p>
+                            <h3 className="text-lg font-black">NFSe Goo</h3>
+                        </div>
+                    </div>
+
+                    <div className="mt-8 space-y-3">
+                        {['Emitir NFS-e', 'Clientes', 'Minhas Notas', 'Suporte'].map((item, index) => (
+                            <div key={item} className={`rounded-2xl px-4 py-3 text-sm font-bold ${index === 0 ? 'bg-blue-600 text-white' : 'bg-white/5 text-slate-300'}`}>
+                                {item}
+                            </div>
+                        ))}
+                    </div>
+
+                    <div className="mt-8 rounded-2xl border border-white/10 bg-white/5 p-4">
+                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Avisos</p>
+                        <div className="mt-3 flex items-start gap-3">
+                            <Bell size={18} className="mt-0.5 text-amber-300" />
+                            <div>
+                                <p className="text-xs font-black">Certificado perto do vencimento</p>
+                                <p className="mt-1 text-[11px] leading-5 text-slate-400">Antecipe a renovação.</p>
+                            </div>
+                        </div>
+                    </div>
+                </aside>
+
+                <div className="rounded-3xl bg-slate-50 p-4 md:p-6">
+                    <div className="grid gap-4 xl:grid-cols-[1fr_1.1fr]">
+                        <div className="rounded-3xl bg-blue-600 p-6 text-white shadow-lg shadow-blue-200">
+                            <p className="text-xs font-black uppercase tracking-[0.2em] text-blue-100">Próxima ação</p>
+                            <h3 className="mt-3 text-2xl font-black">Você já pode emitir</h3>
+                            <p className="mt-3 text-sm leading-6 text-blue-50">Cadastro, IBGE e certificado estão prontos para a emissão.</p>
+                            <Link href="/cadastro" className="mt-7 inline-flex items-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-black text-blue-700 transition hover:bg-blue-50">
+                                Criar conta <ArrowRight size={16} />
+                            </Link>
+                        </div>
+
+                        <div className="rounded-3xl border border-slate-200 bg-white p-5">
+                            <div className="flex items-center justify-between">
+                                <h3 className="text-lg font-black text-slate-900">Prontidão para emissão</h3>
+                                <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700 animate-status-pulse">4/4</span>
+                            </div>
+                            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                                {checklist.map((item) => (
+                                    <div key={item.label} className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                                        <div className="flex items-center gap-2 text-emerald-700">
+                                            <CheckCircle size={16} />
+                                            <p className="text-sm font-black">{item.label}</p>
+                                        </div>
+                                        <p className="mt-1 text-xs font-medium text-emerald-700/80">{item.status}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="mt-4 grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+                        <div className="rounded-3xl border border-slate-200 bg-white p-5">
+                            <div className="mb-4 flex items-center justify-between">
+                                <h3 className="text-lg font-black text-slate-900">Minhas Notas</h3>
+                                <span className="text-xs font-black text-blue-600">PDF/XML</span>
+                            </div>
+                            {['Cliente Exemplo LTDA', 'Pessoa Física Exemplo', 'Serviço recorrente'].map((item, index) => (
+                                <div key={item} className="grid grid-cols-[1fr_96px_70px] items-center gap-3 border-t border-slate-100 py-3">
+                                    <span className="truncate text-sm font-bold text-slate-700">{item}</span>
+                                    <span className={`w-fit rounded-full px-2 py-1 text-[10px] font-black ${index === 1 ? 'bg-slate-100 text-slate-500' : 'bg-emerald-50 text-emerald-700'}`}>
+                                        {index === 1 ? 'CANCELADA' : 'AUTORIZADA'}
+                                    </span>
+                                    <span className="rounded-xl bg-blue-50 px-3 py-2 text-center text-xs font-black text-blue-700">Abrir</span>
+                                </div>
+                            ))}
+                        </div>
+
+                        <div className="rounded-3xl border border-slate-200 bg-white p-5">
+                            <div className="flex items-center gap-3">
+                                <div className="rounded-2xl bg-blue-50 p-3 text-blue-600">
+                                    <RefreshCw size={20} />
+                                </div>
+                                <div>
+                                    <h3 className="text-lg font-black text-slate-900">Retome sem perder dados</h3>
+                                    <p className="mt-1 text-sm leading-6 text-slate-500">Rascunhos mantêm a emissão pronta para continuar quando o Portal solicitar ajuste.</p>
+                                </div>
+                            </div>
+                            <div className="mt-5 rounded-2xl border border-blue-200 bg-blue-50 p-4">
+                                <p className="text-xs font-black uppercase tracking-[0.16em] text-blue-600">Rascunho</p>
+                                <p className="mt-2 text-sm font-black text-slate-900">Emissão preservada</p>
+                                <p className="mt-1 text-xs leading-5 text-slate-500">Volte na revisão, confirme os dados e transmita novamente.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 function StatusBadge({ status, mini = false }: { status: StatusID, mini?: boolean }) {
     const config = getStatusConfig(status);
     if (mini) return <div className={`w-3 h-3 rounded-full shadow-sm ${config.dotColor}`} title={config.label}></div>;
@@ -560,12 +712,12 @@ function SecaoPublicoAlvo() {
                 </div>
                 <h3 className="text-2xl font-black text-slate-800 mb-3">Ei, PJ!</h3>
                 <p className="text-slate-600 mb-6 flex-1 text-sm leading-relaxed">
-                  Ideal para prestadores de serviço, MEIs e pequenas empresas. Emita suas notas de forma 100% automática e sem burocracia.
+                  Para prestadores, MEIs e pequenas empresas que precisam emitir, acompanhar, cancelar e baixar arquivos sem depender do Portal no dia a dia.
                 </p>
                 <ul className="space-y-3 mb-8 text-sm text-slate-600 font-medium">
-                  <li className="flex items-center gap-2"><CheckCircle size={16} className="text-blue-500"/> Emissão rápida</li>
-                  <li className="flex items-center gap-2"><CheckCircle size={16} className="text-blue-500"/> Controle de limites</li>
-                  <li className="flex items-center gap-2"><CheckCircle size={16} className="text-blue-500"/> Planos self-service</li>
+                  <li className="flex items-center gap-2"><CheckCircle size={16} className="text-blue-500"/> Emissão assistida</li>
+                  <li className="flex items-center gap-2"><CheckCircle size={16} className="text-blue-500"/> PDF, XML e cancelamento</li>
+                  <li className="flex items-center gap-2"><CheckCircle size={16} className="text-blue-500"/> Ajuda e suporte no SaaS</li>
                 </ul>
                 <Link href="/cadastro" className="inline-flex items-center justify-center gap-2 w-full bg-blue-50 text-blue-700 font-bold py-3 rounded-xl hover:bg-blue-600 hover:text-white transition-colors">
                   Criar minha conta <ArrowRight size={18} />
@@ -584,12 +736,12 @@ function SecaoPublicoAlvo() {
                 </div>
                 <h3 className="text-2xl font-black text-slate-800 mb-3">Ei, Contador!</h3>
                 <p className="text-slate-600 mb-6 flex-1 text-sm leading-relaxed">
-                  O paraíso do BPO Financeiro. Gerencie múltiplos CNPJs num dashboard unificado, emita notas e tenha controle da carteira.
+                  Para escritórios que precisam operar múltiplos CNPJs, alternar empresas, acompanhar pendências e manter a carteira organizada.
                 </p>
                 <ul className="space-y-3 mb-8 text-sm text-slate-600 font-medium">
                   <li className="flex items-center gap-2"><CheckCircle size={16} className="text-emerald-500"/> Multi-empresas</li>
-                  <li className="flex items-center gap-2"><CheckCircle size={16} className="text-emerald-500"/> Vínculo de CNPJ</li>
-                  <li className="flex items-center gap-2"><CheckCircle size={16} className="text-emerald-500"/> Gestão centralizada</li>
+                  <li className="flex items-center gap-2"><CheckCircle size={16} className="text-emerald-500"/> Vínculo e custódia</li>
+                  <li className="flex items-center gap-2"><CheckCircle size={16} className="text-emerald-500"/> Carteira centralizada</li>
                 </ul>
                 <Link href="/cadastro?tipo=contador" className="inline-flex items-center justify-center gap-2 w-full bg-emerald-50 text-emerald-700 font-bold py-3 rounded-xl hover:bg-emerald-600 hover:text-white transition-colors">
                   Cadastrar escritório <ArrowRight size={18} />
@@ -608,12 +760,12 @@ function SecaoPublicoAlvo() {
                 </div>
                 <h3 className="text-2xl font-black text-white mb-3">Seja Parceiro</h3>
                 <p className="text-slate-400 mb-6 flex-1 text-sm leading-relaxed">
-                  Volume alto? Temos contratos customizados. Limites massivos e negociação direta com nossa diretoria para grandes operações.
+                  Volume alto ou operação especial? Estruture limites, suporte e condições comerciais sob medida com atendimento direto.
                 </p>
                 <ul className="space-y-3 mb-8 text-sm text-slate-300 font-medium">
                   <li className="flex items-center gap-2"><CheckCircle size={16} className="text-purple-400"/> Limites customizados</li>
-                  <li className="flex items-center gap-2"><CheckCircle size={16} className="text-purple-400"/> Faturamento sob medida</li>
-                  <li className="flex items-center gap-2"><CheckCircle size={16} className="text-purple-400"/> Atendimento VIP</li>
+                  <li className="flex items-center gap-2"><CheckCircle size={16} className="text-purple-400"/> Operação assistida</li>
+                  <li className="flex items-center gap-2"><CheckCircle size={16} className="text-purple-400"/> Suporte prioritário</li>
                 </ul>
                 <a href="https://wa.me/seu-numero" target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 w-full bg-purple-900/40 text-purple-300 font-bold py-3 rounded-xl hover:bg-purple-600 hover:text-white transition-colors border border-purple-800/50 hover:border-transparent">
                   Falar com Comercial <ArrowRight size={18} />

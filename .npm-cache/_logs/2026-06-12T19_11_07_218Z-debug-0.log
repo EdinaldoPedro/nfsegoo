@@ -1,0 +1,33 @@
+0 verbose cli C:\Program Files\nodejs\node.exe C:\Users\edina\AppData\Roaming\npm\node_modules\npm\bin\npm-cli.js
+1 info using npm@11.12.1
+2 info using node@v24.12.0
+3 silly config load:file:C:\Users\edina\AppData\Roaming\npm\node_modules\npm\npmrc
+4 silly config load:file:C:\Users\edina\Documents\Sites\nfsegoo\.npmrc
+5 silly config load:file:C:\Users\edina\.npmrc
+6 silly config load:file:C:\Users\edina\AppData\Roaming\npm\etc\npmrc
+7 verbose title npm install
+8 verbose argv "install" "--package-lock-only" "--ignore-scripts"
+9 verbose logfile logs-max:10 dir:C:\Users\edina\Documents\Sites\nfsegoo\.npm-cache\_logs\2026-06-12T19_11_07_218Z-
+10 verbose logfile C:\Users\edina\Documents\Sites\nfsegoo\.npm-cache\_logs\2026-06-12T19_11_07_218Z-debug-0.log
+11 silly logfile done cleaning log files
+12 http fetch GET https://registry.npmjs.org/npm attempt 1 failed with ECONNREFUSED
+13 silly packumentCache heap:4496293888 maxSize:1124073472 maxEntrySize:562036736
+14 silly idealTree buildDeps
+15 http cache https://registry.npmjs.org/@tailwindcss/oxide-wasm32-wasi/-/oxide-wasm32-wasi-4.1.18.tgz 0ms (cache hit)
+16 silly tarball no local data for https://registry.npmjs.org/@tailwindcss/oxide-wasm32-wasi/-/oxide-wasm32-wasi-4.1.18.tgz. Extracting by manifest.
+17 verbose stack Error: request to https://registry.npmjs.org/@tailwindcss/oxide-wasm32-wasi/-/oxide-wasm32-wasi-4.1.18.tgz failed: cache mode is 'only-if-cached' but no cached response is available.
+17 verbose stack     at cacheFetch (C:\Users\edina\AppData\Roaming\npm\node_modules\npm\node_modules\make-fetch-happen\lib\cache\index.js:12:13)
+17 verbose stack     at async fetch (C:\Users\edina\AppData\Roaming\npm\node_modules\npm\node_modules\make-fetch-happen\lib\fetch.js:98:7)
+18 error code ENOTCACHED
+19 error request to https://registry.npmjs.org/@tailwindcss/oxide-wasm32-wasi/-/oxide-wasm32-wasi-4.1.18.tgz failed: cache mode is 'only-if-cached' but no cached response is available.
+20 silly unfinished npm timer reify 1781291468546
+21 silly unfinished npm timer reify:loadTrees 1781291468546
+22 silly unfinished npm timer idealTree:buildDeps 1781291469205
+23 silly unfinished npm timer idealTree:node_modules/@tailwindcss/oxide-wasm32-wasi 1781291469207
+24 verbose cwd C:\Users\edina\Documents\Sites\nfsegoo
+25 verbose os Windows_NT 10.0.26200
+26 verbose node v24.12.0
+27 verbose npm  v11.12.1
+28 verbose exit 1
+29 verbose code 1
+30 error A complete log of this run can be found in: C:\Users\edina\Documents\Sites\nfsegoo\.npm-cache\_logs\2026-06-12T19_11_07_218Z-debug-0.log

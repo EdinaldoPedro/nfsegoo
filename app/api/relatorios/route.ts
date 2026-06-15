@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { checkPlanLimits } from '@/app/services/planService'; 
 import { validateRequest } from '@/app/utils/api-security';
+import { getAccessibleEmpresaIds } from '@/app/utils/access-control';
 import { getTributacaoPorCnae } from '@/app/utils/tributacao'; // <--- ADICIONE ESTA LINHA AQUI
 
 
@@ -39,9 +40,17 @@ export async function GET(request: Request) {
   try {
     const user = await prisma.user.findUnique({ where: { id: userId } });
     let empresaId = user?.empresaId;
+    if (!user) return NextResponse.json({ error: 'Usuario nao encontrado' }, { status: 404 });
+
+    const accessibleEmpresaIds = await getAccessibleEmpresaIds(user);
 
     if (contextId && contextId !== 'null') {
+       if (accessibleEmpresaIds !== null && !accessibleEmpresaIds.includes(contextId)) {
+          return NextResponse.json({ error: 'Empresa nao autorizada para este usuario.' }, { status: 403 });
+       }
        empresaId = contextId;
+    } else if (accessibleEmpresaIds !== null && empresaId && !accessibleEmpresaIds.includes(empresaId)) {
+       return NextResponse.json({ error: 'Empresa nao autorizada para este usuario.' }, { status: 403 });
     }
 
     if (!empresaId) return NextResponse.json({ data: [], summary: {} });

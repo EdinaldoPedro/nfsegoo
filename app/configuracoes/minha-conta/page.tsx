@@ -26,6 +26,7 @@ export default function MinhaContaPage() {
   const [passwordSuccess, setPasswordSuccess] = useState('');
   const [showPasswordForm, setShowPasswordForm] = useState(false);
   const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
+  const [pedidoContratacao, setPedidoContratacao] = useState<any>(null);
   
   // === ESTADOS PARA NOVA EMPRESA ===
   const [showAddPJ, setShowAddPJ] = useState(false);
@@ -85,6 +86,11 @@ export default function MinhaContaPage() {
           if(err.message === "Sessão expirada") router.push('/login');
           setLoading(false); 
       });
+
+    fetch('/api/checkout', { headers: { 'x-user-id': userId }, cache: 'no-store' })
+      .then(res => res.ok ? res.json() : null)
+      .then(result => setPedidoContratacao(result?.pedido || null))
+      .catch(() => setPedidoContratacao(null));
   }, [router]);
   
   const handlePlanChange = async (newSlug: string, newCiclo: string) => {

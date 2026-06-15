@@ -4,6 +4,7 @@ import zlib from 'zlib';
 import { checkPlanLimits } from '@/app/services/planService';
 import { validateRequest } from '@/app/utils/api-security';
 import { getAccessibleEmpresaIds } from '@/app/utils/access-control';
+import { validateJsonContentLength } from '@/app/utils/request-guards';
 import { prisma } from '@/app/utils/prisma';
 
 function decodeBase64Xml(base64: string) {
@@ -25,6 +26,9 @@ export async function POST(request: Request) {
   }
 
   try {
+    const sizeError = validateJsonContentLength(request, 500_000);
+    if (sizeError) return sizeError;
+
     const { ids, formato } = await request.json();
 
     if (!ids || ids.length === 0) {
