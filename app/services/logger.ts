@@ -5,6 +5,13 @@ interface LogParams {
   action: string;
   message: string;
   details?: any;
+  module?: string;
+  traceId?: string;
+  userId?: string;
+  requestPath?: string;
+  statusCode?: number;
+  durationMs?: number;
+  debugHint?: string;
   empresaId?: string;
   vendaId?: string;
 }
@@ -74,7 +81,62 @@ export function sanitizeLogValue(value: any): any {
   return sanitizarObjeto(value);
 }
 
-export async function createLog({ level, action, message, details, empresaId, vendaId }: LogParams) {
+export function createTraceId(prefix = 'trace') {
+  const random = Math.random().toString(36).slice(2, 10);
+  return `${prefix}_${Date.now().toString(36)}_${random}`;
+}
+
+export function getErrorDiagnostics(error: any) {
+  const message = String(error?.message || error || 'Erro desconhecido');
+  const response = error?.response;
+  const code = error?.code || response?.status || response?.statusCode;
+
+  return {
+    code,
+    message,
+    responseStatus: response?.status,
+    responseText: response?.data || response?.statusText,
+    stack: error?.stack,
+  };
+}
+
+export function inferDebugHint(error: any, fallback?: string) {
+  const text = `${error?.code || ''} ${error?.message || error || ''} ${error?.response?.data || ''}`.toLowerCase();
+
+  if (text.includes('quota') || text.includes('daily') || text.includes('limit') || text.includes('too many')) {
+    return 'O provedor pode ter bloqueado por limite de envio. Aguarde o reset do limite ou altere a conta SMTP.';
+  }
+
+  if (text.includes('auth') || text.includes('invalid login') || text.includes('535')) {
+    return 'Falha de autenticacao SMTP. Confira usuario, senha/app password e permissoes da conta remetente.';
+  }
+
+  if (text.includes('timeout') || text.includes('etimedout') || text.includes('econnreset') || text.includes('socket')) {
+    return 'Falha temporaria de rede ou servico externo instavel. Tente novamente e verifique conectividade do servidor.';
+  }
+
+  if (text.includes('certificate') || text.includes('tls') || text.includes('ssl')) {
+    return 'Falha TLS/SSL. Verifique porta, modo seguro e certificado do servidor SMTP.';
+  }
+
+  return fallback || undefined;
+}
+
+export async function createLog({
+  level,
+  action,
+  message,
+  details,
+  module,
+  traceId,
+  userId,
+  requestPath,
+  statusCode,
+  durationMs,
+  debugHint,
+  empresaId,
+  vendaId,
+}: LogParams) {
   try {
     let detailsStr = '';
     const dadosSeguros = sanitizarObjeto(details);
@@ -93,9 +155,16 @@ export async function createLog({ level, action, message, details, empresaId, ve
         action,
         message: sanitizarString(message),
         details: detailsStr,
+        module,
+        traceId,
+        userId,
+        requestPath,
+        statusCode,
+        durationMs,
+        debugHint: debugHint ? sanitizarString(debugHint) : undefined,
         empresaId,
         vendaId,
-      },
+      } as any,
     });
 
     const cor = level === 'ERRO' ? '\x1b[31m' : '\x1b[32m';

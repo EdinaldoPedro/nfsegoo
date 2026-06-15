@@ -55,6 +55,19 @@ export async function GET(request: Request) {
 
     if (!empresaId) return NextResponse.json({ data: [], summary: {} });
 
+    const empresa = await prisma.empresa.findUnique({
+      where: { id: empresaId },
+      select: {
+        razaoSocial: true,
+        nomeFantasia: true,
+        documento: true,
+        inscricaoMunicipal: true,
+        cidade: true,
+        uf: true,
+        codigoIbge: true,
+      },
+    });
+
     // Filtros
     const whereClause: any = {
       empresaId,
@@ -153,7 +166,8 @@ export async function GET(request: Request) {
             qtdAutorizadas: summary._count.id || 0,
             qtdCanceladas: totalCanceladas,
             periodo: { start: startDate, end: endDate }
-        }
+        },
+        prestador: empresa
     });
 
   } catch (e: any) {

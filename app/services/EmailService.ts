@@ -1,7 +1,16 @@
 import nodemailer from 'nodemailer';
-import { createLog } from './logger';
+import { createLog, getErrorDiagnostics, inferDebugHint } from './logger';
 import { decrypt } from '@/app/utils/crypto';
 import { prisma } from '@/app/utils/prisma';
+
+type EmailLogContext = {
+  traceId?: string;
+  userId?: string;
+  empresaId?: string;
+  vendaId?: string;
+  requestPath?: string;
+  module?: string;
+};
 
 export class EmailService {
   private async getTransporter() {
@@ -20,7 +29,7 @@ export class EmailService {
             pass: smtpPass,
           },
         }),
-        remetente: config.emailRemetente || config.smtpUser || 'nao-responda@seusistema.com.br',
+        remetente: config.emailRemetente || config.smtpUser || 'nao-responda@nfsegoo.com.br',
       };
     }
 
@@ -35,19 +44,35 @@ export class EmailService {
             pass: process.env.SMTP_PASS,
           },
         }),
-        remetente: process.env.SMTP_FROM || process.env.SMTP_USER || 'nao-responda@seusistema.com.br',
+        remetente: process.env.SMTP_FROM || process.env.SMTP_USER || 'nao-responda@nfsegoo.com.br',
       };
     }
 
-    throw new Error('SMTP nÃ£o configurado. Configure no Painel Admin ou .env');
+    throw new Error('SMTP nao configurado. Configure no Painel Admin ou .env');
   }
 
-  async sendEmail(to: string, subject: string, html: string, attachments: any[] = []) {
+  async sendEmail(to: string, subject: string, html: string, attachments: any[] = [], context: EmailLogContext = {}) {
+    const startedAt = Date.now();
+    const moduleName = context.module || 'EMAIL';
+
     try {
       const { transporter, remetente } = await this.getTransporter();
 
+      await createLog({
+        level: 'INFO',
+        action: 'EMAIL_ENVIO_INICIADO',
+        message: `Preparando envio de e-mail para ${to}.`,
+        module: moduleName,
+        traceId: context.traceId,
+        userId: context.userId,
+        empresaId: context.empresaId,
+        vendaId: context.vendaId,
+        requestPath: context.requestPath,
+        details: { to, subject, remetente, attachments: attachments.length },
+      });
+
       const info = await transporter.sendMail({
-        from: `"Emissor NFSe" <${remetente}>`,
+        from: `"NFSe Goo" <${remetente}>`,
         to,
         subject,
         html,
@@ -55,6 +80,20 @@ export class EmailService {
       });
 
       console.log(`[EMAIL] Enviado para ${to} | ID: ${info.messageId}`);
+
+      await createLog({
+        level: 'INFO',
+        action: 'EMAIL_ENVIO_SUCESSO',
+        message: `E-mail aceito pelo provedor para ${to}.`,
+        module: moduleName,
+        traceId: context.traceId,
+        userId: context.userId,
+        empresaId: context.empresaId,
+        vendaId: context.vendaId,
+        requestPath: context.requestPath,
+        durationMs: Date.now() - startedAt,
+        details: { to, subject, messageId: info.messageId, accepted: info.accepted, rejected: info.rejected },
+      });
 
       return { success: true, messageId: info.messageId };
     } catch (error: any) {
@@ -64,7 +103,16 @@ export class EmailService {
         level: 'ERRO',
         action: 'FALHA_ENVIO_EMAIL',
         message: `Falha ao enviar para ${to}: ${error.message}`,
-        details: { stack: error.stack },
+        module: moduleName,
+        traceId: context.traceId,
+        userId: context.userId,
+        empresaId: context.empresaId,
+        vendaId: context.vendaId,
+        requestPath: context.requestPath,
+        durationMs: Date.now() - startedAt,
+        statusCode: typeof error?.responseCode === 'number' ? error.responseCode : undefined,
+        debugHint: inferDebugHint(error, 'Verifique a configuracao SMTP, limite do provedor e conectividade do servidor.'),
+        details: getErrorDiagnostics(error),
       });
 
       return { success: false, error: error.message };
@@ -73,42 +121,40 @@ export class EmailService {
 
   getTemplateRecuperacaoSenha(nome: string, link: string) {
     return `
-            <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
-                <h2 style="color: #2563eb; margin-bottom: 10px;">NFSeGoo</h2>
-                <h3 style="color: #1e293b; margin-top: 0;">RecuperaÃ§Ã£o de Palavra-passe</h3>
-                <p>OlÃ¡, <strong>${nome}</strong>.</p>
-                <p>Recebemos um pedido para redefinir a palavra-passe da sua conta no sistema <strong>NFSeGoo</strong>.</p>
-                <p>Se foi vocÃª que fez este pedido, clique no botÃ£o abaixo para criar uma nova palavra-passe segura:</p>
-                <br/>
-                <div style="text-align: center;">
-                    <a href="${link}" style="background-color: #2563eb; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: bold; font-size: 16px;">Redefinir Minha Senha</a>
-                </div>
-                <br/><br/>
-                <hr style="border: none; border-top: 1px solid #e2e8f0;" />
-                <p style="font-size: 12px; color: #64748b; margin-top: 20px;">
-                    ðŸ”’ <strong>SeguranÃ§a:</strong> Este link Ã© de uso Ãºnico e <strong>expira em 1 hora</strong>. Nunca partilhe este link ou a sua senha com ninguÃ©m.
-                </p>
-                <p style="font-size: 12px; color: #64748b;">
-                    Se nÃ£o solicitou esta alteraÃ§Ã£o, por favor ignore este e-mail. A sua conta permanece segura.
-                </p>
-            </div>
-        `;
+      <div style="font-family: Arial, sans-serif; color: #334155; max-width: 600px; margin: auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 14px;">
+        <h2 style="color: #2563eb; margin: 0 0 10px;">NFSe Goo</h2>
+        <h3 style="color: #0f172a; margin: 0 0 16px;">Recuperacao de senha</h3>
+        <p>Ola, <strong>${nome}</strong>.</p>
+        <p>Recebemos um pedido para redefinir a senha da sua conta no <strong>NFSe Goo</strong>.</p>
+        <p>Se foi voce que fez este pedido, clique no botao abaixo para criar uma nova senha segura:</p>
+        <div style="text-align: center; margin: 28px 0;">
+          <a href="${link}" style="background-color: #2563eb; color: white; padding: 14px 28px; text-decoration: none; border-radius: 10px; display: inline-block; font-weight: bold; font-size: 16px;">Redefinir minha senha</a>
+        </div>
+        <hr style="border: none; border-top: 1px solid #e2e8f0;" />
+        <p style="font-size: 12px; color: #64748b; margin-top: 20px;">
+          <strong>Seguranca:</strong> este link e de uso unico e expira em 1 hora. Nunca compartilhe este link ou sua senha.
+        </p>
+        <p style="font-size: 12px; color: #64748b;">
+          Se voce nao solicitou esta alteracao, ignore este e-mail. Sua conta permanece segura.
+        </p>
+      </div>
+    `;
   }
 
   getTemplateVerificacaoEmail(nome: string, codigo: string) {
     return `
-            <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px;">
-                <h2 style="color: #2563eb;">ConfirmaÃ§Ã£o de E-mail</h2>
-                <p>OlÃ¡, <strong>${nome}</strong>.</p>
-                <p>Recebemos uma solicitaÃ§Ã£o para atualizar seu e-mail de acesso.</p>
-                <p>Seu cÃ³digo de verificaÃ§Ã£o Ã©:</p>
-                <div style="background-color: #f3f4f6; padding: 15px; font-size: 24px; font-weight: bold; text-align: center; letter-spacing: 5px; margin: 20px 0; border-radius: 5px;">
-                    ${codigo}
-                </div>
-                <p style="font-size: 12px; color: #666;">Este cÃ³digo expira em 15 minutos.</p>
-                <p style="font-size: 12px; color: #666;">Se nÃ£o foi vocÃª, altere sua senha imediatamente.</p>
-            </div>
-        `;
+      <div style="font-family: Arial, sans-serif; color: #334155; max-width: 600px; margin: auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 14px;">
+        <h2 style="color: #2563eb; margin: 0 0 10px;">Confirmacao de e-mail</h2>
+        <p>Ola, <strong>${nome}</strong>.</p>
+        <p>Recebemos uma solicitacao para atualizar seu e-mail de acesso.</p>
+        <p>Seu codigo de verificacao e:</p>
+        <div style="background-color: #f8fafc; padding: 16px; font-size: 24px; font-weight: bold; text-align: center; letter-spacing: 5px; margin: 20px 0; border-radius: 10px; border: 1px solid #e2e8f0;">
+          ${codigo}
+        </div>
+        <p style="font-size: 12px; color: #64748b;">Este codigo expira em 15 minutos.</p>
+        <p style="font-size: 12px; color: #64748b;">Se nao foi voce, altere sua senha imediatamente.</p>
+      </div>
+    `;
   }
 
   getTemplateContratacaoManual(params: {
@@ -132,12 +178,12 @@ export class EmailService {
 
     return `
       <div style="font-family: Arial, sans-serif; color: #1e293b; max-width: 620px; margin: auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 14px;">
-        <h2 style="color:#2563eb;margin:0 0 10px;">NFSeGoo</h2>
+        <h2 style="color:#2563eb;margin:0 0 10px;">NFSe Goo</h2>
         <h3 style="margin:0 0 16px;color:#0f172a;">${params.titulo}</h3>
         <p>Ola, <strong>${params.nome}</strong>.</p>
         <p style="line-height:1.6;">${params.mensagem}</p>
         ${rows ? `<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px;margin:18px 0;">${rows}</div>` : ''}
-        ${params.link ? `<div style="text-align:center;margin:24px 0;"><a href="${params.link}" style="background:#2563eb;color:white;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:bold;display:inline-block;">Abrir no NFSeGoo</a></div>` : ''}
+        ${params.link ? `<div style="text-align:center;margin:24px 0;"><a href="${params.link}" style="background:#2563eb;color:white;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:bold;display:inline-block;">Abrir no NFSe Goo</a></div>` : ''}
         <p style="font-size:12px;color:#64748b;margin-top:24px;">Este e-mail e automatico. Para enviar documentos ou responder a equipe, use o suporte dentro da plataforma.</p>
       </div>
     `;
@@ -153,7 +199,7 @@ export class EmailService {
   }) {
     return `
       <div style="font-family: Arial, sans-serif; color: #1e293b; max-width: 620px; margin: auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 14px;">
-        <h2 style="color:#2563eb;margin:0 0 10px;">NFSeGoo</h2>
+        <h2 style="color:#2563eb;margin:0 0 10px;">NFSe Goo</h2>
         <h3 style="margin:0 0 16px;color:#0f172a;">Nova resposta no suporte</h3>
         <p>Ola, <strong>${params.nome}</strong>.</p>
         <p>Ha uma nova resposta no ticket <strong>#${params.protocolo}</strong>.</p>

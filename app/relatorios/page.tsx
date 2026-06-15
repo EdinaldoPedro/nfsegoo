@@ -28,6 +28,7 @@ export default function RelatoriosPage() {
     // Dados
     const [notas, setNotas] = useState<any[]>([]);
     const [summary, setSummary] = useState<any>(null);
+    const [prestador, setPrestador] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [isBlocked, setIsBlocked] = useState(false);
     
@@ -105,6 +106,7 @@ const fetchData = async () => {
             if (data.data) {
                 setNotas(data.data);
                 setSummary(data.summary);
+                setPrestador(data.prestador || null);
                 setTotalPages(data.meta.totalPages);
                 setSelectedIds([]); 
             }
@@ -119,41 +121,80 @@ const fetchData = async () => {
         return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(val || 0));
     };
 
+    const formatDoc = (value?: string | null) => {
+        const digits = String(value || '').replace(/\D/g, '');
+        if (digits.length === 14) return digits.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+        if (digits.length === 11) return digits.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4');
+        return value || '-';
+    };
+
+    const truncateText = (value: string, size = 56) => {
+        return value.length > size ? `${value.slice(0, size)}...` : value;
+    };
+
     // === GERAR RELATÓRIO PDF ===
     const handleGeneratePDF = () => {
         if (!summary) return;
 
         const doc = new jsPDF();
+        const periodoRelatorio = `${new Date(startDate + 'T12:00:00').toLocaleDateString()} a ${new Date(endDate + 'T12:00:00').toLocaleDateString()}`;
+        const prestadorNome = prestador?.razaoSocial || prestador?.nomeFantasia || 'Prestador nao identificado';
+        const prestadorLocal = [prestador?.cidade, prestador?.uf].filter(Boolean).join('/');
         
-        doc.setFontSize(18);
-        doc.setTextColor(40);
+        doc.setFillColor(15, 23, 42);
+        doc.rect(0, 0, 210, 34, 'F');
+
+        doc.setFontSize(9);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(147, 197, 253);
+        doc.text("NFSeGoo | Relatório fiscal", 14, 12);
+
+        doc.setFontSize(17);
+        doc.setTextColor(255, 255, 255);
         doc.text("Relatório de Notas Fiscais", 14, 22);
-        
-        doc.setFontSize(10);
-        doc.setTextColor(100);
-        doc.text(`Período: ${new Date(startDate).toLocaleDateString()} a ${new Date(endDate).toLocaleDateString()}`, 14, 28);
-        doc.text(`Gerado em: ${new Date().toLocaleString()}`, 14, 33);
+
+        doc.setFontSize(8);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(203, 213, 225);
+        doc.text("Documento operacional para conferência, suporte fiscal e acompanhamento de emissão.", 14, 29);
+
+        doc.setFillColor(248, 250, 252);
+        doc.roundedRect(14, 40, 180, 28, 2, 2, 'F');
+
+        doc.setFontSize(9);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(15, 23, 42);
+        doc.text("Prestador", 20, 48);
+        doc.text("Período", 126, 48);
+
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(71, 85, 105);
+        doc.text(truncateText(prestadorNome, 56), 20, 54);
+        doc.text(`CNPJ/CPF: ${formatDoc(prestador?.documento)}`, 20, 59);
+        doc.text(`IM: ${prestador?.inscricaoMunicipal || '-'} | IBGE: ${prestador?.codigoIbge || '-'} | ${prestadorLocal || '-'}`, 20, 64);
+        doc.text(periodoRelatorio, 126, 54);
+        doc.text(`Gerado em: ${new Date().toLocaleString()}`, 126, 59);
 
         // Resumo
         doc.setFillColor(245, 247, 250);
-        doc.roundedRect(14, 40, 180, 20, 2, 2, 'F');
+        doc.roundedRect(14, 75, 180, 20, 2, 2, 'F');
         
         doc.setFontSize(10);
         doc.setTextColor(80);
-        doc.text("Valor Total (Autorizadas):", 20, 48);
-        doc.text("Qtd. Notas:", 100, 48);
-        doc.text("Canceladas:", 140, 48);
+        doc.text("Valor Total (Autorizadas):", 20, 83);
+        doc.text("Qtd. Notas:", 100, 83);
+        doc.text("Canceladas:", 140, 83);
 
         doc.setFontSize(12);
         doc.setFont("helvetica", "bold");
         doc.setTextColor(22, 163, 74);
-        doc.text(formatCurrency(summary.totalValor), 20, 55);
+        doc.text(formatCurrency(summary.totalValor), 20, 90);
         
         doc.setTextColor(40);
-        doc.text(String(summary.qtdAutorizadas), 100, 55);
+        doc.text(String(summary.qtdAutorizadas), 100, 90);
         
         doc.setTextColor(220, 38, 38);
-        doc.text(String(summary.qtdCanceladas), 140, 55);
+        doc.text(String(summary.qtdCanceladas), 140, 90);
 
         // Tabela PDF
         const tableData = notas.map(n => [
@@ -167,7 +208,7 @@ const fetchData = async () => {
         ]);
 
         autoTable(doc, {
-            startY: 65,
+            startY: 102,
             head: [['Data', 'Número', 'Tomador', 'Cód. Serviço', 'Valor', 'Status']],
             body: tableData,
             theme: 'grid',
@@ -175,6 +216,16 @@ const fetchData = async () => {
             styles: { fontSize: 8 },
             alternateRowStyles: { fillColor: [248, 250, 252] }
         });
+
+        const pageCount = doc.getNumberOfPages();
+        for (let i = 1; i <= pageCount; i++) {
+            doc.setPage(i);
+            doc.setFontSize(8);
+            doc.setFont("helvetica", "normal");
+            doc.setTextColor(100);
+            doc.text("Diretrizes NFSeGoo: valide valores, status e arquivos oficiais antes do fechamento contábil. Relatório sem valor fiscal autônomo.", 14, 286);
+            doc.text(`Página ${i}/${pageCount}`, 180, 286);
+        }
 
         doc.save(`relatorio_faturamento_${startDate}.pdf`);
     };
@@ -276,6 +327,15 @@ const fetchData = async () => {
                             <p className="text-slate-500 text-xs">
                                 {startDate ? new Date(startDate + 'T12:00:00').toLocaleDateString() : '-'} até {endDate ? new Date(endDate + 'T12:00:00').toLocaleDateString() : '-'}
                             </p>
+                            {prestador && (
+                                <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/60 p-3">
+                                    <p className="text-[10px] font-black uppercase tracking-wider text-blue-600">Prestador do relatório</p>
+                                    <p className="mt-1 text-sm font-black text-slate-800">{prestador.razaoSocial || prestador.nomeFantasia}</p>
+                                    <p className="mt-1 text-xs text-slate-500">
+                                        CNPJ/CPF: {formatDoc(prestador.documento)} · IM: {prestador.inscricaoMunicipal || '-'} · IBGE: {prestador.codigoIbge || '-'} · {[prestador.cidade, prestador.uf].filter(Boolean).join('/') || '-'}
+                                    </p>
+                                </div>
+                            )}
                         </div>
                         <div className="flex gap-8">
                             <div className="text-right">

@@ -401,16 +401,30 @@ model PlanHistory {
 }
 
 model SystemLog {
-  id        String   @id @default(uuid())
-  level     String
-  action    String
-  message   String
-  details   String?
-  empresaId String?
-  vendaId   String?
-  createdAt DateTime @default(now())
-  empresa   Empresa? @relation(fields: [empresaId], references: [id])
-  venda     Venda?   @relation(fields: [vendaId], references: [id])
+  id          String   @id @default(uuid())
+  level       String
+  action      String
+  message     String
+  details     String?
+  module      String?
+  traceId     String?
+  userId      String?
+  requestPath String?
+  statusCode  Int?
+  durationMs  Int?
+  debugHint   String?
+  empresaId   String?
+  vendaId     String?
+  createdAt   DateTime @default(now())
+  empresa     Empresa? @relation(fields: [empresaId], references: [id])
+  venda       Venda?   @relation(fields: [vendaId], references: [id])
+
+  @@index([createdAt])
+  @@index([level])
+  @@index([module])
+  @@index([traceId])
+  @@index([empresaId])
+  @@index([vendaId])
 }
 
 model Ticket {
