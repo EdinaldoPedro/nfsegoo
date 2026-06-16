@@ -81,20 +81,76 @@ function parsePayloadSeguro(payloadJson?: string | null) {
   }
 }
 
+function firstDefined(...values: any[]) {
+  return values.find((value) => value !== undefined && value !== null && value !== '');
+}
+
+function optionalString(value: any) {
+  const resolved = firstDefined(value);
+  if (resolved === undefined) return undefined;
+  const text = String(resolved).trim();
+  return text ? text : undefined;
+}
+
+function parseNumero(value: any, fallback = 0) {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : fallback;
+  const parsed = Number(String(value).replace(/[^\d,.-]/g, '').replace(/\./g, '').replace(',', '.'));
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function parseBoolean(value: any, fallback = false) {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value === 'boolean') return value;
+  const normalized = String(value).trim().toLowerCase();
+  if (['true', '1', 'sim', 's', 'yes'].includes(normalized)) return true;
+  if (['false', '0', 'nao', 'não', 'n', 'no'].includes(normalized)) return false;
+  return fallback;
+}
+
 function normalizarPayload(body: any) {
   const {
     clienteId,
     valor,
     descricao,
     codigoCnae,
+    cnae,
     vendaId,
     aliquota,
+    aliquotaMunicipio,
     issRetido,
     retencoes,
     numeroDPS,
     serieDPS,
     valorMoedaEstrangeira,
     dataCompetencia,
+    codigoTributacaoNacional,
+    codigoTribNacional,
+    codigoTributacaoMunicipal,
+    codigoNbs,
+    itemLc,
+    tipoTributacao,
+    inscricaoMunicipalPrestador,
+    regimeEspecialTributacao,
+    localPrestacaoIbge,
+    tomadorDocumento,
+    tomadorNome,
+    tomadorInscricaoMunicipal,
+    tomadorEmail,
+    tomadorTelefone,
+    tomadorTipo,
+    tomadorNif,
+    tomadorPais,
+    tomadorMoeda,
+    tomadorSemEndereco,
+    tomadorCep,
+    tomadorLogradouro,
+    tomadorNumero,
+    tomadorComplemento,
+    tomadorBairro,
+    tomadorCidade,
+    tomadorUf,
+    tomadorCodigoIbge,
     idempotencyKey,
   } = body;
 
@@ -102,15 +158,44 @@ function normalizarPayload(body: any) {
     clienteId,
     valor,
     descricao,
-    codigoCnae,
+    codigoCnae: codigoCnae || cnae,
+    cnae,
     vendaId,
     aliquota,
+    aliquotaMunicipio,
     issRetido,
     retencoes,
     numeroDPS,
     serieDPS,
     valorMoedaEstrangeira,
     dataCompetencia,
+    codigoTributacaoNacional,
+    codigoTribNacional,
+    codigoTributacaoMunicipal,
+    codigoNbs,
+    itemLc,
+    tipoTributacao,
+    inscricaoMunicipalPrestador,
+    regimeEspecialTributacao,
+    localPrestacaoIbge,
+    tomadorDocumento,
+    tomadorNome,
+    tomadorInscricaoMunicipal,
+    tomadorEmail,
+    tomadorTelefone,
+    tomadorTipo,
+    tomadorNif,
+    tomadorPais,
+    tomadorMoeda,
+    tomadorSemEndereco,
+    tomadorCep,
+    tomadorLogradouro,
+    tomadorNumero,
+    tomadorComplemento,
+    tomadorBairro,
+    tomadorCidade,
+    tomadorUf,
+    tomadorCodigoIbge,
     idempotencyKey,
   };
 }
@@ -128,6 +213,16 @@ function montarErroFinal(resultado: any, dpsFinal: number, tentativasEmissao: nu
     customUserAction = 'Sua Inscricao Municipal esta ausente ou incorreta. Por favor, acesse as Configuracoes da Empresa e atualize o numero da sua I.M.';
     draftEligible = true;
     draftReasonType = 'INSCRICAO_MUNICIPAL';
+    discardVenda = true;
+  } else if (errorStr.includes('e0116')) {
+    customUserAction = 'Sua Inscricao Municipal esta ausente ou incorreta. Por favor, acesse as Configuracoes da Empresa e atualize o numero da sua I.M.';
+    draftEligible = true;
+    draftReasonType = 'INSCRICAO_MUNICIPAL';
+    discardVenda = true;
+  } else if (errorStr.includes('e0160') || (errorStr.includes('simples nacional') && errorStr.includes('cadastro simples nacional'))) {
+    customUserAction = 'O regime tributario salvo no SaaS nao confere com o cadastro do prestador no Portal Nacional para este mes de competencia. Acesse as Configuracoes da Empresa e ajuste o Regime Tributario conforme o cadastro oficial antes de reenviar.';
+    draftEligible = true;
+    draftReasonType = 'REGIME_TRIBUTARIO';
     discardVenda = true;
   } else if (errorStr.includes('já utilizado') || errorStr.includes('jÃ¡ utilizado') || errorStr.includes('já existe') || errorStr.includes('jÃ¡ existe') || errorStr.includes('duplicado') || errorStr.includes('e0171') || errorStr.includes('e0041')) {
     customUserAction = `O numero de DPS ${dpsFinal} ja foi utilizado. Por favor, altere o numero do DPS para o proximo sequencial disponivel.`;
@@ -595,7 +690,7 @@ async function executarEmissao(job: any) {
     throw new Error('Job de emissao sem usuario, empresa, tomador ou venda vinculado.');
   }
 
-  const valorFloat = parseFloat(payload.valor);
+  const valorFloat = parseNumero(payload.valor);
   const serieFinal = payload.serieDPS || prestador.serieDPS || '900';
   const dpsFinal = job.reservedDpsNumero
     ? Number(job.reservedDpsNumero)
@@ -649,48 +744,79 @@ async function executarEmissao(job: any) {
     codigoNbs = nbsEncontrado;
   }
 
-  const semEnderecoTomador = tomador.tipo === 'PF' && (tomador as any).semEndereco === true;
+  codigoTribNacional = optionalString(firstDefined(payload.codigoTributacaoNacional, payload.codigoTribNacional, codigoTribNacional))?.replace(/\D/g, '') || codigoTribNacional;
+  itemLc = optionalString(firstDefined(payload.itemLc, itemLc)) || itemLc;
+  codigoNbs = optionalString(firstDefined(payload.codigoNbs, codigoNbs)) || '';
+  const codigoTributacaoMunicipal = optionalString(firstDefined(payload.codigoTributacaoMunicipal, regraMunicipal?.codigoTributacaoMunicipal));
+  const aliquotaMunicipio = firstDefined(payload.aliquotaMunicipio, regraMunicipal?.aliquotaIss);
+  const tipoTributacao = optionalString(firstDefined(payload.tipoTributacao, prestador.tipoTributacaoPadrao));
+
+  const prestadorEmissao = {
+    ...prestador,
+    inscricaoMunicipal: optionalString(firstDefined(payload.inscricaoMunicipalPrestador, prestador.inscricaoMunicipal)),
+    regimeEspecialTributacao: optionalString(firstDefined(payload.regimeEspecialTributacao, prestador.regimeEspecialTributacao)),
+    tipoTributacaoPadrao: tipoTributacao || prestador.tipoTributacaoPadrao,
+    codigoIbge: optionalString(firstDefined(payload.localPrestacaoIbge, prestador.codigoIbge)) || prestador.codigoIbge,
+  };
+
+  const tomadorTipo = optionalString(firstDefined(payload.tomadorTipo, tomador.tipo)) || tomador.tipo;
+  const tomadorPais = optionalString(firstDefined(payload.tomadorPais, tomador.pais)) || tomador.pais;
+  const semEnderecoTomador = tomadorTipo === 'PF' && parseBoolean(payload.tomadorSemEndereco, (tomador as any).semEndereco === true);
   const tomadorAdaptado = {
     ...tomador,
-    razaoSocial: tomador.nome,
-    documento: tomador.documento || '',
-    inscricaoMunicipal: tomador.inscricaoMunicipal ? String(tomador.inscricaoMunicipal) : undefined,
-    codigoIbge: semEnderecoTomador ? '' : tomador.codigoIbge || '9999999',
-    tipo: tomador.tipo,
-    nif: tomador.nif,
-    pais: tomador.pais,
-    moeda: tomador.moeda,
+    razaoSocial: optionalString(firstDefined(payload.tomadorNome, tomador.nome)) || tomador.nome,
+    nome: optionalString(firstDefined(payload.tomadorNome, tomador.nome)) || tomador.nome,
+    documento: optionalString(firstDefined(payload.tomadorDocumento, tomador.documento)) || '',
+    inscricaoMunicipal: optionalString(firstDefined(payload.tomadorInscricaoMunicipal, tomador.inscricaoMunicipal)),
+    email: optionalString(firstDefined(payload.tomadorEmail, tomador.email)),
+    telefone: optionalString(firstDefined(payload.tomadorTelefone, tomador.telefone)),
+    codigoIbge: semEnderecoTomador ? '' : optionalString(firstDefined(payload.tomadorCodigoIbge, tomador.codigoIbge, '9999999')) || '9999999',
+    tipo: tomadorTipo,
+    nif: optionalString(firstDefined(payload.tomadorNif, tomador.nif)),
+    pais: tomadorPais,
+    moeda: optionalString(firstDefined(payload.tomadorMoeda, tomador.moeda)),
     semEndereco: semEnderecoTomador,
+    cep: semEnderecoTomador ? '' : optionalString(firstDefined(payload.tomadorCep, tomador.cep)) || '',
+    logradouro: semEnderecoTomador ? '' : optionalString(firstDefined(payload.tomadorLogradouro, tomador.logradouro)) || '',
+    numero: semEnderecoTomador ? '' : optionalString(firstDefined(payload.tomadorNumero, tomador.numero)) || '',
+    complemento: optionalString(firstDefined(payload.tomadorComplemento, tomador.complemento)),
+    bairro: semEnderecoTomador ? '' : optionalString(firstDefined(payload.tomadorBairro, tomador.bairro)) || '',
+    cidade: semEnderecoTomador ? '' : optionalString(firstDefined(payload.tomadorCidade, tomador.cidade)) || '',
+    uf: semEnderecoTomador ? '' : optionalString(firstDefined(payload.tomadorUf, tomador.uf)) || '',
     endereco: {
-      cep: semEnderecoTomador ? '' : tomador.cep || '',
-      logradouro: semEnderecoTomador ? '' : tomador.logradouro || '',
-      numero: semEnderecoTomador ? '' : tomador.numero || '',
-      bairro: semEnderecoTomador ? '' : tomador.bairro || '',
-      cidade: semEnderecoTomador ? '' : tomador.cidade || '',
-      codigoIbge: semEnderecoTomador ? '' : tomador.codigoIbge || '9999999',
-      uf: semEnderecoTomador ? '' : tomador.uf || '',
+      cep: semEnderecoTomador ? '' : optionalString(firstDefined(payload.tomadorCep, tomador.cep)) || '',
+      logradouro: semEnderecoTomador ? '' : optionalString(firstDefined(payload.tomadorLogradouro, tomador.logradouro)) || '',
+      numero: semEnderecoTomador ? '' : optionalString(firstDefined(payload.tomadorNumero, tomador.numero)) || '',
+      complemento: optionalString(firstDefined(payload.tomadorComplemento, tomador.complemento)),
+      bairro: semEnderecoTomador ? '' : optionalString(firstDefined(payload.tomadorBairro, tomador.bairro)) || '',
+      cidade: semEnderecoTomador ? '' : optionalString(firstDefined(payload.tomadorCidade, tomador.cidade)) || '',
+      codigoIbge: semEnderecoTomador ? '' : optionalString(firstDefined(payload.tomadorCodigoIbge, tomador.codigoIbge, '9999999')) || '9999999',
+      uf: semEnderecoTomador ? '' : optionalString(firstDefined(payload.tomadorUf, tomador.uf)) || '',
     },
   };
 
   const dadosParaEstrategia = {
-    prestador,
+    prestador: prestadorEmissao,
     tomador: tomadorAdaptado,
     venda,
     servico: {
       valor: valorFloat,
-      valorMoedaEstrangeira: payload.valorMoedaEstrangeira ? parseFloat(payload.valorMoedaEstrangeira) : undefined,
+      valorMoedaEstrangeira: firstDefined(payload.valorMoedaEstrangeira) ? parseNumero(payload.valorMoedaEstrangeira) : undefined,
       codigoNbs,
-      codigoTributacaoMunicipal: regraMunicipal?.codigoTributacaoMunicipal,
-      aliquotaMunicipio: regraMunicipal?.aliquotaIss ? Number(regraMunicipal.aliquotaIss) : null,
+      codigoTributacaoMunicipal,
+      aliquotaMunicipio: aliquotaMunicipio ? parseNumero(aliquotaMunicipio) : null,
       descricao: payload.descricao,
       cnae: cnaeFinal,
       itemLc,
+      itemListaServico: itemLc,
       codigoTribNacional,
-      aliquota: payload.aliquota ? parseFloat(payload.aliquota) : 0,
-      issRetido: !!payload.issRetido,
+      codigoTributacaoNacional: codigoTribNacional,
+      aliquota: payload.aliquota ? parseNumero(payload.aliquota) : 0,
+      issRetido: parseBoolean(payload.issRetido, false),
+      tipoTributacao: tipoTributacao || '1',
       retencoes: payload.retencoes,
     },
-    ambiente: prestador.ambiente as 'HOMOLOGACAO' | 'PRODUCAO',
+    ambiente: prestadorEmissao.ambiente as 'HOMOLOGACAO' | 'PRODUCAO',
     numeroDPS: dpsFinal,
     serieDPS: serieFinal,
     dataCompetencia: payload.dataCompetencia,

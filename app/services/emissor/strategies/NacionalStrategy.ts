@@ -69,8 +69,8 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
                     },
                     configuracoes: {
                         aliquotaPadrao: Number(prestador.aliquotaPadrao),
-                        issRetido: dadosTributarios.issRetido,
-                        tipoTributacao: prestador.tipoTributacaoPadrao,
+                        issRetido: servico.issRetido ?? dadosTributarios.issRetido,
+                        tipoTributacao: servico.tipoTributacao || prestador.tipoTributacaoPadrao,
                         regimeEspecial: prestador.regimeEspecialTributacao
                     }
                 },
@@ -91,7 +91,8 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
                     endereco: {
                         cep: tomador.cep,
                         logradouro: tomador.logradouro,
-                        numero: tomador.numero, 
+                        numero: tomador.numero,
+                        complemento: tomador.complemento,
                         bairro: tomador.bairro,
                         cidade: tomador.cidade, // Cidade é necessária para <xCidade> no Exterior
                         codigoIbge: tomador.codigoIbge,
@@ -100,8 +101,8 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
                 },
                 // === MERGE DO SERVIÇO (Garante que valorMoedaEstrangeira e codigoNbs não sejam perdidos) ===
                 servico: {
-                    ...servico,
-                    ...dadosTributarios
+                    ...dadosTributarios,
+                    ...servico
                 } as ICanonicalRps['servico'],
                 
                 meta: {

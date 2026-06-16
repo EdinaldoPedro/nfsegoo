@@ -152,6 +152,15 @@ function fieldValue(value: any) {
   return value || value === 0 ? String(value) : 'Não informado';
 }
 
+function toFormText(value: any) {
+  return value || value === 0 ? String(value) : '';
+}
+
+function toBoolText(value: any) {
+  if (value === true || value === 'true' || value === 1 || value === '1') return 'true';
+  return 'false';
+}
+
 function logIndicaErroTemporario(log: any) {
   const details = safeJson(log?.details) || log?.details || {};
   const texto = `${log?.message || ''} ${typeof details === 'string' ? details : JSON.stringify(details)}`.toLowerCase();
@@ -388,11 +397,41 @@ export default function DetalheVendaCompleto() {
     descricao: '',
     valor: '',
     cnae: '',
+    codigoCnae: '',
     numeroDPS: '',
     serieDPS: '',
     dataCompetencia: '',
     aliquota: '',
+    aliquotaMunicipio: '',
     issRetido: 'false',
+    valorMoedaEstrangeira: '',
+    codigoTributacaoNacional: '',
+    codigoTribNacional: '',
+    codigoTributacaoMunicipal: '',
+    codigoNbs: '',
+    itemLc: '',
+    tipoTributacao: '1',
+    inscricaoMunicipalPrestador: '',
+    regimeEspecialTributacao: '',
+    localPrestacaoIbge: '',
+    tomadorDocumento: '',
+    tomadorNome: '',
+    tomadorInscricaoMunicipal: '',
+    tomadorEmail: '',
+    tomadorTelefone: '',
+    tomadorTipo: '',
+    tomadorNif: '',
+    tomadorPais: '',
+    tomadorMoeda: '',
+    tomadorSemEndereco: 'false',
+    tomadorCep: '',
+    tomadorLogradouro: '',
+    tomadorNumero: '',
+    tomadorComplemento: '',
+    tomadorBairro: '',
+    tomadorCidade: '',
+    tomadorUf: '',
+    tomadorCodigoIbge: '',
   });
 
   const fetchVenda = (silent = false) => {
@@ -402,33 +441,49 @@ export default function DetalheVendaCompleto() {
       .then((data) => {
         setVenda(data);
         if (!isEditing && !silent) {
-          let cnaeSalvo = data.notas?.[0]?.cnae || '';
-          let dpsSalvo = '';
-          let serieSalva = data.empresa?.serieDPS || '';
-          let dataCompetencia = '';
-
-          try {
-            const logComPayload = data.logs.find((l: any) => l.details && (l.details.includes('payloadOriginal') || l.details.includes('codigoCnae')));
-            if (logComPayload) {
-              let raw = typeof logComPayload.details === 'string' ? JSON.parse(logComPayload.details) : logComPayload.details;
-              if (raw.payloadOriginal) raw = raw.payloadOriginal;
-
-              cnaeSalvo = cnaeSalvo || raw?.servico?.cnae || raw?.servico?.codigoCnae || '';
-              dpsSalvo = raw?.numeroDPS || raw?.meta?.numero || '';
-              serieSalva = raw?.serieDPS || raw?.meta?.serie || serieSalva || '';
-              dataCompetencia = onlyDate(raw?.dataCompetencia || raw?.meta?.dataCompetencia);
-            }
-          } catch {}
+          const payload = data.payloadRecuperado || {};
+          const valorTela = toFormText(payload.valor ?? data.valor).replace('.', ',');
+          const valorMoedaEstrangeiraTela = toFormText(payload.valorMoedaEstrangeira).replace('.', ',');
 
           setFormData({
-            descricao: data.descricao || '',
-            valor: data.valor ? String(data.valor).replace('.', ',') : '',
-            cnae: cnaeSalvo,
-            numeroDPS: dpsSalvo,
-            serieDPS: serieSalva,
-            dataCompetencia,
-            aliquota: '',
-            issRetido: 'false',
+            descricao: toFormText(payload.descricao ?? data.descricao),
+            valor: valorTela,
+            cnae: toFormText(payload.cnae || payload.codigoCnae || data.notas?.[0]?.cnae),
+            codigoCnae: toFormText(payload.codigoCnae || payload.cnae || data.notas?.[0]?.cnae),
+            numeroDPS: toFormText(payload.numeroDPS),
+            serieDPS: toFormText(payload.serieDPS || data.empresa?.serieDPS || '900'),
+            dataCompetencia: onlyDate(payload.dataCompetencia),
+            aliquota: toFormText(payload.aliquota).replace('.', ','),
+            aliquotaMunicipio: toFormText(payload.aliquotaMunicipio).replace('.', ','),
+            issRetido: toBoolText(payload.issRetido),
+            valorMoedaEstrangeira: valorMoedaEstrangeiraTela,
+            codigoTributacaoNacional: toFormText(payload.codigoTributacaoNacional || payload.codigoTribNacional),
+            codigoTribNacional: toFormText(payload.codigoTribNacional || payload.codigoTributacaoNacional),
+            codigoTributacaoMunicipal: toFormText(payload.codigoTributacaoMunicipal),
+            codigoNbs: toFormText(payload.codigoNbs),
+            itemLc: toFormText(payload.itemLc),
+            tipoTributacao: toFormText(payload.tipoTributacao || '1'),
+            inscricaoMunicipalPrestador: toFormText(payload.inscricaoMunicipalPrestador || data.empresa?.inscricaoMunicipal),
+            regimeEspecialTributacao: toFormText(payload.regimeEspecialTributacao || data.empresa?.regimeEspecialTributacao),
+            localPrestacaoIbge: toFormText(payload.localPrestacaoIbge || data.empresa?.codigoIbge),
+            tomadorDocumento: toFormText(payload.tomadorDocumento || data.cliente?.documento),
+            tomadorNome: toFormText(payload.tomadorNome || data.cliente?.nome),
+            tomadorInscricaoMunicipal: toFormText(payload.tomadorInscricaoMunicipal || data.cliente?.inscricaoMunicipal),
+            tomadorEmail: toFormText(payload.tomadorEmail || data.cliente?.email),
+            tomadorTelefone: toFormText(payload.tomadorTelefone || data.cliente?.telefone),
+            tomadorTipo: toFormText(payload.tomadorTipo || data.cliente?.tipo),
+            tomadorNif: toFormText(payload.tomadorNif || data.cliente?.nif),
+            tomadorPais: toFormText(payload.tomadorPais || data.cliente?.pais),
+            tomadorMoeda: toFormText(payload.tomadorMoeda || data.cliente?.moeda),
+            tomadorSemEndereco: toBoolText(payload.tomadorSemEndereco || data.cliente?.semEndereco),
+            tomadorCep: toFormText(payload.tomadorCep || data.cliente?.cep),
+            tomadorLogradouro: toFormText(payload.tomadorLogradouro || data.cliente?.logradouro),
+            tomadorNumero: toFormText(payload.tomadorNumero || data.cliente?.numero),
+            tomadorComplemento: toFormText(payload.tomadorComplemento || data.cliente?.complemento),
+            tomadorBairro: toFormText(payload.tomadorBairro || data.cliente?.bairro),
+            tomadorCidade: toFormText(payload.tomadorCidade || data.cliente?.cidade),
+            tomadorUf: toFormText(payload.tomadorUf || data.cliente?.uf),
+            tomadorCodigoIbge: toFormText(payload.tomadorCodigoIbge || data.cliente?.codigoIbge),
           });
         }
       })
@@ -452,15 +507,26 @@ export default function DetalheVendaCompleto() {
 
   const parseValor = (val: string) => {
     if (!val) return 0;
-    const limpo = val.replace(/[^\d,]/g, '').replace(',', '.');
+    const bruto = String(val).trim().replace(/[^\d,.-]/g, '');
+    const temVirgula = bruto.includes(',');
+    const limpo = temVirgula ? bruto.replace(/\./g, '').replace(',', '.') : bruto;
     return parseFloat(limpo);
   };
 
   const payloadEnvio = () => ({
     ...formData,
+    codigoCnae: formData.codigoCnae || formData.cnae,
     valor: parseValor(formData.valor),
+    valorMoedaEstrangeira: formData.valorMoedaEstrangeira ? parseValor(formData.valorMoedaEstrangeira) : undefined,
+    aliquota: formData.aliquota ? parseValor(formData.aliquota) : undefined,
+    aliquotaMunicipio: formData.aliquotaMunicipio ? parseValor(formData.aliquotaMunicipio) : undefined,
     issRetido: formData.issRetido === 'true',
+    tomadorSemEndereco: formData.tomadorSemEndereco === 'true',
   });
+
+  const updateFormField = (field: keyof typeof formData, value: string) => {
+    setFormData((prev) => ({ ...prev, [field]: value }));
+  };
 
   const executarInspecao = async () => {
     setInspecionando(true);
@@ -873,7 +939,7 @@ export default function DetalheVendaCompleto() {
               <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                 <div>
                   <p className="text-sm font-black text-blue-950">Modo de correção técnica</p>
-                  <p className="text-sm text-blue-700">Esta primeira versão corrige os campos já suportados pelo reenvio e organiza os demais campos para diagnóstico.</p>
+                  <p className="text-sm text-blue-700">Edite os campos que entram na DPS/XML, valide a prévia e reenvie a mesma venda pela fila fiscal.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {!isEditing && (
@@ -897,35 +963,61 @@ export default function DetalheVendaCompleto() {
                 </div>
               </div>
 
-              <SectionShell title="RPS / DPS" subtitle="Campos chave da tentativa de emissão." icon={Hash}>
+              <SectionShell title="Identificação da DPS" subtitle="Número, série e competência usados para montar o Id da DPS." icon={Hash}>
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <TextInput label="Número DPS" value={formData.numeroDPS} onChange={(value) => setFormData({ ...formData, numeroDPS: value })} placeholder="Automático" mono disabled={!isEditing} />
-                  <TextInput label="Série DPS" value={formData.serieDPS} onChange={(value) => setFormData({ ...formData, serieDPS: value })} placeholder="900" mono disabled={!isEditing} />
-                  <TextInput label="Data competência" type="date" value={formData.dataCompetencia} onChange={(value) => setFormData({ ...formData, dataCompetencia: value })} disabled={!isEditing} />
-                  <InfoItem label="Tipo RPS" value="1" mono />
-                </div>
-                <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <InfoItem label="Natureza da operação" value="Operação tributável" />
-                  <InfoItem label="Optante Simples Nacional" value={String(venda.empresa.regimeTributario || '').toUpperCase() === 'MEI' || String(venda.empresa.regimeTributario || '').toUpperCase().includes('SIMPLES') ? 'Sim' : 'Conferir'} />
-                  <InfoItem label="Regime especial" value={venda.empresa.regimeEspecialTributacao || 'Não informado'} />
+                  <TextInput label="nDPS" value={formData.numeroDPS} onChange={(value) => updateFormField('numeroDPS', value)} placeholder="Automático" mono disabled={!isEditing} />
+                  <TextInput label="série" value={formData.serieDPS} onChange={(value) => updateFormField('serieDPS', value)} placeholder="900" mono disabled={!isEditing} />
+                  <TextInput label="data competência" type="date" value={formData.dataCompetencia} onChange={(value) => updateFormField('dataCompetencia', value)} disabled={!isEditing} />
+                  <TextInput label="cLocPrestacao" value={formData.localPrestacaoIbge} onChange={(value) => updateFormField('localPrestacaoIbge', value)} mono disabled={!isEditing} />
                 </div>
               </SectionShell>
 
-              <SectionShell title="Serviço e tributação" subtitle="Primeiro bloco de edição real para corrigir rejeições de CNAE, descrição, valor e tributação." icon={Layers}>
+              <SectionShell title="Prestador e operação" subtitle="Campos do prestador e da indicação tributária que saem no XML." icon={Building}>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <TextInput label="CNAE" value={formData.cnae} onChange={(value) => setFormData({ ...formData, cnae: value })} mono disabled={!isEditing} />
-                  <TextInput label="Valor do serviço" value={formData.valor} onChange={(value) => setFormData({ ...formData, valor: value })} mono disabled={!isEditing} />
-                  <TextInput label="Alíquota ISS" value={formData.aliquota} onChange={(value) => setFormData({ ...formData, aliquota: value })} placeholder="Ex: 5,00" mono disabled={!isEditing} />
+                  <TextInput label="prest/IM" value={formData.inscricaoMunicipalPrestador} onChange={(value) => updateFormField('inscricaoMunicipalPrestador', value)} mono disabled={!isEditing} />
+                  <TextInput label="regEspTrib" value={formData.regimeEspecialTributacao} onChange={(value) => updateFormField('regimeEspecialTributacao', value)} mono disabled={!isEditing} />
+                  <label className="block">
+                    <span className="block text-xs font-black uppercase tracking-wide text-slate-500 mb-1.5">tribISSQN</span>
+                    <select
+                      value={formData.tipoTributacao}
+                      disabled={!isEditing}
+                      onChange={(event) => updateFormField('tipoTributacao', event.target.value)}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-bold text-slate-900 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-50 disabled:bg-slate-100"
+                    >
+                      <option value="1">1 - Tributável no município</option>
+                      <option value="2">2 - Não incidência / imunidade</option>
+                      <option value="3">3 - Exterior / exportação</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <InfoItem label="CNPJ prestador" value={venda.empresa.documento} mono />
+                  <InfoItem label="Regime atual" value={venda.empresa.regimeTributario} />
+                  <InfoItem label="Ambiente" value={venda.empresa.ambiente} />
+                </div>
+              </SectionShell>
+
+              <SectionShell title="Serviço e XML" subtitle="CNAE é referência visual; cTribNac, cTribMun, NBS e descrição são os campos efetivos enviados." icon={Layers}>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <TextInput label="CNAE visual / de-para" value={formData.cnae} onChange={(value) => setFormData({ ...formData, cnae: value, codigoCnae: value })} mono disabled={!isEditing} />
+                  <TextInput label="cTribNac" value={formData.codigoTributacaoNacional} onChange={(value) => setFormData({ ...formData, codigoTributacaoNacional: value, codigoTribNacional: value })} mono disabled={!isEditing} />
+                  <TextInput label="cTribMun" value={formData.codigoTributacaoMunicipal} onChange={(value) => updateFormField('codigoTributacaoMunicipal', value)} mono disabled={!isEditing} />
+                </div>
+                <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <TextInput label="item LC" value={formData.itemLc} onChange={(value) => updateFormField('itemLc', value)} mono disabled={!isEditing} />
+                  <TextInput label="cNBS" value={formData.codigoNbs} onChange={(value) => updateFormField('codigoNbs', value)} mono disabled={!isEditing} />
+                  <TextInput label="valor vServ" value={formData.valor} onChange={(value) => updateFormField('valor', value)} mono disabled={!isEditing} />
+                  <TextInput label="valor moeda estrangeira" value={formData.valorMoedaEstrangeira} onChange={(value) => updateFormField('valorMoedaEstrangeira', value)} mono disabled={!isEditing} />
                 </div>
 
                 <div className="mt-4">
                   <label className="block">
-                    <span className="block text-xs font-black uppercase tracking-wide text-slate-500 mb-1.5">Descrição do serviço</span>
+                    <span className="block text-xs font-black uppercase tracking-wide text-slate-500 mb-1.5">xDescServ</span>
                     <textarea
                       value={formData.descricao}
                       disabled={!isEditing}
                       rows={5}
-                      onChange={(event) => setFormData({ ...formData, descricao: event.target.value })}
+                      onChange={(event) => updateFormField('descricao', event.target.value)}
                       className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-50 disabled:bg-slate-100 disabled:text-slate-500"
                     />
                   </label>
@@ -933,57 +1025,83 @@ export default function DetalheVendaCompleto() {
 
                 <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-4">
                   <label className="block">
-                    <span className="block text-xs font-black uppercase tracking-wide text-slate-500 mb-1.5">ISS retido?</span>
+                    <span className="block text-xs font-black uppercase tracking-wide text-slate-500 mb-1.5">tpRetISSQN</span>
                     <select
                       value={formData.issRetido}
                       disabled={!isEditing}
-                      onChange={(event) => setFormData({ ...formData, issRetido: event.target.value })}
+                      onChange={(event) => updateFormField('issRetido', event.target.value)}
                       className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-bold text-slate-900 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-50 disabled:bg-slate-100"
                     >
-                      <option value="false">Não</option>
-                      <option value="true">Sim</option>
+                      <option value="false">1 - Sem retenção</option>
+                      <option value="true">2 - ISS retido</option>
                     </select>
                   </label>
+                  <TextInput label="alíquota ISS" value={formData.aliquota} onChange={(value) => updateFormField('aliquota', value)} placeholder="Ex: 5,00" mono disabled={!isEditing} />
+                  <TextInput label="alíquota municipal" value={formData.aliquotaMunicipio} onChange={(value) => updateFormField('aliquotaMunicipio', value)} mono disabled={!isEditing} />
                   <InfoItem label="Base de cálculo" value={formatMoney(parseValor(formData.valor))} />
-                  <InfoItem label="Valor líquido" value={formatMoney(parseValor(formData.valor))} />
-                  <InfoItem label="Código municipal" value="Resolvido pela regra municipal" />
                 </div>
               </SectionShell>
 
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                <SectionShell title="Tomador do serviço" subtitle="Hoje é leitura para conferência. Edição granular entra na próxima etapa." icon={User}>
+                <SectionShell title="Tomador" subtitle="Dados enviados em toma: documento, nome, contato, exterior e sem endereço para PF." icon={User}>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <InfoItem label="CNPJ/CPF" value={venda.cliente.documento} mono />
-                    <InfoItem label="Razão social" value={nomeTomador} />
-                    <InfoItem label="CEP" value={venda.cliente.cep} mono />
-                    <InfoItem label="Logradouro" value={venda.cliente.logradouro} />
-                    <InfoItem label="Número" value={venda.cliente.numero} />
-                    <InfoItem label="Bairro" value={venda.cliente.bairro} />
-                    <InfoItem label="Município IBGE" value={venda.cliente.codigoIbge} mono />
-                    <InfoItem label="Cidade/UF" value={`${fieldValue(venda.cliente.cidade)}/${fieldValue(venda.cliente.uf)}`} />
+                    <TextInput label="CPF/CNPJ/NIF" value={formData.tomadorDocumento} onChange={(value) => updateFormField('tomadorDocumento', value)} mono disabled={!isEditing} />
+                    <TextInput label="xNome" value={formData.tomadorNome} onChange={(value) => updateFormField('tomadorNome', value)} disabled={!isEditing} />
+                    <TextInput label="toma/IM" value={formData.tomadorInscricaoMunicipal} onChange={(value) => updateFormField('tomadorInscricaoMunicipal', value)} mono disabled={!isEditing} />
+                    <TextInput label="email" value={formData.tomadorEmail} onChange={(value) => updateFormField('tomadorEmail', value)} disabled={!isEditing} />
+                    <TextInput label="fone" value={formData.tomadorTelefone} onChange={(value) => updateFormField('tomadorTelefone', value)} mono disabled={!isEditing} />
+                    <label className="block">
+                      <span className="block text-xs font-black uppercase tracking-wide text-slate-500 mb-1.5">tipo tomador</span>
+                      <select
+                        value={formData.tomadorTipo}
+                        disabled={!isEditing}
+                        onChange={(event) => updateFormField('tomadorTipo', event.target.value)}
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-bold text-slate-900 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-50 disabled:bg-slate-100"
+                      >
+                        <option value="">Usar cadastro</option>
+                        <option value="PF">PF</option>
+                        <option value="PJ">PJ</option>
+                        <option value="EXT">Exterior</option>
+                      </select>
+                    </label>
+                    <TextInput label="país" value={formData.tomadorPais} onChange={(value) => updateFormField('tomadorPais', value)} disabled={!isEditing} />
+                    <TextInput label="moeda" value={formData.tomadorMoeda} onChange={(value) => updateFormField('tomadorMoeda', value)} mono disabled={!isEditing} />
+                    <TextInput label="NIF exterior" value={formData.tomadorNif} onChange={(value) => updateFormField('tomadorNif', value)} mono disabled={!isEditing} />
+                    <label className="block">
+                      <span className="block text-xs font-black uppercase tracking-wide text-slate-500 mb-1.5">PF sem endereço?</span>
+                      <select
+                        value={formData.tomadorSemEndereco}
+                        disabled={!isEditing}
+                        onChange={(event) => updateFormField('tomadorSemEndereco', event.target.value)}
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-bold text-slate-900 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-50 disabled:bg-slate-100"
+                      >
+                        <option value="false">Não, informar endereço</option>
+                        <option value="true">Sim, omitir toma/end</option>
+                      </select>
+                    </label>
                   </div>
                 </SectionShell>
 
-                <SectionShell title="Local de prestação" subtitle="Essencial para rejeições de incidência do ISSQN." icon={MapPin}>
+                <SectionShell title="Endereço do tomador" subtitle="Quando PF sem endereço estiver marcado, estes campos não entram no XML." icon={MapPin}>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <InfoItem label="Código IBGE usado" value={venda.empresa.codigoIbge} mono />
-                    <InfoItem label="Município/UF" value={`${fieldValue(venda.empresa.cidade)}/${fieldValue(venda.empresa.uf)}`} />
-                    <InfoItem label="CEP" value={venda.empresa.cep} mono />
-                    <InfoItem label="Logradouro" value={venda.empresa.logradouro} />
-                    <InfoItem label="Bairro" value={venda.empresa.bairro} />
-                    <InfoItem label="Número" value={venda.empresa.numero} />
+                    <TextInput label="CEP" value={formData.tomadorCep} onChange={(value) => updateFormField('tomadorCep', value)} mono disabled={!isEditing || formData.tomadorSemEndereco === 'true'} />
+                    <TextInput label="cMun" value={formData.tomadorCodigoIbge} onChange={(value) => updateFormField('tomadorCodigoIbge', value)} mono disabled={!isEditing || formData.tomadorSemEndereco === 'true'} />
+                    <TextInput label="xLgr" value={formData.tomadorLogradouro} onChange={(value) => updateFormField('tomadorLogradouro', value)} disabled={!isEditing || formData.tomadorSemEndereco === 'true'} />
+                    <TextInput label="nro" value={formData.tomadorNumero} onChange={(value) => updateFormField('tomadorNumero', value)} disabled={!isEditing || formData.tomadorSemEndereco === 'true'} />
+                    <TextInput label="xCpl" value={formData.tomadorComplemento} onChange={(value) => updateFormField('tomadorComplemento', value)} disabled={!isEditing || formData.tomadorSemEndereco === 'true'} />
+                    <TextInput label="xBairro" value={formData.tomadorBairro} onChange={(value) => updateFormField('tomadorBairro', value)} disabled={!isEditing || formData.tomadorSemEndereco === 'true'} />
+                    <TextInput label="xCidade" value={formData.tomadorCidade} onChange={(value) => updateFormField('tomadorCidade', value)} disabled={!isEditing || formData.tomadorSemEndereco === 'true'} />
+                    <TextInput label="UF" value={formData.tomadorUf} onChange={(value) => updateFormField('tomadorUf', value)} mono disabled={!isEditing || formData.tomadorSemEndereco === 'true'} />
                   </div>
                 </SectionShell>
               </div>
 
-              <SectionShell title="Blocos avançados reservados" subtitle="Estrutura preparada para casos que exigirem destinatário, imóvel, construção civil ou deduções." icon={Settings2}>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                  {['Destinatário', 'Imóvel', 'Construção civil', 'Deduções'].map((label) => (
-                    <div key={label} className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-center">
-                      <p className="text-sm font-black text-slate-700">{label}</p>
-                      <p className="text-xs text-slate-500 mt-1">Não usado nesta versão</p>
-                    </div>
-                  ))}
+              <SectionShell title="Conferência rápida" subtitle="Use a validação para conferir o payload canônico e o XML antes do reenvio." icon={Settings2}>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <InfoItem label="CNAE usado no de-para" value={formData.codigoCnae || formData.cnae} mono />
+                  <InfoItem label="cTribNac enviado" value={formData.codigoTributacaoNacional} mono />
+                  <InfoItem label="cTribMun enviado" value={formData.codigoTributacaoMunicipal || 'Omitido'} mono />
+                  <InfoItem label="Valor estrangeiro" value={formData.valorMoedaEstrangeira || 'Não usado'} mono />
                 </div>
               </SectionShell>
             </div>

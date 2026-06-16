@@ -432,7 +432,7 @@ function EmitirNotaContent() {
                      const updates: any = {};
                      let cnaePrincipalObj = null;
 
-                     if (!prev.codigoCnae && data.atividades.length > 0) {
+                     if (!retryId && !prev.codigoCnae && data.atividades.length > 0) {
                          cnaePrincipalObj = data.atividades.find((c: CnaeDB) => c.principal) || data.atividades[0];
                          updates.codigoCnae = cnaePrincipalObj.codigo;
                      } else {
@@ -487,7 +487,7 @@ function EmitirNotaContent() {
                 setTimeout(() => {
                     const nota = venda.notas?.[0] || {};
                     // Tenta encontrar o CNAE em todos os lugares possíveis onde o banco pode ter guardado
-                    const cnaeParaUsar = venda.codigoCnae || nota.codigoCnae || venda.cnaeRecuperado || nota.cnae || "";
+                    const cnaeParaUsar = venda.cnaeRecuperado || nota.cnae || nota.codigoCnae || venda.codigoCnae || "";
                     
                     let dataFormatada = undefined;
                     if (nota.dataCompetencia || venda.dataCompetencia) {
@@ -502,15 +502,17 @@ function EmitirNotaContent() {
                         clienteId: venda.clienteId, 
                         clienteNome: venda.cliente?.razaoSocial || venda.cliente?.nome || "Cliente", 
                         valor: String(venda.valor),
-                        valorMoedaEstrangeira: venda.valorMoedaEstrangeira ? String(venda.valorMoedaEstrangeira) : "",
+                        valorMoedaEstrangeira: venda.valorMoedaEstrangeira !== null && venda.valorMoedaEstrangeira !== undefined ? String(venda.valorMoedaEstrangeira) : "",
                         servicoDescricao: venda.descricao || nota.servicoDescricao || "",
                         
                         // Restauração blindada do CNAE e Impostos
-                        codigoCnae: cnaeParaUsar || prev.codigoCnae,
+                        codigoCnae: cnaeParaUsar || "",
                         aliquota: nota.aliquota || venda.aliquota || prev.aliquota,
                         issRetido: nota.issRetido !== undefined ? nota.issRetido : (venda.issRetido !== undefined ? venda.issRetido : prev.issRetido),
                         inssRetido: nota.inssRetido !== undefined ? nota.inssRetido : prev.inssRetido,
-                        dataCompetencia: dataFormatada || prev.dataCompetencia
+                        dataCompetencia: dataFormatada || prev.dataCompetencia,
+                        numeroDPS: venda.numeroDPS ? String(venda.numeroDPS) : prev.numeroDPS,
+                        serieDPS: venda.serieDPS ? String(venda.serieDPS) : prev.serieDPS,
                     }));
                     
                     setStep(3); // Pula para o passo 3 só DEPOIS de preencher tudo
@@ -747,6 +749,7 @@ function EmitirNotaContent() {
   const mostraRetencoesFederais = isPJ && !isPF && !isExterior && ['LUCRO_PRESUMIDO', 'LUCRO_REAL'].includes(perfilEmpresa?.regimeTributario);
   
   const cnaeSelecionadoObj = meusCnaes.find(c => c.codigo === nfData.codigoCnae);
+  const cnaeRecuperadoForaDaLista = !!nfData.codigoCnae && !cnaeSelecionadoObj;
 
   const valorNumerico = parseFloat(nfData.valor) || 0;
   const valorEstrangeiroNum = parseFloat(nfData.valorMoedaEstrangeira) || 0;
@@ -959,6 +962,11 @@ function EmitirNotaContent() {
                 <label className="block text-sm font-bold text-yellow-800 mb-2 flex items-center gap-2"><Briefcase size={18} /> Atividade Econômica (CNAE)</label>
                 <select className="w-full p-3 border rounded-lg bg-white outline-blue-500 text-slate-700" value={nfData.codigoCnae} onChange={(e) => setNfData({...nfData, codigoCnae: e.target.value})}>
                     {!nfData.codigoCnae && <option value="">Selecione uma atividade...</option>}
+                    {cnaeRecuperadoForaDaLista && (
+                        <option value={nfData.codigoCnae}>
+                            {nfData.codigoCnae} - CNAE recuperado da venda
+                        </option>
+                    )}
                     {meusCnaes.map(cnae => {
                         const descCurta = cnae.descricao.length > 60 ? cnae.descricao.substring(0, 60) + '...' : cnae.descricao;
                         return (

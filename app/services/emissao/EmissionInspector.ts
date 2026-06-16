@@ -22,16 +22,60 @@ interface InspectorOverrides {
   descricao?: string;
   valor?: number | string;
   cnae?: string;
+  codigoCnae?: string;
   numeroDPS?: number | string;
   serieDPS?: string;
   dataCompetencia?: string;
   aliquota?: number | string;
-  issRetido?: boolean;
+  aliquotaMunicipio?: number | string;
+  issRetido?: boolean | string;
   retencoes?: any;
+  valorMoedaEstrangeira?: number | string;
+  codigoTributacaoNacional?: string;
+  codigoTribNacional?: string;
+  codigoTributacaoMunicipal?: string;
+  codigoNbs?: string;
+  itemLc?: string;
+  tipoTributacao?: string;
+  inscricaoMunicipalPrestador?: string;
+  regimeEspecialTributacao?: string;
+  localPrestacaoIbge?: string;
+  tomadorDocumento?: string;
+  tomadorNome?: string;
+  tomadorInscricaoMunicipal?: string;
+  tomadorEmail?: string;
+  tomadorTelefone?: string;
+  tomadorTipo?: string;
+  tomadorNif?: string;
+  tomadorPais?: string;
+  tomadorMoeda?: string;
+  tomadorSemEndereco?: boolean | string;
+  tomadorCep?: string;
+  tomadorLogradouro?: string;
+  tomadorNumero?: string;
+  tomadorComplemento?: string;
+  tomadorBairro?: string;
+  tomadorCidade?: string;
+  tomadorUf?: string;
+  tomadorCodigoIbge?: string;
 }
 
 function onlyDigits(value?: string | null) {
   return String(value || '').replace(/\D/g, '');
+}
+
+function firstDefined(...values: any[]) {
+  return values.find((value) => value !== undefined && value !== null && value !== '');
+}
+
+function asText(value: any, fallback = '') {
+  const resolved = firstDefined(value, fallback);
+  return resolved === undefined || resolved === null ? '' : String(resolved);
+}
+
+function optionalText(value: any) {
+  const text = asText(value).trim();
+  return text ? text : undefined;
 }
 
 function asNumber(value: any, fallback = 0) {
@@ -39,6 +83,15 @@ function asNumber(value: any, fallback = 0) {
   if (typeof value === 'number') return Number.isFinite(value) ? value : fallback;
   const parsed = Number(String(value).replace(/\./g, '').replace(',', '.'));
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function asBoolean(value: any, fallback = false) {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value === 'boolean') return value;
+  const normalized = String(value).trim().toLowerCase();
+  if (['true', '1', 'sim', 's', 'yes'].includes(normalized)) return true;
+  if (['false', '0', 'nao', 'não', 'n', 'no'].includes(normalized)) return false;
+  return fallback;
 }
 
 function addCheck(checks: CheckItem[], item: CheckItem) {
@@ -87,11 +140,23 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
     where: { empresaId: prestador.id, principal: true },
   });
 
-  const cnaeFinal = onlyDigits(String(overrides.cnae || notaAtual?.cnae || cnaePrincipal?.codigo || ''));
+  const cnaeFinal = onlyDigits(String(firstDefined(overrides.codigoCnae, overrides.cnae, notaAtual?.cnae, cnaePrincipal?.codigo, '')));
   const valorFinal = asNumber(overrides.valor, Number(venda.valor));
   const descricaoFinal = String(overrides.descricao ?? venda.descricao ?? '').trim();
-  const serieFinal = String(overrides.serieDPS || prestador.serieDPS || '900');
-  const numeroDPSFinal = overrides.numeroDPS ? asNumber(overrides.numeroDPS) : (prestador.ultimoDPS || 0) + 1;
+  const serieFinal = String(firstDefined(overrides.serieDPS, prestador.serieDPS, '900'));
+  const numeroDPSFinal = firstDefined(overrides.numeroDPS) ? asNumber(overrides.numeroDPS) : (prestador.ultimoDPS || 0) + 1;
+  const prestadorInscricaoMunicipal = optionalText(firstDefined(overrides.inscricaoMunicipalPrestador, prestador.inscricaoMunicipal));
+  const prestadorRegimeEspecial = optionalText(firstDefined(overrides.regimeEspecialTributacao, prestador.regimeEspecialTributacao));
+  const tipoTributacaoFinal = asText(firstDefined(overrides.tipoTributacao, prestador.tipoTributacaoPadrao, '1'), '1');
+
+  const tomadorTipo = asText(firstDefined(overrides.tomadorTipo, tomador.tipo), tomador.tipo || '');
+  const tomadorPais = asText(firstDefined(overrides.tomadorPais, tomador.pais), tomador.pais || '');
+  const tomadorSemEndereco = asBoolean(overrides.tomadorSemEndereco, (tomador as any).semEndereco === true);
+  const isExterior = tomadorTipo === 'EXT' || (tomadorPais && tomadorPais !== 'Brasil' && tomadorPais !== 'BR');
+  const omitirEnderecoTomador = tomadorTipo === 'PF' && tomadorSemEndereco === true;
+  const tomadorDocumento = asText(firstDefined(overrides.tomadorDocumento, tomador.documento), tomador.documento || '');
+  const tomadorNome = asText(firstDefined(overrides.tomadorNome, tomador.nome), tomador.nome || '');
+  const tomadorCodigoIbge = omitirEnderecoTomador ? '' : asText(firstDefined(overrides.tomadorCodigoIbge, tomador.codigoIbge, '9999999'), '9999999');
 
   addCheck(checks, {
     id: 'prestador-cnpj',
@@ -117,8 +182,8 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
     id: 'prestador-im',
     group: 'Prestador',
     label: 'Inscricao Municipal',
-    status: prestador.inscricaoMunicipal ? 'ok' : 'warn',
-    message: prestador.inscricaoMunicipal ? 'Inscricao Municipal informada.' : 'Sem Inscricao Municipal. Alguns municipios rejeitam a DPS.',
+    status: prestadorInscricaoMunicipal ? 'ok' : 'warn',
+    message: prestadorInscricaoMunicipal ? 'Inscricao Municipal informada.' : 'Sem Inscricao Municipal. Alguns municipios rejeitam a DPS.',
     tag: 'prest/IM',
     field: 'empresa.inscricaoMunicipal',
   });
@@ -144,13 +209,11 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
     });
   }
 
-  const isExterior = tomador.tipo === 'EXT' || (tomador.pais && tomador.pais !== 'Brasil' && tomador.pais !== 'BR');
-  const omitirEnderecoTomador = tomador.tipo === 'PF' && (tomador as any).semEndereco === true;
   addCheck(checks, {
     id: 'tomador-documento',
     group: 'Tomador',
     label: 'Documento do tomador',
-    status: isExterior || onlyDigits(tomador.documento).length === 11 || onlyDigits(tomador.documento).length === 14 ? 'ok' : 'error',
+    status: isExterior || onlyDigits(tomadorDocumento).length === 11 || onlyDigits(tomadorDocumento).length === 14 ? 'ok' : 'error',
     message: isExterior ? 'Tomador exterior identificado.' : 'CPF/CNPJ nacional validado para montagem do XML.',
     tag: 'toma/CPF ou toma/CNPJ',
     field: 'cliente.documento',
@@ -160,8 +223,8 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
     id: 'tomador-nome',
     group: 'Tomador',
     label: 'Nome/Razao social do tomador',
-    status: tomador.nome ? 'ok' : 'error',
-    message: tomador.nome ? 'Nome do tomador informado.' : 'Nome/Razao social do tomador e obrigatorio.',
+    status: tomadorNome ? 'ok' : 'error',
+    message: tomadorNome ? 'Nome do tomador informado.' : 'Nome/Razao social do tomador e obrigatorio.',
     tag: 'toma/xNome',
     field: 'cliente.nome',
   });
@@ -171,8 +234,8 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
       id: 'tomador-ibge',
       group: 'Tomador',
       label: 'Codigo IBGE do tomador',
-      status: onlyDigits(tomador.codigoIbge).length >= 7 ? 'ok' : 'warn',
-      message: onlyDigits(tomador.codigoIbge).length >= 7 ? `IBGE ${tomador.codigoIbge}.` : 'Sem IBGE do tomador. O sistema usara fallback se a emissao permitir.',
+      status: onlyDigits(tomadorCodigoIbge).length >= 7 ? 'ok' : 'warn',
+      message: onlyDigits(tomadorCodigoIbge).length >= 7 ? `IBGE ${tomadorCodigoIbge}.` : 'Sem IBGE do tomador. O sistema usara fallback se a emissao permitir.',
       tag: 'toma/end/endNac/cMun',
       field: 'cliente.codigoIbge',
     });
@@ -225,9 +288,17 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
       })
     : null;
 
-  const itemLc = regraGlobal?.itemLc || infoEstatica.itemLC;
-  const codigoTribNacional = onlyDigits(regraGlobal?.codigoTributacaoNacional || infoEstatica.codigoTributacaoNacional);
-  const codigoNbs = regraMunicipal?.exigeNbs ? (regraGlobal as any)?.codigoNbs || cnaePrincipal?.codigoNbs || '' : '';
+  const itemLc = asText(firstDefined(overrides.itemLc, regraGlobal?.itemLc, infoEstatica.itemLC), infoEstatica.itemLC);
+  const codigoTribNacional = onlyDigits(asText(firstDefined(
+    overrides.codigoTributacaoNacional,
+    overrides.codigoTribNacional,
+    regraGlobal?.codigoTributacaoNacional,
+    infoEstatica.codigoTributacaoNacional,
+  )));
+  const codigoTributacaoMunicipal = optionalText(firstDefined(overrides.codigoTributacaoMunicipal, regraMunicipal?.codigoTributacaoMunicipal));
+  const codigoNbsResolvido = regraMunicipal?.exigeNbs ? (regraGlobal as any)?.codigoNbs || cnaePrincipal?.codigoNbs || '' : '';
+  const codigoNbs = optionalText(firstDefined(overrides.codigoNbs, codigoNbsResolvido));
+  const aliquotaMunicipio = firstDefined(overrides.aliquotaMunicipio, regraMunicipal?.aliquotaIss);
 
   addCheck(checks, {
     id: 'tributacao-nacional',
@@ -243,13 +314,13 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
     id: 'tributacao-municipal',
     group: 'Tributacao',
     label: 'Regra municipal',
-    status: regraMunicipal ? 'ok' : 'warn',
-    message: regraMunicipal ? `Regra municipal encontrada: ${regraMunicipal.codigoTributacaoMunicipal || 'sem codigo municipal'}.` : 'Sem regra municipal especifica. Sera usado apenas o mapeamento nacional/local padrao.',
+    status: regraMunicipal || codigoTributacaoMunicipal ? 'ok' : 'warn',
+    message: regraMunicipal || codigoTributacaoMunicipal ? `cTribMun ${codigoTributacaoMunicipal || 'nao informado pela regra'}.` : 'Sem regra municipal especifica. Sera usado apenas o mapeamento nacional/local padrao.',
     tag: 'serv/cServ/cTribMun',
     field: 'tributacaoMunicipal.codigoTributacaoMunicipal',
   });
 
-  if (regraMunicipal?.exigeNbs) {
+  if (regraMunicipal?.exigeNbs || codigoNbs) {
     addCheck(checks, {
       id: 'tributacao-nbs',
       group: 'Tributacao',
@@ -272,39 +343,43 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
   });
 
   const tomadorAdaptado: ICanonicalRps['tomador'] = {
-    razaoSocial: tomador.nome,
-    documento: tomador.documento || '',
-    inscricaoMunicipal: tomador.inscricaoMunicipal ? String(tomador.inscricaoMunicipal) : undefined,
-    email: tomador.email || undefined,
-    telefone: tomador.telefone || undefined,
-    tipo: tomador.tipo || undefined,
-    nif: tomador.nif || undefined,
-    pais: tomador.pais || undefined,
-    moeda: tomador.moeda || undefined,
+    razaoSocial: tomadorNome,
+    documento: tomadorDocumento || '',
+    inscricaoMunicipal: optionalText(firstDefined(overrides.tomadorInscricaoMunicipal, tomador.inscricaoMunicipal)),
+    email: optionalText(firstDefined(overrides.tomadorEmail, tomador.email)),
+    telefone: optionalText(firstDefined(overrides.tomadorTelefone, tomador.telefone)),
+    tipo: optionalText(tomadorTipo),
+    nif: optionalText(firstDefined(overrides.tomadorNif, tomador.nif)),
+    pais: optionalText(tomadorPais),
+    moeda: optionalText(firstDefined(overrides.tomadorMoeda, tomador.moeda)),
     semEndereco: omitirEnderecoTomador,
     endereco: {
-      cep: omitirEnderecoTomador ? '' : tomador.cep || '',
-      logradouro: omitirEnderecoTomador ? '' : tomador.logradouro || '',
-      numero: omitirEnderecoTomador ? '' : tomador.numero || '',
-      complemento: tomador.complemento || undefined,
-      bairro: omitirEnderecoTomador ? '' : tomador.bairro || '',
-      cidade: omitirEnderecoTomador ? '' : tomador.cidade || '',
-      codigoIbge: omitirEnderecoTomador ? '' : tomador.codigoIbge || '9999999',
-      uf: omitirEnderecoTomador ? '' : tomador.uf || '',
+      cep: omitirEnderecoTomador ? '' : asText(firstDefined(overrides.tomadorCep, tomador.cep), ''),
+      logradouro: omitirEnderecoTomador ? '' : asText(firstDefined(overrides.tomadorLogradouro, tomador.logradouro), ''),
+      numero: omitirEnderecoTomador ? '' : asText(firstDefined(overrides.tomadorNumero, tomador.numero), ''),
+      complemento: optionalText(firstDefined(overrides.tomadorComplemento, tomador.complemento)),
+      bairro: omitirEnderecoTomador ? '' : asText(firstDefined(overrides.tomadorBairro, tomador.bairro), ''),
+      cidade: omitirEnderecoTomador ? '' : asText(firstDefined(overrides.tomadorCidade, tomador.cidade), ''),
+      codigoIbge: tomadorCodigoIbge,
+      uf: omitirEnderecoTomador ? '' : asText(firstDefined(overrides.tomadorUf, tomador.uf), ''),
     },
   };
 
   const servico = {
     valor: valorFinal,
+    valorMoedaEstrangeira: firstDefined(overrides.valorMoedaEstrangeira) ? asNumber(overrides.valorMoedaEstrangeira) : undefined,
     codigoNbs,
-    codigoTributacaoMunicipal: regraMunicipal?.codigoTributacaoMunicipal,
-    aliquotaMunicipio: regraMunicipal?.aliquotaIss ? Number(regraMunicipal.aliquotaIss) : null,
+    codigoTributacaoMunicipal,
+    aliquotaMunicipio: aliquotaMunicipio ? asNumber(aliquotaMunicipio) : null,
     descricao: descricaoFinal,
     cnae: cnaeFinal,
     itemLc,
+    itemListaServico: itemLc,
     codigoTribNacional,
+    codigoTributacaoNacional: codigoTribNacional,
     aliquota: overrides.aliquota !== undefined ? asNumber(overrides.aliquota) : 0,
-    issRetido: !!overrides.issRetido,
+    issRetido: asBoolean(overrides.issRetido, false),
+    tipoTributacao: tipoTributacaoFinal,
     retencoes: overrides.retencoes,
   };
 
@@ -317,23 +392,23 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
     prestador: {
       id: prestador.id,
       documento: prestador.documento,
-      inscricaoMunicipal: prestador.inscricaoMunicipal || undefined,
+      inscricaoMunicipal: prestadorInscricaoMunicipal,
       regimeTributario: prestador.regimeTributario as any,
       endereco: {
-        codigoIbge: prestador.codigoIbge || '',
+        codigoIbge: asText(firstDefined(overrides.localPrestacaoIbge, prestador.codigoIbge), ''),
         uf: prestador.uf || '',
       },
       configuracoes: {
         aliquotaPadrao: Number(prestador.aliquotaPadrao),
-        issRetido: (dadosTributarios as any).issRetido,
-        tipoTributacao: prestador.tipoTributacaoPadrao || undefined,
-        regimeEspecial: prestador.regimeEspecialTributacao || undefined,
+        issRetido: servico.issRetido,
+        tipoTributacao: tipoTributacaoFinal,
+        regimeEspecial: prestadorRegimeEspecial,
       },
     },
     tomador: tomadorAdaptado,
     servico: {
-      ...servico,
       ...dadosTributarios,
+      ...servico,
     } as ICanonicalRps['servico'],
     meta: {
       ambiente: prestador.ambiente as 'HOMOLOGACAO' | 'PRODUCAO',
@@ -379,7 +454,7 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
       cnae: cnaeFinal,
       itemLc,
       codigoTributacaoNacional: codigoTribNacional,
-      codigoTributacaoMunicipal: regraMunicipal?.codigoTributacaoMunicipal || null,
+      codigoTributacaoMunicipal: codigoTributacaoMunicipal || null,
       exigeNbs: !!regraMunicipal?.exigeNbs,
       codigoNbs: codigoNbs || null,
       ambiente: prestador.ambiente,
