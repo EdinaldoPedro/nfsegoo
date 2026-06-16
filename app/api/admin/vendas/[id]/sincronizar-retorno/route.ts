@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import zlib from 'zlib';
 import { EmissorFactory } from '@/app/services/emissor/factories/EmissorFactory';
 import { createLog } from '@/app/services/logger';
+import { notifyFiscalEvent } from '@/app/services/notificationService';
 import { NfsePortalDownloader } from '@/app/services/pdf/NfsePortalDownloader';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 import { isSupportRole } from '@/app/utils/access-control';
@@ -245,6 +246,32 @@ export async function POST(request: Request, { params }: { params: { id: string 
       empresaId: venda.empresaId,
       vendaId: venda.id,
     });
+
+    if (situacaoEfetiva === 'CANCELADA') {
+      await notifyFiscalEvent({
+        type: 'NOTA_CANCELADA',
+        vendaId: venda.id,
+        notaId: nota.id,
+        title: 'Nota cancelada',
+        message: 'A NFS-e foi sincronizada como cancelada pela bancada.',
+        priority: 'NORMAL',
+        eventKeySuffix: `sync-cancelada-${nota.id}`,
+        payload: { notaId: nota.id, chaveAcesso: nota.chaveAcesso, pdfAtualizado, origem: 'ADMIN_SYNC' },
+      });
+    } else if (situacaoEfetiva === 'AUTORIZADA') {
+      await notifyFiscalEvent({
+        type: 'NOTA_AUTORIZADA',
+        vendaId: venda.id,
+        notaId: nota.id,
+        title: 'Nota autorizada',
+        message: dadosNota.numero || nota.numero
+          ? `NFS-e ${dadosNota.numero || nota.numero} sincronizada como autorizada.`
+          : 'NFS-e sincronizada como autorizada.',
+        priority: 'NORMAL',
+        eventKeySuffix: `sync-autorizada-${nota.id}`,
+        payload: { notaId: nota.id, chaveAcesso: nota.chaveAcesso, numero: dadosNota.numero || nota.numero, origem: 'ADMIN_SYNC' },
+      });
+    }
 
     return NextResponse.json({
       success: true,

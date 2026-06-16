@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 import { validateJsonContentLength } from '@/app/utils/request-guards';
 
@@ -12,6 +12,27 @@ const VALID_AUDIENCES = ['TODOS', 'CLIENTES', 'CONTADORES'];
 const MAX_ATTACHMENT_BASE64_LENGTH = 3_000_000;
 const ALLOWED_ATTACHMENT_MIME_TYPES = new Set(['application/pdf', 'image/png', 'image/jpeg', 'image/webp']);
 const ALLOWED_ATTACHMENT_EXTENSIONS = new Set(['.pdf', '.png', '.jpg', '.jpeg', '.webp']);
+let hasNotificarAppColumnCache: boolean | null = null;
+
+const NOTICE_SELECT = {
+  id: true,
+  titulo: true,
+  mensagem: true,
+  tipo: true,
+  status: true,
+  publico: true,
+  iniciaEm: true,
+  terminaEm: true,
+  linkLabel: true,
+  linkHref: true,
+  anexoNome: true,
+  anexoBase64: true,
+  criadoPorId: true,
+  publicadoEm: true,
+  arquivadoEm: true,
+  createdAt: true,
+  updatedAt: true,
+};
 
 function parseDate(value: unknown) {
   if (!value || typeof value !== 'string') return null;
@@ -39,7 +60,56 @@ function serializeNotice(notice: any) {
     ...notice,
     runtimeStatus,
     anexoBase64: notice.anexoBase64 || null,
+    notificarApp: notice.notificarApp || false,
   };
+}
+
+async function hasNotificarAppColumn() {
+  if (hasNotificarAppColumnCache !== null) return hasNotificarAppColumnCache;
+
+  try {
+    const rows = await prisma.$queryRaw<Array<{ exists: boolean }>>`
+      SELECT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'GlobalNotice'
+          AND column_name = 'notificarApp'
+      ) AS "exists"
+    `;
+    if (rows?.[0]?.exists === true) {
+      hasNotificarAppColumnCache = true;
+      return true;
+    }
+  } catch {
+    return false;
+  }
+
+  return false;
+}
+
+async function applyNotificarApp(noticeId: string, value: boolean) {
+  if (!(await hasNotificarAppColumn())) return;
+  await prisma.$executeRaw`
+    UPDATE "GlobalNotice"
+    SET "notificarApp" = ${value}
+    WHERE "id" = ${noticeId}
+  `;
+}
+
+async function attachNotificarAppFlags(notices: any[]) {
+  if (notices.length === 0 || !(await hasNotificarAppColumn())) return notices;
+
+  const ids = notices.map((notice) => notice.id).filter(Boolean);
+  if (ids.length === 0) return notices;
+  const idsSql = Prisma.join(ids);
+  const rows = await prisma.$queryRaw<Array<{ id: string; notificarApp: boolean }>>`
+    SELECT "id", "notificarApp"
+    FROM "GlobalNotice"
+    WHERE "id" IN (${idsSql})
+  `;
+  const flags = new Map(rows.map((row) => [row.id, row.notificarApp]));
+  return notices.map((notice) => ({ ...notice, notificarApp: flags.get(notice.id) || false }));
 }
 
 function fileExtension(fileName: string) {
@@ -108,9 +178,11 @@ export async function GET(request: Request) {
   const notices = await prisma.globalNotice.findMany({
     where: status && status !== 'TODOS' ? { status } : undefined,
     orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+    select: NOTICE_SELECT,
   });
 
-  return NextResponse.json(notices.map(serializeNotice));
+  const noticesWithFlags = await attachNotificarAppFlags(notices);
+  return NextResponse.json(noticesWithFlags.map(serializeNotice));
 }
 
 export async function POST(request: Request) {
@@ -162,9 +234,11 @@ export async function POST(request: Request) {
       criadoPorId: user.id,
       publicadoEm: status === 'ATIVO' ? new Date() : null,
     },
+    select: NOTICE_SELECT,
   });
+  await applyNotificarApp(notice.id, body.notificarApp === true);
 
-  return NextResponse.json(serializeNotice(notice), { status: 201 });
+  return NextResponse.json(serializeNotice({ ...notice, notificarApp: body.notificarApp === true }), { status: 201 });
 }
 
 export async function PUT(request: Request) {
@@ -185,7 +259,7 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: 'Informe titulo e mensagem do aviso.' }, { status: 400 });
   }
 
-  const atual = await prisma.globalNotice.findUnique({ where: { id } });
+  const atual = await prisma.globalNotice.findUnique({ where: { id }, select: NOTICE_SELECT });
   if (!atual) return NextResponse.json({ error: 'Aviso nao encontrado.' }, { status: 404 });
 
   const tipo = VALID_TYPES.includes(body.tipo) ? body.tipo : 'INFO';
@@ -222,9 +296,11 @@ export async function PUT(request: Request) {
       publicadoEm: status === 'ATIVO' && atual.status !== 'ATIVO' ? new Date() : atual.publicadoEm,
       arquivadoEm: status === 'ARQUIVADO' && atual.status !== 'ARQUIVADO' ? new Date() : status !== 'ARQUIVADO' ? null : atual.arquivadoEm,
     },
+    select: NOTICE_SELECT,
   });
+  await applyNotificarApp(notice.id, body.notificarApp === true);
 
-  return NextResponse.json(serializeNotice(notice));
+  return NextResponse.json(serializeNotice({ ...notice, notificarApp: body.notificarApp === true }));
 }
 
 export async function DELETE(request: Request) {
@@ -242,7 +318,9 @@ export async function DELETE(request: Request) {
       status: 'ARQUIVADO',
       arquivadoEm: new Date(),
     },
+    select: NOTICE_SELECT,
   });
 
-  return NextResponse.json(serializeNotice(notice));
+  const [noticeWithFlag] = await attachNotificarAppFlags([notice]);
+  return NextResponse.json(serializeNotice(noticeWithFlag));
 }

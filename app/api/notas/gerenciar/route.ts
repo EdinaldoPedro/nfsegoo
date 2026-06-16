@@ -3,6 +3,7 @@ import { createLog } from '@/app/services/logger';
 import { EmissorFactory } from '@/app/services/emissor/factories/EmissorFactory';
 import { processarCancelamentoNota } from '@/app/services/notaProcessor';
 import { checkPlanLimits } from '@/app/services/planService';
+import { notifyFiscalEvent } from '@/app/services/notificationService';
 import { validateRequest } from '@/app/utils/api-security';
 import { hasEmpresaAccess } from '@/app/utils/access-control';
 import { prisma } from '@/app/utils/prisma';
@@ -108,6 +109,17 @@ export async function POST(request: Request) {
         if (!notaAtiva.pdfBase64) {
           await processarCancelamentoNota(notaAtiva.id, venda.empresaId, venda.id);
         }
+        await notifyFiscalEvent({
+          type: 'NOTA_CANCELADA',
+          vendaId: venda.id,
+          notaId: notaAtiva.id,
+          actorUserId: userId,
+          title: 'Nota cancelada',
+          message: 'A NFS-e ja constava como cancelada e o SaaS sincronizou o status.',
+          priority: 'NORMAL',
+          eventKeySuffix: `cancelada-local-${notaAtiva.id}`,
+          payload: { notaId: notaAtiva.id, chaveAcesso: notaAtiva.chaveAcesso },
+        });
         return NextResponse.json({ success: true, message: 'Nota ja estava cancelada. Status sincronizado.' });
       }
 
@@ -140,6 +152,17 @@ export async function POST(request: Request) {
         });
         await prisma.venda.update({ where: { id: vendaId }, data: { status: 'CANCELADA' } });
         await processarCancelamentoNota(notaAtiva.id, venda.empresaId, venda.id);
+        await notifyFiscalEvent({
+          type: 'NOTA_CANCELADA',
+          vendaId: venda.id,
+          notaId: notaAtiva.id,
+          actorUserId: userId,
+          title: 'Nota cancelada',
+          message: 'A NFS-e foi identificada como cancelada no Portal Nacional.',
+          priority: 'NORMAL',
+          eventKeySuffix: `cancelada-portal-${notaAtiva.id}`,
+          payload: { notaId: notaAtiva.id, chaveAcesso: notaAtiva.chaveAcesso },
+        });
         return NextResponse.json({ success: true, message: 'Nota sincronizada! Status atualizado para Cancelada.' });
       }
 
@@ -191,6 +214,22 @@ export async function POST(request: Request) {
         details: {
           tentativasConsulta,
           tentativasCancelamento,
+          protocolo: protocoloParaCancelar,
+        },
+      });
+
+      await notifyFiscalEvent({
+        type: 'NOTA_CANCELADA',
+        vendaId: venda.id,
+        notaId: notaAtiva.id,
+        actorUserId: userId,
+        title: 'Nota cancelada',
+        message: 'Cancelamento da NFS-e autorizado pelo Portal Nacional.',
+        priority: 'NORMAL',
+        eventKeySuffix: `cancelamento-autorizado-${notaAtiva.id}`,
+        payload: {
+          notaId: notaAtiva.id,
+          chaveAcesso: notaAtiva.chaveAcesso,
           protocolo: protocoloParaCancelar,
         },
       });

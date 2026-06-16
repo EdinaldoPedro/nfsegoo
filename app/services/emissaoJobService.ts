@@ -5,6 +5,7 @@ import { getTributacaoPorCnae } from '@/app/utils/tributacao';
 import { processarRetornoNota } from '@/app/services/notaProcessor';
 import { checkPlanLimits, incrementUsage, releaseEmissionCredit, reserveEmissionCredit, resolveBillingUserId } from '@/app/services/planService';
 import { resolveEmpresaContexto } from '@/app/utils/access-control';
+import { notifyFiscalEvent } from '@/app/services/notificationService';
 
 const prisma = new PrismaClient();
 const emissaoJobModel = (prisma as any).emissaoJob;
@@ -523,6 +524,19 @@ async function registrarFalhaInesperadaJob(jobId: string, error: any) {
       details: { jobId: jobAtual.id, attempts, maxAttempts, delayMs, reservedDpsNumero: jobAtual.reservedDpsNumero, erro: erroPayload },
     });
 
+    if (jobAtual.vendaId) {
+      await notifyFiscalEvent({
+        type: 'NOTA_RETRY',
+        vendaId: jobAtual.vendaId,
+        actorUserId: jobAtual.actorUserId,
+        title: 'Nota em nova tentativa',
+        message: erroPayload.userAction,
+        priority: 'NORMAL',
+        eventKeySuffix: `job-${jobAtual.id}-exception-retry-${attempts}`,
+        payload: { jobId: jobAtual.id, attempts, nextAttemptAt: new Date(Date.now() + delayMs), erro: erroPayload },
+      });
+    }
+
     await agendarNovaTentativa(jobAtual.id, delayMs);
     return;
   }
@@ -554,6 +568,19 @@ async function registrarFalhaInesperadaJob(jobId: string, error: any) {
     vendaId: jobAtual.vendaId,
     details: { jobId: jobAtual.id, attempts, maxAttempts, reservedDpsNumero: jobAtual.reservedDpsNumero, erro: erroPayload },
   });
+
+  if (jobAtual.vendaId) {
+    await notifyFiscalEvent({
+      type: 'NOTA_FALHA',
+      vendaId: jobAtual.vendaId,
+      actorUserId: jobAtual.actorUserId,
+      title: 'Nota nao autorizada',
+      message: erroPayload.userAction,
+      priority: 'HIGH',
+      eventKeySuffix: `job-${jobAtual.id}-exception-final`,
+      payload: { jobId: jobAtual.id, attempts, erro: erroPayload },
+    });
+  }
 }
 
 async function executarEmissao(job: any) {
@@ -717,6 +744,16 @@ async function executarEmissao(job: any) {
         vendaId: venda.id,
         details: { jobId: job.id, attempts, delayMs, erro },
       });
+      await notifyFiscalEvent({
+        type: 'NOTA_RETRY',
+        vendaId: venda.id,
+        actorUserId: job.actorUserId,
+        title: 'Nota em nova tentativa',
+        message: 'O Portal Nacional ficou instavel. Vamos tentar novamente preservando a mesma DPS.',
+        priority: 'NORMAL',
+        eventKeySuffix: `job-${job.id}-retry-${attempts}`,
+        payload: { jobId: job.id, attempts, nextAttemptAt: new Date(Date.now() + delayMs), dps: dpsFinal },
+      });
       await agendarNovaTentativa(job.id, delayMs);
       return;
     }
@@ -759,6 +796,17 @@ async function executarEmissao(job: any) {
         lastError: JSON.stringify(erro),
         finishedAt: new Date(),
       },
+    });
+
+    await notifyFiscalEvent({
+      type: 'NOTA_FALHA',
+      vendaId: venda.id,
+      actorUserId: job.actorUserId,
+      title: erro.temporario ? 'Nota com falha temporaria' : 'Nota nao autorizada',
+      message: erro.userAction || erro.motivo || 'A emissao nao foi autorizada. Acesse o historico para revisar.',
+      priority: erro.temporario ? 'NORMAL' : 'HIGH',
+      eventKeySuffix: `job-${job.id}-final`,
+      payload: { jobId: job.id, dps: dpsFinal, erro },
     });
 
     if (creditReserved && !erro.temporario) await releaseEmissionCredit(job.reservedPlanHistoryId);
@@ -829,6 +877,23 @@ async function executarEmissao(job: any) {
       tentativas: tentativasEmissao,
       chaveAcesso: resultado.notaGov!.chave,
       jobId: job.id,
+    },
+  });
+
+  await notifyFiscalEvent({
+    type: 'NOTA_AUTORIZADA',
+    vendaId: venda.id,
+    notaId: nota.id,
+    actorUserId: job.actorUserId,
+    title: 'Nota autorizada',
+    message: nota.numero && nota.numero > 0 ? `NFS-e ${nota.numero} autorizada com sucesso.` : 'NFS-e autorizada com sucesso.',
+    priority: 'NORMAL',
+    eventKeySuffix: `job-${job.id}-autorizada`,
+    payload: {
+      jobId: job.id,
+      numero: nota.numero,
+      chaveAcesso: nota.chaveAcesso,
+      dps: dpsFinal,
     },
   });
 

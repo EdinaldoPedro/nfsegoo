@@ -4,6 +4,20 @@ import { getAuthenticatedUser, unauthorized } from '@/app/utils/api-middleware';
 
 const prisma = new PrismaClient();
 
+const NOTICE_SELECT = {
+  id: true,
+  titulo: true,
+  mensagem: true,
+  tipo: true,
+  publico: true,
+  linkLabel: true,
+  linkHref: true,
+  anexoNome: true,
+  anexoBase64: true,
+  terminaEm: true,
+  createdAt: true,
+};
+
 function audienceForRole(role: string) {
   if (role === 'CONTADOR') return ['TODOS', 'CONTADORES'];
   return ['TODOS', 'CLIENTES'];
@@ -24,19 +38,7 @@ export async function GET(request: Request) {
     },
     orderBy: [{ tipo: 'desc' }, { createdAt: 'desc' }],
     take: 10,
-    select: {
-      id: true,
-      titulo: true,
-      mensagem: true,
-      tipo: true,
-      publico: true,
-      linkLabel: true,
-      linkHref: true,
-      anexoNome: true,
-      anexoBase64: true,
-      terminaEm: true,
-      createdAt: true,
-    },
+    select: NOTICE_SELECT,
   });
 
   return NextResponse.json(notices.map((notice) => ({

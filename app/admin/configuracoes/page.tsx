@@ -33,6 +33,7 @@ type AvisoGlobal = {
   linkHref?: string;
   anexoNome?: string;
   anexoBase64?: string;
+  notificarApp?: boolean;
   runtimeStatus?: string;
   updatedAt?: string;
   createdAt?: string;
@@ -50,6 +51,7 @@ const avisoInicial: AvisoGlobal = {
   linkHref: '',
   anexoNome: '',
   anexoBase64: '',
+  notificarApp: false,
 };
 
 const MAX_AVISO_ATTACHMENT_BYTES = 2 * 1024 * 1024;
@@ -119,6 +121,7 @@ export default function AdminConfig() {
       linkHref: aviso.linkHref || '',
       anexoNome: aviso.anexoNome || '',
       anexoBase64: aviso.anexoBase64 || '',
+      notificarApp: aviso.notificarApp || false,
     });
     setActiveTab('AVISOS');
   };
@@ -454,6 +457,15 @@ function AvisosSettings({
                 <option value="PAUSADO">Pausado</option>
               </select>
             </div>
+            <label className="flex h-[50px] cursor-pointer items-center gap-3 rounded-lg border border-blue-100 bg-blue-50 px-4 text-sm font-bold text-blue-900 hover:bg-blue-100">
+              <input
+                type="checkbox"
+                checked={avisoForm.notificarApp || false}
+                onChange={e => setAvisoForm({ ...avisoForm, notificarApp: e.target.checked })}
+                className="h-5 w-5 rounded border-blue-300 text-blue-600 focus:ring-blue-500"
+              />
+              <span>Notificar no app</span>
+            </label>
             <div>
               <label className="block text-xs font-bold text-slate-500 uppercase mb-1 ml-1">Arquivo opcional</label>
               <label className="flex h-[50px] cursor-pointer items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 text-sm font-bold text-slate-600 hover:bg-slate-50">
@@ -520,6 +532,7 @@ function AvisosSettings({
                   <span className={`rounded-full px-2.5 py-1 text-[11px] font-black ${getNoticeTone(aviso.tipo).badge}`}>{aviso.tipo}</span>
                   <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-black text-slate-600">{aviso.status}</span>
                   <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-black text-slate-600">{aviso.publico}</span>
+                  {aviso.notificarApp && <span className="rounded-full bg-blue-100 px-2.5 py-1 text-[11px] font-black text-blue-700">APP</span>}
                 </div>
                 <h4 className="mt-3 font-black text-slate-900">{aviso.titulo}</h4>
                 <p className="mt-1 line-clamp-2 text-sm leading-6 text-slate-500">{aviso.mensagem}</p>
@@ -588,6 +601,7 @@ function AvisoPreview({ aviso }: { aviso: AvisoGlobal }) {
         </div>
       </div>
       <p className="mt-3 text-xs text-slate-400">{formatNoticeWindow(aviso)}</p>
+      {aviso.notificarApp && <p className="mt-2 text-xs font-bold text-blue-600">Tambem entrara no sino do app.</p>}
     </div>
   );
 }

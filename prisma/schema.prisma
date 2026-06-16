@@ -321,6 +321,7 @@ model GlobalNotice {
   linkHref         String?
   anexoNome        String?
   anexoBase64      String?   @db.Text
+  notificarApp     Boolean   @default(false)
   criadoPorId      String?
   publicadoEm      DateTime?
   arquivadoEm      DateTime?
@@ -329,6 +330,33 @@ model GlobalNotice {
 
   @@index([status, iniciaEm, terminaEm])
   @@index([publico])
+}
+
+model AppNotification {
+  id          String    @id @default(uuid())
+  recipientId String
+  empresaId   String?
+  vendaId     String?
+  notaId      String?
+  type        String
+  title       String
+  message     String    @db.Text
+  status      String    @default("UNREAD")
+  priority    String    @default("NORMAL")
+  channel     String    @default("IN_APP")
+  eventKey    String
+  payloadJson String?   @db.Text
+  readAt      DateTime?
+  deliveredAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([recipientId, eventKey])
+  @@index([recipientId, status, createdAt])
+  @@index([empresaId, createdAt])
+  @@index([vendaId])
+  @@index([notaId])
+  @@index([type])
 }
 
 model GlobalCnae {
