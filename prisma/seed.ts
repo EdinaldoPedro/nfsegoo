@@ -36,6 +36,52 @@ async function main() {
       privado: true // Não aparece na lista de compras
     },
 
+    {
+      name: 'Contador Starter',
+      slug: 'CONTADOR_STARTER',
+      description: 'Plano privado inicial para contadores parceiros.',
+      priceMonthly: 0,
+      priceYearly: 0,
+      features: JSON.stringify(['Painel do contador', 'Carteira de clientes', 'Empresas vinculadas', 'Suporte administrativo']),
+      maxNotasMensal: 60,
+      maxClientes: 25,
+      diasTeste: 0,
+      active: true,
+      recommended: false,
+      privado: true,
+      tipo: 'PLANO'
+    },
+    {
+      name: 'Contador Pro',
+      slug: 'CONTADOR_PRO',
+      description: 'Plano privado para carteiras contabeis em crescimento.',
+      priceMonthly: 0,
+      priceYearly: 0,
+      features: JSON.stringify(['Mais notas mensais', 'Mais clientes na carteira', 'Suporte administrativo']),
+      maxNotasMensal: 200,
+      maxClientes: 120,
+      diasTeste: 0,
+      active: true,
+      recommended: false,
+      privado: true,
+      tipo: 'PLANO'
+    },
+    {
+      name: 'Contador Scale',
+      slug: 'CONTADOR_SCALE',
+      description: 'Plano privado para operacoes contabeis de alto volume.',
+      priceMonthly: 0,
+      priceYearly: 0,
+      features: JSON.stringify(['Alto volume de notas', 'Carteira ampliada', 'Suporte administrativo']),
+      maxNotasMensal: 600,
+      maxClientes: 300,
+      diasTeste: 0,
+      active: true,
+      recommended: false,
+      privado: true,
+      tipo: 'PLANO'
+    },
+
     // === 2. NOVOS PLANOS COMERCIAIS ===
     
     // BASIC

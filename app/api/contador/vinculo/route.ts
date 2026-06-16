@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 import { upsertEmpresaAndLinkUser } from '@/app/services/empresaService';
 import { stripEmpresaSecrets } from '@/app/utils/safe-data';
+import { createLog } from '@/app/services/logger';
 
 const prisma = new PrismaClient();
 const PENDING_LINK_STATUSES = ['PENDENTE', 'PENDENTE_DONO', 'PENDENTE_CUSTODIANTE'];
@@ -110,9 +111,21 @@ export async function GET(request: Request) {
         })));
     }
     if (mode === 'cliente') {
-        if (!user.empresaId) return NextResponse.json([]);
+        const empresasDoDono = await prisma.empresa.findMany({
+            where: {
+                arquivadoEm: null,
+                OR: [
+                    { proprietarioUserId: user.id } as any,
+                    ...(user.empresaId ? [{ id: user.empresaId }] : []),
+                ],
+            } as any,
+            select: { id: true },
+        });
+        const empresaIds = empresasDoDono.map((empresa) => empresa.id);
+        if (empresaIds.length === 0) return NextResponse.json([]);
+
         const solicitacoes = await prisma.contadorVinculo.findMany({
-            where: { empresaId: user.empresaId, status: { in: ['PENDENTE', 'PENDENTE_DONO'] }, arquivadoEm: null } as any,
+            where: { empresaId: { in: empresaIds }, status: { in: ['PENDENTE', 'PENDENTE_DONO'] }, arquivadoEm: null } as any,
             include: { contador: { select: { nome: true, email: true } } }
         });
         return NextResponse.json(solicitacoes);
@@ -182,6 +195,7 @@ export async function PUT(request: Request) {
                         id: true,
                         contadorCustodianteId: true,
                         donoFaturamentoId: true,
+                        proprietarioUserId: true,
                     } as any,
                 },
             },
@@ -208,6 +222,15 @@ export async function PUT(request: Request) {
                     where: { id: vinculoId },
                     data: { status: 'REJEITADO', arquivadoEm: new Date(), arquivadoPor: user.id, motivoArquivamento: 'Solicitacao rejeitada pelo contador custodiante.' } as any
                 });
+                await createLog({
+                    level: 'INFO',
+                    action: 'VINCULO_CUSTODIA_REJEITADO',
+                    message: 'Solicitacao de vinculo rejeitada pelo contador custodiante.',
+                    empresaId: vinculo.empresaId,
+                    userId: user.id,
+                    module: 'VINCULOS',
+                    details: { vinculoId, contadorSolicitanteId: vinculo.contadorId },
+                });
                 return NextResponse.json({ success: true, message: 'Solicitacao recusada.' });
             }
 
@@ -220,6 +243,15 @@ export async function PUT(request: Request) {
                         arquivadoPor: null,
                         motivoArquivamento: null,
                     } as any,
+                });
+                await createLog({
+                    level: 'INFO',
+                    action: 'VINCULO_ACESSO_LIBERADO_CUSTODIANTE',
+                    message: 'Acesso contabil liberado sem transferir custodia.',
+                    empresaId: vinculo.empresaId,
+                    userId: user.id,
+                    module: 'VINCULOS',
+                    details: { vinculoId, contadorSolicitanteId: vinculo.contadorId },
                 });
                 return NextResponse.json({ success: true, message: 'Acesso concedido. A custodia principal foi mantida.' });
             }
@@ -256,19 +288,61 @@ export async function PUT(request: Request) {
                 }),
             ]);
 
+            await createLog({
+                level: 'INFO',
+                action: 'VINCULO_CUSTODIA_TRANSFERIDA',
+                message: 'Custodia contabil transferida pelo contador atual.',
+                empresaId: vinculo.empresaId,
+                userId: user.id,
+                module: 'VINCULOS',
+                details: {
+                    vinculoId,
+                    contadorSolicitanteId: vinculo.contadorId,
+                    custodianteAnteriorId,
+                    cobrancaTransferida: trocarCobranca,
+                },
+            });
+
             return NextResponse.json({ success: true, message: 'Vinculo liberado e custodia transferida.' });
         }
 
-        if (!vinculo || vinculo.empresaId !== user.empresaId) return forbidden();
+        const empresa = (vinculo as any).empresa;
+        const podeResolverComoDono =
+            empresa?.proprietarioUserId === user.id ||
+            vinculo.empresaId === user.empresaId ||
+            ['MASTER', 'ADMIN'].includes(user.role);
+
+        if (!vinculo || !podeResolverComoDono) return forbidden();
         
         if (acao === 'REJEITAR') {
             await prisma.contadorVinculo.update({
                 where: { id: vinculoId },
                 data: { status: 'REJEITADO', arquivadoEm: new Date(), arquivadoPor: user.id, motivoArquivamento: 'Solicitacao rejeitada pelo cliente.' } as any
             });
+            await createLog({
+                level: 'INFO',
+                action: 'VINCULO_DONO_REJEITADO',
+                message: 'Solicitacao de contador rejeitada pelo proprietario.',
+                empresaId: vinculo.empresaId,
+                userId: user.id,
+                module: 'VINCULOS',
+                details: { vinculoId, contadorSolicitanteId: vinculo.contadorId },
+            });
             return NextResponse.json({ success: true, message: 'Recusado.' });
         }
-        await prisma.contadorVinculo.update({ where: { id: vinculoId }, data: { status: 'APROVADO' } });
+        await prisma.contadorVinculo.update({
+            where: { id: vinculoId },
+            data: { status: 'APROVADO', arquivadoEm: null, arquivadoPor: null, motivoArquivamento: null } as any,
+        });
+        await createLog({
+            level: 'INFO',
+            action: 'VINCULO_DONO_APROVADO',
+            message: 'Solicitacao de contador aprovada pelo proprietario.',
+            empresaId: vinculo.empresaId,
+            userId: user.id,
+            module: 'VINCULOS',
+            details: { vinculoId, contadorSolicitanteId: vinculo.contadorId },
+        });
         return NextResponse.json({ success: true, message: 'Aprovado!' });
     } catch (e) { return NextResponse.json({ error: 'Erro interno.' }, { status: 500 }); }
 }
@@ -287,6 +361,15 @@ export async function DELETE(request: Request) {
         await prisma.contadorVinculo.update({
             where: { id },
             data: { status: 'DESVINCULADO', arquivadoEm: new Date(), arquivadoPor: user.id, motivoArquivamento: 'Desvinculo solicitado pelo usuario.' } as any
+        });
+        await createLog({
+            level: 'INFO',
+            action: 'VINCULO_CONTADOR_DESVINCULADO',
+            message: 'Vinculo contabil desvinculado pelo usuario.',
+            empresaId: vinculo.empresaId,
+            userId: user.id,
+            module: 'VINCULOS',
+            details: { vinculoId: id, contadorId: vinculo.contadorId },
         });
         return NextResponse.json({ success: true });
     } catch (e) { return NextResponse.json({ error: 'Erro ao desvincular.' }, { status: 500 }); }

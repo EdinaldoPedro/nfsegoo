@@ -16,7 +16,9 @@ import {
   RefreshCw,
   Users,
   FileCheck,
-  Power
+  Power,
+  AlertTriangle,
+  CheckCircle2
 } from 'lucide-react';
 import { ROLE_LABELS, STAFF_ROLES } from '@/app/utils/permissions';
 import { useDialog } from '@/app/contexts/DialogContext';
@@ -46,6 +48,48 @@ export default function GestaoColaboradores() {
   const [editRenovacaoAutomatica, setEditRenovacaoAutomatica] = useState(true);
   const [novaProprietaria, setNovaProprietaria] = useState({ documento: '', razaoSocial: '' });
   const [loadingEdit, setLoadingEdit] = useState(false);
+
+  const getActivePlanHistory = (user: any) => {
+    return user?.planHistories?.find((h: any) => h.status === 'ATIVO' && h.plan) || user?.planHistories?.find((h: any) => h.plan) || null;
+  };
+
+  const getPlanInfo = (user: any) => {
+    const history = getActivePlanHistory(user);
+    const plan = history?.plan;
+    const slug = plan?.slug || user?.plano || 'SEM_PLANO';
+    const isLegacy = slug === 'PARCEIRO';
+    const isCustom = plan?.tipo === 'CUSTOM' || slug.startsWith('parceiro-contabil-');
+    const isContadorPrivate = slug.startsWith('CONTADOR_');
+    const dataFim = history?.dataFim || user?.planoExpiresAt;
+    const vencimento = dataFim ? new Date(dataFim) : null;
+
+    return {
+      history,
+      plan,
+      slug,
+      name: plan?.name || slug,
+      origem: isLegacy
+        ? 'Legado'
+        : isCustom
+          ? 'Custom admin'
+          : isContadorPrivate
+            ? 'Plano privado'
+            : plan
+              ? 'Plano base'
+              : 'Sem plano',
+      isLegacy,
+      isCustom,
+      status: history?.status || user?.planoStatus || 'N/A',
+      maxNotas: plan?.maxNotasMensal ?? 0,
+      maxClientes: plan?.maxClientes ?? 0,
+      vencimento,
+    };
+  };
+
+  const formatDate = (date: Date | null) => {
+    if (!date) return 'Sem vencimento';
+    return date.toLocaleDateString('pt-BR');
+  };
 
   const carregarDados = () => {
     fetch('/api/admin/users', { headers: {} })
@@ -159,6 +203,35 @@ export default function GestaoColaboradores() {
       } catch(e) { dialog.showAlert("Erro ao salvar."); }
   };
 
+  const handleApplyDefaultPlan = async () => {
+      if (!selectedUserFull) return;
+      if (!await dialog.showConfirm({
+          title: 'Aplicar plano padrao?',
+          description: 'O contador passara para o CONTADOR_STARTER. Pacotes avulsos permanecem preservados.',
+          type: 'warning'
+      })) return;
+
+      try {
+          const res = await fetch(`/api/admin/users/${selectedUserFull.id}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ role: 'CONTADOR', aplicarPlanoPadrao: true })
+          });
+          const data = await res.json().catch(() => ({}));
+
+          if (!res.ok) {
+              dialog.showAlert({ type: 'danger', description: data.error || 'Erro ao aplicar plano padrao.' });
+              return;
+          }
+
+          dialog.showAlert({ type: 'success', description: 'Plano padrao aplicado ao contador.' });
+          await handleOpenEdit(selectedUserFull.id);
+          carregarDados();
+      } catch {
+          dialog.showAlert('Erro de conexao.');
+      }
+  };
+
   // --- DESVINCULAR EMPRESA ---
   const handleUnlinkCompany = async (vinculoId: string) => {
       if(!await dialog.showConfirm({ 
@@ -246,6 +319,7 @@ export default function GestaoColaboradores() {
   const totalEquipeInterna = colabs.filter((u) => u.role !== 'CONTADOR').length;
   const empresasNaCarteira = selectedUserFull?.empresasContabeis?.length || 0;
   const limiteEmpresasPct = editLimit ? Math.min(100, Math.round((empresasNaCarteira / editLimit) * 100)) : 0;
+  const selectedPlanInfo = selectedUserFull ? getPlanInfo(selectedUserFull) : null;
 
   return (
     <div className="space-y-6">
@@ -358,6 +432,50 @@ export default function GestaoColaboradores() {
                           )}
                         </div>
                     </div>
+
+                    {roleInput === 'CONTADOR' && selectedPlanInfo && (
+                      <div className={`rounded-2xl border p-4 ${selectedPlanInfo.isLegacy ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-white'}`}>
+                        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                          <div className="flex items-start gap-3">
+                            <div className={`rounded-xl p-3 ${selectedPlanInfo.isLegacy ? 'bg-amber-100 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>
+                              {selectedPlanInfo.isLegacy ? <AlertTriangle size={22} /> : <CheckCircle2 size={22} />}
+                            </div>
+                            <div>
+                              <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Plano ativo</p>
+                              <h4 className="mt-1 text-lg font-black text-slate-950">{selectedPlanInfo.name}</h4>
+                              <p className="mt-1 text-sm text-slate-500">
+                                Origem: <span className="font-bold text-slate-700">{selectedPlanInfo.origem}</span> · Status: <span className="font-bold text-slate-700">{selectedPlanInfo.status}</span> · Vence: <span className="font-bold text-slate-700">{formatDate(selectedPlanInfo.vencimento)}</span>
+                              </p>
+                            </div>
+                          </div>
+
+                          {selectedPlanInfo.isLegacy && (
+                            <button
+                              type="button"
+                              onClick={handleApplyDefaultPlan}
+                              className="inline-flex items-center justify-center gap-2 rounded-xl bg-amber-600 px-4 py-3 text-sm font-black text-white transition hover:bg-amber-700"
+                            >
+                              <RefreshCw size={16} /> Aplicar plano padrao
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+                          <div className="rounded-xl border border-slate-200 bg-white/80 p-3">
+                            <p className="text-xs font-black uppercase text-slate-400">Limite NFS-e</p>
+                            <p className="mt-1 text-xl font-black text-slate-950">{selectedPlanInfo.maxNotas}</p>
+                          </div>
+                          <div className="rounded-xl border border-slate-200 bg-white/80 p-3">
+                            <p className="text-xs font-black uppercase text-slate-400">Limite clientes</p>
+                            <p className="mt-1 text-xl font-black text-slate-950">{selectedPlanInfo.maxClientes}</p>
+                          </div>
+                          <div className="rounded-xl border border-slate-200 bg-white/80 p-3">
+                            <p className="text-xs font-black uppercase text-slate-400">Slug</p>
+                            <p className="mt-1 truncate text-sm font-black text-slate-950" title={selectedPlanInfo.slug}>{selectedPlanInfo.slug}</p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     {/* DADOS E LIMITES DO PARCEIRO */}
                     <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -528,6 +646,7 @@ export default function GestaoColaboradores() {
                     <th className="p-4 text-slate-500 font-bold uppercase text-xs">Nome</th>
                     <th className="p-4 text-slate-500 font-bold uppercase text-xs">Cargo</th>
                     <th className="p-4 text-slate-500 font-bold uppercase text-xs">Perfil</th>
+                    <th className="p-4 text-slate-500 font-bold uppercase text-xs">Plano</th>
                     <th className="p-4 text-right text-slate-500 font-bold uppercase text-xs">Ações</th>
                 </tr>
             </thead>
@@ -551,6 +670,31 @@ export default function GestaoColaboradores() {
                             <span className="text-xs font-semibold text-slate-500">
                               {user.role === 'CONTADOR' ? 'Parceiro contábil' : 'Equipe do SaaS'}
                             </span>
+                        </td>
+                        <td className="p-4">
+                            {user.role === 'CONTADOR' ? (() => {
+                                const planInfo = getPlanInfo(user);
+                                return (
+                                    <div className="space-y-1">
+                                        <div className="flex items-center gap-2">
+                                            {planInfo.isLegacy && <AlertTriangle size={14} className="text-amber-600" />}
+                                            <span className={`rounded-full px-2 py-1 text-[10px] font-black uppercase ${
+                                                planInfo.isLegacy
+                                                    ? 'bg-amber-100 text-amber-700'
+                                                    : planInfo.isCustom
+                                                        ? 'bg-purple-100 text-purple-700'
+                                                        : 'bg-emerald-100 text-emerald-700'
+                                            }`}>
+                                                {planInfo.origem}
+                                            </span>
+                                        </div>
+                                        <p className="max-w-[190px] truncate text-xs font-bold text-slate-700" title={planInfo.slug}>{planInfo.name}</p>
+                                        <p className="text-[10px] text-slate-400">{planInfo.maxNotas} notas · {planInfo.maxClientes} clientes</p>
+                                    </div>
+                                );
+                            })() : (
+                                <span className="text-xs text-slate-400">N/A</span>
+                            )}
                         </td>
                         <td className="p-4">
                           <div className="flex justify-end gap-2">

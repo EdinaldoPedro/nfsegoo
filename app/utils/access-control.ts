@@ -60,3 +60,20 @@ export async function hasEmpresaAccess(user: AccessUser, empresaId: string | nul
   const accessibleEmpresaIds = await getAccessibleEmpresaIds(user);
   return accessibleEmpresaIds === null || accessibleEmpresaIds.includes(empresaId);
 }
+
+export async function resolveEmpresaContexto(
+  user: AccessUser,
+  contextId: string | null | undefined,
+): Promise<string | null> {
+  const requestedEmpresaId =
+    contextId && contextId !== 'null' && contextId !== 'undefined'
+      ? contextId
+      : user.empresaId;
+
+  if (!requestedEmpresaId) {
+    return null;
+  }
+
+  const allowed = await hasEmpresaAccess(user, requestedEmpresaId);
+  return allowed ? requestedEmpresaId : null;
+}

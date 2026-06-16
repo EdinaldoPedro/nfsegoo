@@ -2,26 +2,11 @@ import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { validateRequest } from '@/app/utils/api-security';
 import { unauthorized, forbidden } from '@/app/utils/api-middleware';
-import { dispararProcessamentoEmissaoJob } from '@/app/services/emissaoJobService';
+import { dispararProcessamentoEmissaoJob, retomarEmissoesPendentes } from '@/app/services/emissaoJobService';
+import { hasEmpresaAccess } from '@/app/utils/access-control';
 
 const prisma = new PrismaClient();
 const emissaoJobModel = (prisma as any).emissaoJob;
-
-async function podeAcessarEmpresa(user: any, empresaId: string) {
-  const isStaff = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(user.role);
-  if (isStaff || user.empresaId === empresaId) return true;
-
-  const colaborador = await prisma.userCliente.findUnique({
-    where: { userId_empresaId: { userId: user.id, empresaId } },
-  });
-  if (colaborador) return true;
-
-  const vinculo = await prisma.contadorVinculo.findUnique({
-    where: { contadorId_empresaId: { contadorId: user.id, empresaId } },
-  });
-
-  return Boolean(vinculo && vinculo.status === 'APROVADO' && !(vinculo as any).arquivadoEm);
-}
 
 function parseLastError(lastError?: string | null) {
   if (!lastError) return null;
@@ -44,14 +29,20 @@ export async function GET(request: Request, { params }: { params: { id: string }
     return NextResponse.json({ error: 'Job de emissao nao encontrado.' }, { status: 404 });
   }
 
-  const allowed = await podeAcessarEmpresa(user, job.empresaId);
+  const allowed = await hasEmpresaAccess(user, job.empresaId);
   if (!allowed) return forbidden();
 
   const erro = parseLastError(job.lastError);
   const retryDue = !job.nextAttemptAt || new Date(job.nextAttemptAt) <= new Date();
+  const staleMinutes = Number(process.env.EMISSION_STALE_PROCESSING_MINUTES || 15);
+  const staleProcessing =
+    job.status === 'PROCESSANDO' &&
+    (!job.lockedAt || new Date(job.lockedAt).getTime() < Date.now() - staleMinutes * 60 * 1000);
 
   if (['PENDENTE', 'ERRO_TEMPORARIO'].includes(job.status) && retryDue) {
     dispararProcessamentoEmissaoJob(job.id);
+  } else if (staleProcessing) {
+    retomarEmissoesPendentes({ limit: 10, recuperarTravados: true }).catch(console.error);
   }
 
   return NextResponse.json({

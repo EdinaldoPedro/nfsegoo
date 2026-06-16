@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { NfsePortalInscricaoClient } from '@/app/services/portal/NfsePortalInscricaoClient';
 import { validateRequest } from '@/app/utils/api-security';
 import { validarCPF } from '@/app/utils/cpf';
+import { resolveEmpresaContexto } from '@/app/utils/access-control';
 
 const prisma = new PrismaClient();
 const MAX_CONSULTA_CPF_ATTEMPTS = 3;
@@ -10,32 +11,6 @@ const RETRY_DELAY_MS = 1500;
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function getEmpresaContexto(user: any, contextId: string | null) {
-  const isStaff = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(user.role);
-
-  if (contextId && contextId !== 'null' && contextId !== 'undefined') {
-    if (isStaff) return contextId;
-    if (contextId === user.empresaId) return contextId;
-
-    const colaborador = await prisma.userCliente.findUnique({
-      where: { userId_empresaId: { userId: user.id, empresaId: contextId } },
-    });
-    if (colaborador) return contextId;
-
-    const vinculo = await prisma.contadorVinculo.findUnique({
-      where: { contadorId_empresaId: { contadorId: user.id, empresaId: contextId } },
-    });
-    if (vinculo && vinculo.status === 'APROVADO' && !(vinculo as any).arquivadoEm) return contextId;
-
-    const empresaAdicional = null;
-    if (empresaAdicional) return contextId;
-
-    return null;
-  }
-
-  return user.empresaId;
 }
 
 export async function POST(request: Request) {
@@ -54,7 +29,7 @@ export async function POST(request: Request) {
     }
 
     const contextId = request.headers.get('x-empresa-id');
-    const empresaIdAlvo = await getEmpresaContexto(user, contextId);
+    const empresaIdAlvo = await resolveEmpresaContexto(user, contextId);
     if (!empresaIdAlvo) {
       return NextResponse.json({ error: 'Acesso negado a esta empresa.' }, { status: 403 });
     }

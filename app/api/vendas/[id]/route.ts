@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { validateRequest } from '@/app/utils/api-security';
+import { hasEmpresaAccess } from '@/app/utils/access-control';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,8 +11,6 @@ export async function GET(request: Request, { params }: { params: { id: string }
   // 1. Usa a validação padrão de segurança do sistema
   const { targetId, errorResponse } = await validateRequest(request);
   if (errorResponse) return errorResponse;
-
-  const contextId = request.headers.get('x-empresa-id');
 
   try {
     const venda = await prisma.venda.findUnique({
@@ -33,19 +32,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
 
     // 2. Validação de Acesso Flexível
     const user = await prisma.user.findUnique({ where: { id: targetId }});
-    const isStaff = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(user?.role || '');
-
-    let hasAccess = false;
-    if (isStaff) {
-        hasAccess = true;
-    } else if (contextId && venda.empresaId === contextId) {
-        const vinculo = await prisma.contadorVinculo.findUnique({
-            where: { contadorId_empresaId: { contadorId: targetId, empresaId: contextId } }
-        });
-        if (vinculo && vinculo.status === 'APROVADO') hasAccess = true;
-    } else if (venda.empresaId === user?.empresaId) {
-        hasAccess = true;
-    }
+    const hasAccess = user ? await hasEmpresaAccess(user, venda.empresaId) : false;
 
     if (!hasAccess) {
         return NextResponse.json({ error: 'Não autorizado a ver esta venda.' }, { status: 403 });

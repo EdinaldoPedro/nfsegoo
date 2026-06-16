@@ -4,6 +4,7 @@ import { createLog } from '@/app/services/logger';
 import { checkPlanLimits, resolveBillingUserId } from '@/app/services/planService';
 import { validateRequest } from "@/app/utils/api-security";
 import { validarCPF } from '@/app/utils/cpf';
+import { resolveEmpresaContexto } from '@/app/utils/access-control';
 
 const prisma = new PrismaClient();
 
@@ -51,30 +52,6 @@ function validarEnderecoMinimoParaEmissao(body: any, codigoIbgeFinal: string | n
     return null;
 }
 
-async function getEmpresaContexto(user: any, contextId: string | null) {
-    const isStaff = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(user.role);
-    if (contextId && contextId !== 'null' && contextId !== 'undefined') {
-        if (isStaff) return contextId;
-        if (contextId === user.empresaId) return contextId;
-
-        const colaborador = await prisma.userCliente.findUnique({
-            where: { userId_empresaId: { userId: user.id, empresaId: contextId } }
-        });
-        if (colaborador) return contextId;
-
-        const vinculo = await prisma.contadorVinculo.findUnique({
-            where: { contadorId_empresaId: { contadorId: user.id, empresaId: contextId } }
-        });
-        if (vinculo && vinculo.status === 'APROVADO' && !(vinculo as any).arquivadoEm) return contextId;
-        
-        const empresaAdicional = null;
-        if (empresaAdicional) return contextId;
-
-        return null; 
-    }
-    return user.empresaId;
-}
-
 export async function GET(request: Request) {
     const { targetId, errorResponse } = await validateRequest(request);
     if (errorResponse) return errorResponse;
@@ -89,7 +66,7 @@ export async function GET(request: Request) {
     const limit = parseInt(searchParams.get('limit') || '10');
 
     try {
-        const empresaIdAlvo = await getEmpresaContexto(user, contextId);
+        const empresaIdAlvo = await resolveEmpresaContexto(user, contextId);
         if (!empresaIdAlvo) return NextResponse.json({ data: [], meta: { total: 0 } });
 
         const whereClause = {
@@ -141,7 +118,7 @@ export async function POST(request: Request) {
     const body = await request.json();
 
     try {
-        const empresaIdAlvo = await getEmpresaContexto(user, contextId);
+        const empresaIdAlvo = await resolveEmpresaContexto(user, contextId);
         if (!empresaIdAlvo) return NextResponse.json({ error: 'Acesso negado a esta empresa' }, { status: 403 });
 
         const prestador = await prisma.empresa.findUnique({ where: { id: empresaIdAlvo } });
@@ -283,7 +260,7 @@ export async function PUT(request: Request) {
     const { id, ...dadosAtualizacao } = body;
 
     try {
-        const empresaIdAlvo = await getEmpresaContexto(user, contextId);
+        const empresaIdAlvo = await resolveEmpresaContexto(user, contextId);
         if (!empresaIdAlvo) return NextResponse.json({ error: 'Acesso negado' }, { status: 403 });
 
         const clienteAtual = await prisma.cliente.findFirst({

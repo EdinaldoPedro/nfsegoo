@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { syncCnaesGlobalmente } from '@/app/services/syncService'; 
 import { validateRequest } from '@/app/utils/api-security';
 import { encrypt } from '@/app/utils/crypto';
-import { hasEmpresaAccess, isAdminRole } from '@/app/utils/access-control';
+import { hasEmpresaAccess, isAdminRole, resolveEmpresaContexto } from '@/app/utils/access-control';
 import { validarCertificadoA1 } from '@/app/utils/certificadoA1Validation';
 import { renovarUsoMensalSeNecessario } from '@/app/services/planService';
 
@@ -43,7 +43,11 @@ export async function GET(request: Request) {
         include: { 
             empresa: true,
             empresasFaturadas: true,
-            empresasProprietarias: true
+            empresasProprietarias: true,
+            empresasContabeis: {
+                where: { status: 'APROVADO', arquivadoEm: null } as any,
+                include: { empresa: true },
+            },
         }
       });
 
@@ -64,6 +68,14 @@ export async function GET(request: Request) {
           (user as any).empresasProprietarias.forEach((emp: any) => {
               if (!listaEmpresas.some(e => e.id === emp.id)) {
                   listaEmpresas.push({ id: emp.id, razaoSocial: emp.razaoSocial || 'Empresa Proprietaria', cnpj: emp.documento, isPrimary: emp.id === user.empresaId });
+              }
+          });
+      }
+      if ((user as any).empresasContabeis && (user as any).empresasContabeis.length > 0) {
+          (user as any).empresasContabeis.forEach((vinculo: any) => {
+              const emp = vinculo.empresa;
+              if (emp && !listaEmpresas.some(e => e.id === emp.id)) {
+                  listaEmpresas.push({ id: emp.id, razaoSocial: emp.razaoSocial || 'Empresa Contabil', cnpj: emp.documento, isPrimary: emp.id === user.empresaId });
               }
           });
       }
@@ -134,18 +146,9 @@ export async function GET(request: Request) {
       let empresaAlvoId = null;
 
       if (contextEmpresaId && contextEmpresaId !== 'null' && contextEmpresaId !== 'undefined') {
-          if (isStaff) {
-              empresaAlvoId = contextEmpresaId;
-          } else {
-              const isOwnCompany = listaEmpresas.some(e => e.id === contextEmpresaId);
-              if (isOwnCompany) {
-                  empresaAlvoId = contextEmpresaId;
-              } else {
-                  const vinculo = await prisma.contadorVinculo.findUnique({
-                      where: { contadorId_empresaId: { contadorId: userId, empresaId: contextEmpresaId } }
-                  });
-                  if (vinculo) empresaAlvoId = contextEmpresaId; 
-              }
+          empresaAlvoId = await resolveEmpresaContexto(user, contextEmpresaId);
+          if (!empresaAlvoId) {
+              return NextResponse.json({ error: 'Voce nao tem acesso aprovado a esta empresa.' }, { status: 403 });
           }
       }
 

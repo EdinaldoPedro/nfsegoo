@@ -90,6 +90,8 @@ export async function PUT(request: Request) {
         action: 'VINCULO_CUSTODIA_NEGADO',
         message: `Vinculo de contador negado pela bancada interna para ${(vinculo as any).empresa.razaoSocial}.`,
         empresaId: vinculo.empresaId,
+        userId: user.id,
+        module: 'VINCULOS',
         details: { vinculoId, contadorSolicitanteId: vinculo.contadorId, observacao, adminId: user.id },
       });
 
@@ -112,6 +114,8 @@ export async function PUT(request: Request) {
         action: 'VINCULO_ACESSO_LIBERADO',
         message: `Acesso operacional liberado para ${vinculo.contador.nome || vinculo.contador.email}.`,
         empresaId: vinculo.empresaId,
+        userId: user.id,
+        module: 'VINCULOS',
         details: { vinculoId, contadorSolicitanteId: vinculo.contadorId, observacao, adminId: user.id },
       });
 
@@ -161,6 +165,8 @@ export async function PUT(request: Request) {
       action: 'VINCULO_CUSTODIA_LIBERADO',
       message: `Custodia transferida para ${vinculo.contador.nome || vinculo.contador.email}.`,
       empresaId: vinculo.empresaId,
+      userId: user.id,
+      module: 'VINCULOS',
       details: {
         vinculoId,
         empresaId: vinculo.empresaId,

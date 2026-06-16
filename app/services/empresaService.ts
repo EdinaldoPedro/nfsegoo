@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { syncCnaesGlobalmente } from './syncService';
 import { validarCPF } from '@/app/utils/cpf'; 
+import { createLog } from '@/app/services/logger';
 
 const prisma = new PrismaClient();
 
@@ -131,7 +132,10 @@ export async function upsertEmpresaAndLinkUser(documento: string, userId: string
       // >> CONTADOR CADASTRANDO <<
       if (userRole === 'CONTADOR') {
           const proprietarioAtualId = (empresaExistente as any)?.proprietarioUserId || null;
-          const temDonoReal = (!!empresaExistente?.donoUser && empresaExistente.donoUser.id !== userId) || (!!proprietarioAtualId && proprietarioAtualId !== userId);
+          const donoLegadoReal = empresaExistente?.donoUser && empresaExistente.donoUser.role !== 'CONTADOR'
+              ? empresaExistente.donoUser
+              : null;
+          const temDonoReal = (!!donoLegadoReal && donoLegadoReal.id !== userId) || (!!proprietarioAtualId && proprietarioAtualId !== userId);
           const vinculoAprovadoAtual = empresaExistente
               ? await tx.contadorVinculo.findFirst({
                   where: {
@@ -215,7 +219,13 @@ export async function upsertEmpresaAndLinkUser(documento: string, userId: string
               } as any
           });
 
-          return { ...empresa, _statusVinculo: statusVinculo };
+          return {
+              ...empresa,
+              _statusVinculo: statusVinculo,
+              _wasExisting: !!empresaExistente,
+              _temDonoReal: temDonoReal,
+              _temOutroCustodiante: temOutroCustodiante,
+          };
       } 
       
       // >> CLIENTE COMUM CADASTRANDO (RESOLUÇÃO DA FALHA 1) <<
@@ -279,9 +289,56 @@ export async function upsertEmpresaAndLinkUser(documento: string, userId: string
           
           await tx.user.update({ where: { id: userId }, data: { empresaId: empresa.id } });
 
-          return empresa;
+          return {
+              ...empresa,
+              _statusPropriedadeFinal: 'PROPRIETARIA',
+              _wasExisting: !!empresaExistente,
+          };
       }
   });
+
+  try {
+      if (userRole === 'CONTADOR') {
+          const empresaContador = empresaProcessada as any;
+          const actionByStatus: Record<string, string> = {
+              APROVADO: empresaContador._wasExisting ? 'VINCULO_CONTADOR_APROVADO' : 'EMPRESA_CUSTODIADA_CRIADA',
+              PENDENTE_DONO: 'VINCULO_CONTADOR_PENDENTE_DONO',
+              PENDENTE_CUSTODIANTE: 'VINCULO_CONTADOR_PENDENTE_CUSTODIANTE',
+          };
+
+          await createLog({
+              level: empresaContador._statusVinculo === STATUS_VINCULO.APROVADO ? 'INFO' : 'ALERTA',
+              action: actionByStatus[empresaContador._statusVinculo] || 'VINCULO_CONTADOR_SOLICITADO',
+              message: empresaContador._statusVinculo === STATUS_VINCULO.APROVADO
+                  ? 'Vinculo contabil aprovado automaticamente.'
+                  : 'Solicitacao de vinculo contabil registrada aguardando aprovacao.',
+              empresaId: empresaContador.id,
+              userId,
+              module: 'VINCULOS',
+              details: {
+                  documento: docLimpo,
+                  statusVinculo: empresaContador._statusVinculo,
+                  empresaExistia: empresaContador._wasExisting,
+                  temDonoReal: empresaContador._temDonoReal,
+                  temOutroCustodiante: empresaContador._temOutroCustodiante,
+              },
+          });
+      } else if ((empresaProcessada as any)._statusPropriedadeFinal === 'PROPRIETARIA') {
+          await createLog({
+              level: 'INFO',
+              action: empresaProcessada._wasExisting ? 'EMPRESA_REIVINDICADA_PROPRIETARIO' : 'EMPRESA_PROPRIETARIA_CRIADA',
+              message: empresaProcessada._wasExisting
+                  ? 'Empresa reivindicada por proprietario real.'
+                  : 'Empresa criada com proprietario real.',
+              empresaId: empresaProcessada.id,
+              userId,
+              module: 'VINCULOS',
+              details: { documento: docLimpo, empresaExistia: empresaProcessada._wasExisting },
+          });
+      }
+  } catch (error) {
+      console.error('[EMPRESA_SERVICE] Falha ao auditar vinculo:', error);
+  }
 
   if (cnaesUnicos.length > 0 && dadosFinais.codigoIbge) {
       await syncCnaesGlobalmente(cnaesUnicos, dadosFinais.codigoIbge);

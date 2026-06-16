@@ -125,7 +125,13 @@ function CheckoutContent() {
 
     if (loading) return <div className="h-screen flex items-center justify-center"><Loader2 className="animate-spin text-blue-600" size={40}/></div>;
 
-    if (planSlug === 'PARCEIRO' || planSlug === 'parceiro-contabil') {
+    const isPlanoContador =
+        planSlug === 'PARCEIRO' ||
+        planSlug === 'parceiro-contabil' ||
+        planSlug?.startsWith('parceiro-contabil-') ||
+        planSlug?.startsWith('CONTADOR_');
+
+    if (isPlanoContador) {
         return (
             <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
                 <div className="bg-white p-10 rounded-3xl shadow-xl max-w-lg text-center border border-slate-200">

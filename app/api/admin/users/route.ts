@@ -7,12 +7,15 @@ import { stripUserSecrets } from '@/app/utils/safe-data';
 import { marcarEmpresasProprietariasDoContador } from '@/app/services/contadorOwnershipService';
 import { EmailService } from '@/app/services/EmailService';
 import { parsePedidoMetadata } from '@/app/utils/manual-contracting';
+import { ativarPlanoContadorPadrao } from '@/app/services/contadorPlanService';
+import { createLog } from '@/app/services/logger';
+
+const STAFF_ROLES = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'];
 
 export async function GET(request: Request) {
   const user = await getAuthenticatedUser(request);
   if (!user) return unauthorized();
-  const isStaff = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(user.role);
-  if (!isStaff) return forbidden();
+  if (!STAFF_ROLES.includes(user.role)) return forbidden();
 
   const users = await prisma.user.findMany({
     include: {
@@ -23,12 +26,29 @@ export async function GET(request: Request) {
   });
 
   const safeUsers = users.map((u) => {
-    // @ts-ignore
     const { historicoPlanos, ...rest } = u;
     return { ...stripUserSecrets(rest), planHistories: historicoPlanos };
   });
 
   return NextResponse.json(safeUsers);
+}
+
+async function assertAdminPassword(params: {
+  adminId: string;
+  adminPassword?: string;
+  justification?: string;
+}) {
+  if (!params.adminPassword || !params.justification) {
+    return NextResponse.json({ error: 'Senha e justificativa sao obrigatorias.' }, { status: 400 });
+  }
+
+  const adminDb = await prisma.user.findUnique({ where: { id: params.adminId } });
+  if (!adminDb) return unauthorized();
+
+  const senhaValida = await bcrypt.compare(params.adminPassword, adminDb.senha);
+  if (!senhaValida) return NextResponse.json({ error: 'Senha incorreta.' }, { status: 403 });
+
+  return null;
 }
 
 export async function PUT(request: Request) {
@@ -39,34 +59,55 @@ export async function PUT(request: Request) {
   try {
     const body = await request.json();
 
-    if (body.plano) {
-      if (!body.adminPassword || !body.justification) {
-        return NextResponse.json({ error: 'Senha e justificativa sÃ£o obrigatÃ³rios.' }, { status: 400 });
-      }
-      const adminDb = await prisma.user.findUnique({ where: { id: userAuth.id } });
-      if (!adminDb) return unauthorized();
+    if (!body.id) {
+      return NextResponse.json({ error: 'Usuario nao informado.' }, { status: 400 });
+    }
 
-      const senhaValida = await bcrypt.compare(body.adminPassword, adminDb.senha);
-      if (!senhaValida) return NextResponse.json({ error: 'Senha incorreta.' }, { status: 403 });
+    if (body.plano) {
+      const errorResponse = await assertAdminPassword({
+        adminId: userAuth.id,
+        adminPassword: body.adminPassword,
+        justification: body.justification,
+      });
+      if (errorResponse) return errorResponse;
     }
 
     if (body.resetEmail) {
-      const tempPlaceholder = `reset_${Date.now()}_${body.id.substring(0, 5)}@sistema.temp`;
+      const tempPlaceholder = `reset_${Date.now()}_${String(body.id).substring(0, 5)}@sistema.temp`;
       await prisma.user.update({ where: { id: body.id }, data: { email: tempPlaceholder } });
 
-      await registrarEventoCrm(body.id, 'SISTEMA', 'E-mail Resetado', 'O Admin resetou o e-mail de acesso.');
+      await registrarEventoCrm(body.id, 'SISTEMA', 'E-mail resetado', 'O admin resetou o e-mail de acesso.');
+      await createLog({
+        level: 'ALERTA',
+        action: 'USER_EMAIL_RESET_BY_ADMIN',
+        module: 'USUARIOS',
+        userId: userAuth.id,
+        message: 'E-mail de usuario resetado pelo administrativo.',
+        details: { targetUserId: body.id },
+      });
+
       return NextResponse.json({ success: true, message: 'E-mail resetado.' });
     }
 
     if (body.unlinkCompany) {
       await prisma.user.update({ where: { id: body.id }, data: { empresaId: null } });
-      await registrarEventoCrm(body.id, 'SISTEMA', 'Empresa Desvinculada', 'A empresa foi desvinculada manualmente.');
+
+      await registrarEventoCrm(body.id, 'SISTEMA', 'Empresa desvinculada', 'A empresa foi desvinculada manualmente.');
+      await createLog({
+        level: 'ALERTA',
+        action: 'USER_PRIMARY_COMPANY_UNLINKED',
+        module: 'USUARIOS',
+        userId: userAuth.id,
+        message: 'Empresa primaria desvinculada de usuario pelo administrativo.',
+        details: { targetUserId: body.id },
+      });
+
       return NextResponse.json({ success: true, message: 'Empresa desvinculada.' });
     }
 
     if (body.newCnpj) {
-      const cnpjLimpo = body.newCnpj.replace(/\D/g, '');
-      if (cnpjLimpo.length !== 14) return NextResponse.json({ error: 'CNPJ InvÃ¡lido' }, { status: 400 });
+      const cnpjLimpo = String(body.newCnpj).replace(/\D/g, '');
+      if (cnpjLimpo.length !== 14) return NextResponse.json({ error: 'CNPJ invalido.' }, { status: 400 });
 
       const empresaExistente = await prisma.empresa.findUnique({
         where: { documento: cnpjLimpo },
@@ -77,32 +118,53 @@ export async function PUT(request: Request) {
         if (empresaExistente.donoUser && empresaExistente.donoUser.id !== body.id) {
           return NextResponse.json({ error: `CNPJ pertence a ${empresaExistente.donoUser.nome}.` }, { status: 409 });
         }
+
         await prisma.user.update({ where: { id: body.id }, data: { empresaId: empresaExistente.id } });
-        await registrarEventoCrm(body.id, 'SISTEMA', 'Novo VÃ­nculo PJ', `O cliente foi vinculado ao CNPJ ${cnpjLimpo}.`);
-        return NextResponse.json({ success: true, message: 'UsuÃ¡rio vinculado.' });
+        await registrarEventoCrm(body.id, 'SISTEMA', 'Novo vinculo PJ', `O cliente foi vinculado ao CNPJ ${cnpjLimpo}.`);
+        await createLog({
+          level: 'INFO',
+          action: 'USER_COMPANY_LINKED_BY_ADMIN',
+          module: 'USUARIOS',
+          userId: userAuth.id,
+          empresaId: empresaExistente.id,
+          message: 'Usuario vinculado a empresa existente pelo administrativo.',
+          details: { targetUserId: body.id, documento: cnpjLimpo },
+        });
+
+        return NextResponse.json({ success: true, message: 'Usuario vinculado.' });
       }
 
       if (body.empresaId) {
         await prisma.empresa.update({ where: { id: body.empresaId }, data: { documento: cnpjLimpo } });
+        await createLog({
+          level: 'ALERTA',
+          action: 'COMPANY_DOCUMENT_UPDATED_BY_ADMIN',
+          module: 'USUARIOS',
+          userId: userAuth.id,
+          empresaId: body.empresaId,
+          message: 'CNPJ de empresa atualizado pelo administrativo.',
+          details: { targetUserId: body.id, documento: cnpjLimpo },
+        });
+
         return NextResponse.json({ success: true, message: 'CNPJ atualizado.' });
       }
 
-      return NextResponse.json({ error: 'Empresa nÃ£o encontrada.' }, { status: 400 });
+      return NextResponse.json({ error: 'Empresa nao encontrada.' }, { status: 400 });
     }
 
     if (body.plano) {
       const userAlvo = await prisma.user.findUnique({ where: { id: body.id } });
-      await prisma.systemLog.create({
-        data: {
-          level: 'WARN',
-          action: 'MANUAL_PLAN_CHANGE',
-          message: `AlteraÃ§Ã£o manual de plano para: ${userAlvo?.email || userAlvo?.nome}`,
-          details: JSON.stringify({
-            adminId: userAuth.id,
-            newPlan: body.plano,
-            planCycle: body.planoCiclo,
-            justification: body.justification,
-          }),
+      await createLog({
+        level: 'ALERTA',
+        action: 'MANUAL_PLAN_CHANGE',
+        module: 'PLANOS',
+        userId: userAuth.id,
+        message: `Alteracao manual de plano para: ${userAlvo?.email || userAlvo?.nome || body.id}`,
+        details: {
+          targetUserId: body.id,
+          newPlan: body.plano,
+          planCycle: body.planoCiclo,
+          justification: body.justification,
         },
       });
 
@@ -116,12 +178,12 @@ export async function PUT(request: Request) {
           data: { plano: 'SEM_PLANO', planoStatus: 'suspended', planoExpiresAt: new Date() },
         });
 
-        await registrarEventoCrm(body.id, 'FINANCEIRO', 'Plano Suspenso', `Justificativa do Admin: ${body.justification}`);
+        await registrarEventoCrm(body.id, 'FINANCEIRO', 'Plano suspenso', `Justificativa do admin: ${body.justification}`);
         return NextResponse.json({ success: true, message: 'Acesso suspenso.' });
       }
 
       const novoPlano = await prisma.plan.findUnique({ where: { slug: body.plano } });
-      if (!novoPlano) return NextResponse.json({ error: 'Plano nÃ£o encontrado.' }, { status: 404 });
+      if (!novoPlano) return NextResponse.json({ error: 'Plano nao encontrado.' }, { status: 404 });
 
       if (novoPlano.tipo === 'PLANO') {
         const dataFimFinal =
@@ -136,7 +198,7 @@ export async function PUT(request: Request) {
 
         await Promise.all(
           historicosAtivos
-            .filter((hist) => hist.plan.tipo === 'PLANO')
+            .filter((hist) => hist.plan.tipo === 'PLANO' || hist.plan.tipo === 'CUSTOM')
             .map((hist) =>
               prisma.planHistory.update({
                 where: { id: hist.id },
@@ -169,7 +231,7 @@ export async function PUT(request: Request) {
         await registrarEventoCrm(
           body.id,
           'FINANCEIRO',
-          'Plano Alterado',
+          'Plano alterado',
           `Mudou para o plano ${novoPlano.name}. Justificativa: ${body.justification}`,
         );
 
@@ -194,17 +256,16 @@ export async function PUT(request: Request) {
               },
             });
 
-            await prisma.systemLog.create({
-              data: {
-                level: 'INFO',
-                action: 'PEDIDO_CONTRATACAO_ATIVADO',
-                message: `Pedido de contratacao ${pedido.id} ativado junto com plano.`,
-                details: JSON.stringify({
-                  adminId: userAuth.id,
-                  pedidoId: pedido.id,
-                  userId: body.id,
-                  plan: novoPlano.slug,
-                }),
+            await createLog({
+              level: 'INFO',
+              action: 'PEDIDO_CONTRATACAO_ATIVADO',
+              module: 'FINANCEIRO',
+              userId: userAuth.id,
+              message: `Pedido de contratacao ${pedido.id} ativado junto com plano.`,
+              details: {
+                pedidoId: pedido.id,
+                targetUserId: body.id,
+                plan: novoPlano.slug,
               },
             });
 
@@ -219,11 +280,14 @@ export async function PUT(request: Request) {
                 pedidoId: pedido.id,
                 ticketProtocolo: detalhes.ticketProtocolo,
                 plano: novoPlano.name,
-                link: process.env.NEXT_PUBLIC_APP_URL ? `${process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, '')}/cliente/dashboard` : '/cliente/dashboard',
+                link: process.env.NEXT_PUBLIC_APP_URL
+                  ? `${process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, '')}/cliente/dashboard`
+                  : '/cliente/dashboard',
               }),
             );
           }
         }
+
         return NextResponse.json({ success: true, message: 'Plano atualizado.' });
       }
 
@@ -241,40 +305,52 @@ export async function PUT(request: Request) {
       if (novoPlano.tipo === 'PACOTE_PJ') {
         await prisma.user.update({
           where: { id: body.id },
-          data: {
-            empresasAdicionais: { increment: 1 },
-          },
+          data: { empresasAdicionais: { increment: 1 } },
         });
       }
 
       await registrarEventoCrm(
         body.id,
         'FINANCEIRO',
-        'Pacote Manual Adicionado',
+        'Pacote manual adicionado',
         `Pacote ${novoPlano.name} liberado manualmente. Justificativa: ${body.justification}`,
       );
+      await createLog({
+        level: 'INFO',
+        action: 'PACOTE_MANUAL_ADICIONADO',
+        module: 'PLANOS',
+        userId: userAuth.id,
+        message: 'Pacote manual adicionado ao usuario.',
+        details: {
+          targetUserId: body.id,
+          planSlug: novoPlano.slug,
+          planType: novoPlano.tipo,
+          justification: body.justification,
+        },
+      });
+
       return NextResponse.json({ success: true, message: 'Pacote adicionado com sucesso.' });
     }
 
-    const dataToUpdate: any = {};
+    const dataToUpdate: Record<string, unknown> = {};
     if (body.role) {
       dataToUpdate.role = body.role;
 
       if (body.role === 'CONTADOR') {
-        const planoParceiro = await prisma.plan.findUnique({ where: { slug: 'PARCEIRO' } });
-        if (planoParceiro) {
-          await prisma.planHistory.updateMany({
-            where: { userId: body.id, status: 'ATIVO' },
-            data: { status: 'FINALIZADO', dataFim: new Date() },
-          });
-          await prisma.planHistory.create({
-            data: { userId: body.id, planId: planoParceiro.id, status: 'ATIVO', dataInicio: new Date(), dataFim: null, notasEmitidas: 0 },
-          });
-          dataToUpdate.plano = 'PARCEIRO';
-          dataToUpdate.planoStatus = 'active';
-          dataToUpdate.planoCiclo = 'ANUAL';
-        }
-        await registrarEventoCrm(body.id, 'SISTEMA', 'Conta Promovida a Contador', 'O utilizador agora Ã© um Contador Parceiro.');
+        const { plano } = await ativarPlanoContadorPadrao(body.id, 'ANUAL');
+        dataToUpdate.plano = plano.slug;
+        dataToUpdate.planoStatus = 'active';
+        dataToUpdate.planoCiclo = 'ANUAL';
+
+        await createLog({
+          level: 'INFO',
+          action: 'CONTA_PROMOVIDA_CONTADOR',
+          module: 'PLANOS',
+          userId: userAuth.id,
+          message: 'Conta promovida para contador com plano padrao privado.',
+          details: { targetUserId: body.id, planSlug: plano.slug },
+        });
+        await registrarEventoCrm(body.id, 'SISTEMA', 'Conta promovida a contador', 'O usuario agora e um contador parceiro.');
       }
     }
 

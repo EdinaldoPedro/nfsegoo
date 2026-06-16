@@ -6,6 +6,8 @@ import { decrypt } from '@/app/utils/crypto';
 import { prisma } from '@/app/utils/prisma';
 import { getErrorDiagnostics, inferDebugHint, sanitizeLogValue } from '@/app/services/logger';
 
+export const dynamic = 'force-dynamic';
+
 function statusFrom(ok: boolean, warning = false) {
   if (ok) return warning ? 'ALERTA' : 'OK';
   return warning ? 'ALERTA' : 'ERRO';

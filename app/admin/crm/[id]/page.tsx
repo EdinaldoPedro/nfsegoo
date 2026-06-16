@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, User, CreditCard, Clock, MessageSquare, Plus, Activity, Mail, Send, AlertCircle } from 'lucide-react';
+import { ArrowLeft, CreditCard, Clock, MessageSquare, Activity, Mail, Send, AlertCircle, Building2, FileCheck, Wrench, ShieldCheck } from 'lucide-react';
 import { useDialog } from '@/app/contexts/DialogContext';
 
 export default function PerfilCrmCliente() {
@@ -12,6 +12,7 @@ export default function PerfilCrmCliente() {
 
     const [user, setUser] = useState<any>(null);
     const [eventos, setEventos] = useState<any[]>([]);
+    const [diagnostico, setDiagnostico] = useState<any>(null);
     const [novaNota, setNovaNota] = useState('');
     const [loading, setLoading] = useState(true);
 
@@ -26,6 +27,9 @@ export default function PerfilCrmCliente() {
             // 2. Busca a Linha do Tempo (Eventos CRM)
             const resEventos = await fetch(`/api/admin/users/${params.id}/events`, { headers: { 'Authorization': `Bearer ${token}` } });
             if (resEventos.ok) setEventos(await resEventos.json());
+
+            const resDiagnostico = await fetch(`/api/admin/users/${params.id}/diagnostico`, { headers: { 'Authorization': `Bearer ${token}` } });
+            if (resDiagnostico.ok) setDiagnostico(await resDiagnostico.json());
         } catch (error) {
             dialog.showAlert('Erro ao carregar dados do CRM.');
         } finally {
@@ -76,6 +80,10 @@ export default function PerfilCrmCliente() {
     if (!user) return <div className="p-8 text-center text-red-500">Utilizador não encontrado.</div>;
 
     const planoAtivo = user.planHistories?.find((h: any) => h.status === 'ATIVO');
+    const limites = diagnostico?.limites;
+    const problemas = diagnostico?.problemas || [];
+    const resumo = diagnostico?.resumo || {};
+    const totalEmpresasOperacionais = (resumo.empresasProprietarias || 0) + (resumo.empresasCustodiadas || 0);
 
     return (
         <div className="p-6 max-w-7xl mx-auto space-y-6">
@@ -111,6 +119,80 @@ export default function PerfilCrmCliente() {
                                 <span className={`font-bold uppercase ${user.status === 'active' ? 'text-emerald-600' : 'text-red-500'}`}>{user.status}</span>
                             </div>
                             <div className="flex justify-between"><span className="text-slate-500">Perfil:</span> <span className="font-medium bg-slate-100 px-2 py-0.5 rounded text-xs">{user.role}</span></div>
+                        </div>
+                    </div>
+
+                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                                <ShieldCheck size={18} className="text-blue-600" />
+                                Raio-X operacional
+                            </h3>
+                            <span className={`text-[10px] font-black uppercase px-2 py-1 rounded-full ${problemas.length ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                                {problemas.length ? `${problemas.length} atenções` : 'OK'}
+                            </span>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 mb-4">
+                            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                <div className="flex items-center gap-2 text-[10px] font-black uppercase text-slate-400">
+                                    <FileCheck size={14} /> NFS-e
+                                </div>
+                                <p className="text-lg font-black text-slate-900 mt-1">
+                                    {limites ? `${limites.notasUsadas}/${limites.limiteNotas || '∞'}` : '--'}
+                                </p>
+                            </div>
+                            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                <div className="flex items-center gap-2 text-[10px] font-black uppercase text-slate-400">
+                                    <Building2 size={14} /> Empresas
+                                </div>
+                                <p className="text-lg font-black text-slate-900 mt-1">{totalEmpresasOperacionais}</p>
+                            </div>
+                            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                <div className="flex items-center gap-2 text-[10px] font-black uppercase text-slate-400">
+                                    <Wrench size={14} /> Tickets
+                                </div>
+                                <p className="text-lg font-black text-slate-900 mt-1">{resumo.ticketsAbertos || 0}</p>
+                            </div>
+                            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                <div className="flex items-center gap-2 text-[10px] font-black uppercase text-slate-400">
+                                    <AlertCircle size={14} /> Erros
+                                </div>
+                                <p className="text-lg font-black text-slate-900 mt-1">{resumo.logsErroRecentes || 0}</p>
+                            </div>
+                        </div>
+
+                        {problemas.length > 0 ? (
+                            <div className="space-y-2 mb-4">
+                                {problemas.slice(0, 3).map((problema: any, index: number) => (
+                                    <div key={`${problema.tipo}-${index}`} className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+                                        <p className="text-xs font-black uppercase text-amber-700">{problema.tipo}</p>
+                                        <p className="text-xs text-amber-800 mt-1">{problema.mensagem}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 mb-4">
+                                <p className="text-xs font-bold text-emerald-700">Conta sem pendências operacionais críticas.</p>
+                            </div>
+                        )}
+
+                        <div>
+                            <p className="text-[10px] font-black uppercase tracking-wider text-slate-400 mb-2">Últimos rastros técnicos</p>
+                            <div className="space-y-2">
+                                {(diagnostico?.logsRecentes || []).slice(0, 3).map((log: any) => (
+                                    <div key={log.id} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                                        <div className="flex items-center justify-between gap-2">
+                                            <span className="text-[10px] font-black uppercase text-slate-600 truncate">{log.action}</span>
+                                            <span className="text-[10px] text-slate-400">{new Date(log.createdAt).toLocaleDateString('pt-BR')}</span>
+                                        </div>
+                                        <p className="text-xs text-slate-500 truncate mt-1">{log.message}</p>
+                                    </div>
+                                ))}
+                                {(!diagnostico?.logsRecentes || diagnostico.logsRecentes.length === 0) && (
+                                    <p className="text-xs text-slate-400">Nenhum rastro técnico recente encontrado.</p>
+                                )}
+                            </div>
                         </div>
                     </div>
 

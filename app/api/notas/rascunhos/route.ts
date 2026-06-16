@@ -3,31 +3,9 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/app/utils/prisma';
 import { validateRequest } from '@/app/utils/api-security';
 import { forbidden, unauthorized } from '@/app/utils/api-middleware';
+import { resolveEmpresaContexto } from '@/app/utils/access-control';
 
 const MAX_RASCUNHOS = 5;
-
-async function getEmpresaContexto(user: any, contextId: string | null) {
-  const isStaff = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(user.role);
-
-  if (contextId && contextId !== 'null' && contextId !== 'undefined') {
-    if (isStaff) return contextId;
-    if (contextId === user.empresaId) return contextId;
-
-    const colaborador = await prisma.userCliente.findUnique({
-      where: { userId_empresaId: { userId: user.id, empresaId: contextId } },
-    });
-    if (colaborador) return contextId;
-
-    const vinculo = await prisma.contadorVinculo.findUnique({
-      where: { contadorId_empresaId: { contadorId: user.id, empresaId: contextId } },
-    });
-    if (vinculo && vinculo.status === 'APROVADO' && !(vinculo as any).arquivadoEm) return contextId;
-
-    return null;
-  }
-
-  return user.empresaId;
-}
 
 function parsePayload(payloadJson: string) {
   try {
@@ -60,7 +38,7 @@ export async function GET(request: Request) {
   if (!user || !targetId) return unauthorized();
 
   const contextId = request.headers.get('x-empresa-id');
-  const empresaId = await getEmpresaContexto(user, contextId);
+  const empresaId = await resolveEmpresaContexto(user, contextId);
   if (!empresaId) return forbidden();
 
   const rascunhos = await prisma.$queryRaw<any[]>`
@@ -86,7 +64,7 @@ export async function POST(request: Request) {
   if (!user || !targetId) return unauthorized();
 
   const contextId = request.headers.get('x-empresa-id');
-  const empresaId = await getEmpresaContexto(user, contextId);
+  const empresaId = await resolveEmpresaContexto(user, contextId);
   if (!empresaId) return forbidden();
 
   const body = await request.json();
@@ -128,7 +106,7 @@ export async function DELETE(request: Request) {
   if (!user || !targetId) return unauthorized();
 
   const contextId = request.headers.get('x-empresa-id');
-  const empresaId = await getEmpresaContexto(user, contextId);
+  const empresaId = await resolveEmpresaContexto(user, contextId);
   if (!empresaId) return forbidden();
 
   const { searchParams } = new URL(request.url);

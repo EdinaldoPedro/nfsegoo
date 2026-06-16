@@ -4,31 +4,9 @@ import { getTributacaoPorCnae } from '@/app/utils/tributacao';
 import { unauthorized } from '@/app/utils/api-middleware';
 import { validateRequest } from '@/app/utils/api-security';
 import { criarEmissaoJob, dispararProcessamentoEmissaoJob } from '@/app/services/emissaoJobService';
+import { resolveEmpresaContexto } from '@/app/utils/access-control';
 
 const prisma = new PrismaClient();
-
-async function getEmpresaContexto(user: any, contextId: string | null) {
-    const isStaff = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(user.role);
-
-    if (contextId && contextId !== 'null' && contextId !== 'undefined') {
-        if (isStaff) return contextId;
-        if (contextId === user.empresaId) return contextId;
-
-        const colaborador = await prisma.userCliente.findUnique({
-            where: { userId_empresaId: { userId: user.id, empresaId: contextId } }
-        });
-        if (colaborador) return contextId;
-
-        const vinculo = await prisma.contadorVinculo.findUnique({
-            where: { contadorId_empresaId: { contadorId: user.id, empresaId: contextId } }
-        });
-        if (vinculo && vinculo.status === 'APROVADO' && !(vinculo as any).arquivadoEm) return contextId;
-
-        return null;
-    }
-
-    return user.empresaId;
-}
 
 export async function POST(request: Request) {
     const { targetId, errorResponse } = await validateRequest(request);
@@ -82,7 +60,7 @@ export async function GET(request: Request) {
     const typeFilter = searchParams.get('type') || 'all';
 
     try {
-        const empresaIdAlvo = await getEmpresaContexto(user, contextId);
+        const empresaIdAlvo = await resolveEmpresaContexto(user, contextId);
         if (!empresaIdAlvo) return NextResponse.json({ data: [], meta: { total: 0 } });
 
         const skip = (page - 1) * limit;
