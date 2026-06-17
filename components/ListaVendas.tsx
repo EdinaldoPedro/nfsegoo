@@ -491,6 +491,7 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
                         const nota = venda.notas[0]; 
                         const isCancelada = venda.status === 'CANCELADA' || nota?.status === 'CANCELADA';
                         const isAutorizada = venda.status === 'CONCLUIDA' || isCancelada;
+                        const erroPrecisaSuporte = Boolean(venda.erroPrecisaSuporte);
 
                         return (
                             <tr key={venda.id} className="hover:bg-slate-50 transition">
@@ -533,11 +534,13 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
                                     {venda.status === 'ERRO_EMISSAO' ? (
                                         <div className="flex justify-end gap-2">
                                             <button onClick={() => handlePedirAjuda(venda.id, venda.motivoErro)} className="text-xs font-bold text-orange-600 bg-orange-50 hover:bg-orange-100 border border-orange-200 px-3 py-1.5 rounded-lg inline-flex items-center gap-1 transition">
-                                                <LifeBuoy size={14}/> Ajuda
+                                                <LifeBuoy size={14}/> {erroPrecisaSuporte ? 'Abrir suporte' : 'Ajuda'}
                                             </button>
-                                            <button onClick={() => handleCorrigir(venda.id)} className="text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-lg inline-flex items-center gap-1 shadow-sm transition">
-                                                <RefreshCcw size={12}/> Corrigir
-                                            </button>
+                                            {!erroPrecisaSuporte && (
+                                                <button onClick={() => handleCorrigir(venda.id)} className="text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-lg inline-flex items-center gap-1 shadow-sm transition">
+                                                    <RefreshCcw size={12}/> Corrigir
+                                                </button>
+                                            )}
                                         </div>
                                     ) : isAutorizada && (
                                         <button 

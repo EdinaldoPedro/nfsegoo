@@ -6,6 +6,7 @@ import { processarRetornoNota } from '@/app/services/notaProcessor';
 import { checkPlanLimits, incrementUsage, releaseEmissionCredit, reserveEmissionCredit, resolveBillingUserId } from '@/app/services/planService';
 import { resolveEmpresaContexto } from '@/app/utils/access-control';
 import { notifyFiscalEvent } from '@/app/services/notificationService';
+import { getMensagemErroFiscalCliente } from '@/app/utils/fiscal-error-messages';
 
 const prisma = new PrismaClient();
 const emissaoJobModel = (prisma as any).emissaoJob;
@@ -206,9 +207,13 @@ function montarErroFinal(resultado: any, dpsFinal: number, tentativasEmissao: nu
   let draftReasonType = null;
   let discardVenda = false;
   const errorStr = textoErroFiscal(resultado);
+  const erroFiscalCliente = getMensagemErroFiscalCliente(resultado);
 
   if (isErroTemporarioPortal(resultado)) {
     customUserAction = `Portal Nacional indisponivel no momento. Tentamos ${tentativasEmissao} vez(es) usando a mesma DPS ${dpsFinal}, mas o servico nao respondeu corretamente. Aguarde alguns minutos e tente reenviar.`;
+  } else if (erroFiscalCliente) {
+    customUserAction = erroFiscalCliente.message;
+    draftReasonType = erroFiscalCliente.reasonType;
   } else if (errorStr.includes('inscrição municipal') || errorStr.includes('inscriÃ§Ã£o municipal') || errorStr.includes('im ') || errorStr.includes('e0180') || errorStr.includes('e0183') || errorStr.includes('e0184')) {
     customUserAction = 'Sua Inscricao Municipal esta ausente ou incorreta. Por favor, acesse as Configuracoes da Empresa e atualize o numero da sua I.M.';
     draftEligible = true;
@@ -901,11 +906,15 @@ async function executarEmissao(job: any) {
     await createLog({
       level: 'ERRO',
       action: 'FALHA_EMISSAO',
-      message: erro.motivo || 'Rejeicao Sefaz',
+      message: erro.userAction || erro.motivo || 'Rejeicao Sefaz',
       empresaId: prestador.id,
       vendaId: venda.id,
       details: {
         erros: resultado.erros,
+        motivoFiscal: erro.motivo,
+        userAction: erro.userAction,
+        draftEligible: erro.draftEligible,
+        draftReasonType: erro.draftReasonType,
         tentativas: tentativasEmissao,
         dpsPreservada: isErroTemporarioPortal(resultado),
         numeroDPS: dpsFinal,

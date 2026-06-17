@@ -173,7 +173,21 @@ export default function TributacaoMunicipalPage() {
               <div><label className="mb-1 block text-xs font-black uppercase text-slate-500">Cidade</label><SearchableSelect options={opcoesCidade} value={form.codigoIbge} onChange={(val) => setForm({ ...form, codigoIbge: val })} placeholder="Busque pela cidade..." disabled={!!editing} /></div>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2"><div><label className="mb-1 block text-xs font-black uppercase text-blue-700">Cód. Municipal (CTM)</label><input className={`${inputBase} bg-blue-50`} value={form.codigoTributacaoMunicipal} onChange={e => setForm({ ...form, codigoTributacaoMunicipal: e.target.value })} placeholder="Ex: 010700188" /></div><div><label className="mb-1 block text-xs font-black uppercase text-emerald-700">Alíquota ISS (%)</label><input type="number" step="0.01" min="0" max="5" className={`${inputBase} bg-emerald-50`} value={form.aliquotaIss || ''} onChange={e => setForm({ ...form, aliquotaIss: e.target.value })} placeholder="Ex: 3.00" /></div></div>
               <div><label className="mb-1 block text-xs font-black uppercase text-slate-500">Descrição</label><textarea className={`${inputBase} resize-none`} value={form.descricaoServicoMunicipal || ''} onChange={e => setForm({ ...form, descricaoServicoMunicipal: e.target.value })} rows={3} /></div>
-              <button type="button" onClick={() => setForm({ ...form, exigeNbs: !form.exigeNbs })} className={`w-full rounded-2xl border p-4 text-left transition ${form.exigeNbs ? 'border-purple-200 bg-purple-50 text-purple-800' : 'border-slate-200 bg-slate-50 text-slate-600'}`}><p className="font-black">Prefeitura exige código NBS?</p><p className="text-sm opacity-80">Marque quando o município exigir NBS obrigatório para esta regra.</p></button>
+              <label className={`flex w-full cursor-pointer items-center justify-between gap-4 rounded-2xl border p-4 transition ${form.exigeNbs ? 'border-purple-300 bg-purple-50 text-purple-800' : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-purple-200 hover:bg-purple-50/40'}`}>
+                <input
+                  type="checkbox"
+                  checked={form.exigeNbs}
+                  onChange={(event) => setForm({ ...form, exigeNbs: event.target.checked })}
+                  className="sr-only"
+                />
+                <div>
+                  <p className="font-black">Prefeitura exige código NBS?</p>
+                  <p className="text-sm opacity-80">Marque quando o município exigir NBS obrigatório para esta regra.</p>
+                </div>
+                <span className={`relative h-7 w-12 shrink-0 rounded-full border transition ${form.exigeNbs ? 'border-purple-500 bg-purple-600' : 'border-slate-300 bg-white'}`}>
+                  <span className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow-sm transition ${form.exigeNbs ? 'left-6' : 'left-1'}`} />
+                </span>
+              </label>
             </div>
             <div className="flex justify-end gap-2 border-t bg-slate-50 p-5"><button onClick={() => setModalOpen(false)} className="rounded-xl px-5 py-3 text-sm font-bold text-slate-600 hover:bg-white">Cancelar</button><button onClick={handleSave} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-6 py-3 text-sm font-bold text-white hover:bg-blue-700"><Save size={18} /> Salvar</button></div>
           </div>

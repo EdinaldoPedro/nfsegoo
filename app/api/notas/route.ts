@@ -5,8 +5,36 @@ import { unauthorized } from '@/app/utils/api-middleware';
 import { validateRequest } from '@/app/utils/api-security';
 import { criarEmissaoJob, dispararProcessamentoEmissaoJob } from '@/app/services/emissaoJobService';
 import { resolveEmpresaContexto } from '@/app/utils/access-control';
+import { getMensagemErroFiscalCliente } from '@/app/utils/fiscal-error-messages';
 
 const prisma = new PrismaClient();
+
+function parseLogDetails(details?: string | null) {
+    if (!details) return null;
+
+    try {
+        return JSON.parse(details);
+    } catch {
+        return null;
+    }
+}
+
+function resolverErroCliente(log?: { message: string; details?: string | null }) {
+    if (!log) return { motivoErro: null, erroPrecisaSuporte: false };
+
+    const details = parseLogDetails(log.details);
+    const erroFiscal = getMensagemErroFiscalCliente({ message: log.message, details });
+    if (erroFiscal) {
+        return { motivoErro: erroFiscal.message, erroPrecisaSuporte: erroFiscal.needsSupport };
+    }
+
+    const userAction = details?.userAction || details?.erro?.userAction;
+    if (typeof userAction === 'string' && userAction.trim()) {
+        return { motivoErro: userAction, erroPrecisaSuporte: false };
+    }
+
+    return { motivoErro: log.message || null, erroPrecisaSuporte: false };
+}
 
 export async function POST(request: Request) {
     const { targetId, errorResponse } = await validateRequest(request);
@@ -87,7 +115,7 @@ export async function GET(request: Request) {
                 include: {
                     cliente: { select: { nome: true, documento: true } },
                     notas: { orderBy: { createdAt: 'desc' }, select: { id: true, numero: true, status: true, vendaId: true, valor: true, cnae: true, dataEmissao: true, xmlBase64: true, xmlAutorizadoBase64: true, xmlCancelamentoEventoBase64: true, pdfBase64: true } as any },
-                    logs: { where: { level: 'ERRO' }, orderBy: { createdAt: 'desc' }, take: 1, select: { message: true } }
+                    logs: { where: { level: 'ERRO' }, orderBy: { createdAt: 'desc' }, take: 1, select: { message: true, details: true } }
                 }
             }),
             prisma.venda.count({ where: whereClause })
@@ -105,6 +133,8 @@ export async function GET(request: Request) {
                 }
             }
 
+            const erroCliente = resolverErroCliente(v.logs[0]);
+
             return {
                 ...v,
                 cliente: {
@@ -112,7 +142,8 @@ export async function GET(request: Request) {
                     razaoSocial: v.cliente?.nome || 'Consumidor'
                 },
                 notas: v.notas.map(n => ({ ...n, codigoTribNacional: codigoTribDisplay, nomeServico: nomeServicoDisplay })),
-                motivoErro: v.status === 'ERRO_EMISSAO' && v.logs[0] ? v.logs[0].message : null
+                motivoErro: v.status === 'ERRO_EMISSAO' ? erroCliente.motivoErro : null,
+                erroPrecisaSuporte: v.status === 'ERRO_EMISSAO' ? erroCliente.erroPrecisaSuporte : false
             };
         });
 
