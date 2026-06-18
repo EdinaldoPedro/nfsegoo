@@ -225,12 +225,12 @@ export default function ClienteDashboard() {
       </div>
       <AppHeader title="NFSe Goo" subtitle={nomeUsuario ? `Olá, ${nomeUsuario}` : 'Ambiente Beta'} eyebrow="Dashboard" />
 
-      <div className="saas-container flex flex-col xl:flex-row gap-8">
+      <div className="saas-container flex flex-col gap-5 xl:flex-row xl:gap-8">
         
         {/* === VITRINE (MARGEM ESQUERDA) === */}
-        <div className="w-full xl:w-[320px] shrink-0">
-            <div className="xl:sticky xl:top-32 space-y-6">
-              <div className="h-[450px]">
+        <div className="w-full shrink-0 xl:w-[320px]">
+            <div className="space-y-4 xl:sticky xl:top-32 xl:space-y-6">
+              <div className="h-[220px] sm:h-[250px] xl:h-[450px]">
                 <Vitrine />
               </div>
               {perfilCarregado && <CentralAvisos avisos={avisosDashboard} />}

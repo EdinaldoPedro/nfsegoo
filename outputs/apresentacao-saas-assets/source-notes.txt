@@ -1,0 +1,19 @@
+Fonte: SaaS NFSeGoo executado localmente em http://localhost:3001.
+Data de acesso/captura: 18/06/2026.
+Modo: prints reais da interface Next.js local, com respostas de API demonstrativas interceptadas na sessao de captura porque o PostgreSQL local nao estava ativo.
+Uso: slides de guia/apresentacao para cliente, sem expor credenciais reais ou dados de producao.
+Slide 3: Conhecer o SaaS e os planos - screenshot 01-home-planos.png
+Slide 4: Montar assinatura e adicionais - screenshot 02-checkout-contratacao.png
+Slide 5: Entrar na conta - screenshot 03-login.png
+Slide 6: Criar conta de cliente - screenshot 04-cadastro.png
+Slide 7: Ver prontidao fiscal e proximas acoes - screenshot 05-dashboard-cliente.png
+Slide 8: Abrir menu e alternar areas - screenshot 06-menu-lateral.png
+Slide 9: Gerenciar tomadores PF, PJ e exterior - screenshot 07-clientes-carteira.png
+Slide 10: Escolher o tomador da NFS-e - screenshot 08-emitir-passo-1.png
+Slide 11: Preencher servico, CNAE e valores - screenshot 09-emitir-passo-2.png
+Slide 12: Consultar historico e corrigir falhas - screenshot 10-notas-emitidas.png
+Slide 13: Fechar periodo fiscal - screenshot 11-relatorios.png
+Slide 14: Abrir e acompanhar chamados - screenshot 12-suporte.png
+Slide 15: Consultar central de conhecimento - screenshot 13-ajuda.png
+Slide 16: Configurar empresa, certificado e ambiente - screenshot 14-configuracoes.png
+Slide 17: Gerenciar assinatura e dados pessoais - screenshot 15-minha-conta-planos.png

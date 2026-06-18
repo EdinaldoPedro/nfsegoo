@@ -1,0 +1,369 @@
+{"kind":"deck","id":"pr/b4u74h","name":"Deck"}
+{"kind":"layout","layoutId":"97f8c670-9f00-45c0-b7e9-9f64b4c162d2","name":"Master","type":"master"}
+{"kind":"layout","layoutId":"12169639-1dad-4187-97f2-5f0a7337e3da","name":"Title Slide","type":"title"}
+{"kind":"slide","id":"sl/2b9bcl","slide":1,"title":"SAAS WEB","textShapes":8}
+{"kind":"shape","id":"sh/qtcj6tov","slide":1,"bbox":[0,0,1280,720]}
+{"kind":"shape","id":"sh/1gvy90je","slide":1,"bbox":[0,0,430,720]}
+{"kind":"shape","id":"sh/8z25kb6x","slide":1,"bbox":[64,80,112,28]}
+{"kind":"textbox","id":"sh/fmlkjm1c","slide":1,"text":"SAAS WEB","textPreview":"SAAS WEB","textChars":8,"textLines":1,"bbox":[76,85,88,18]}
+{"kind":"textbox","id":"sh/q1orytsv","slide":1,"text":"NFSeGoo","textPreview":"NFSeGoo","textChars":7,"textLines":1,"bbox":[64,138,320,70]}
+{"kind":"textbox","id":"sh/xs72x4na","slide":1,"text":"Apresentacao guia para cliente","textPreview":"Apresentacao guia para cliente","textChars":30,"textLines":1,"bbox":[64,222,300,72]}
+{"kind":"textbox","id":"sh/87ed8bat","slide":1,"text":"Um roteiro visual com prints reais do SaaS: contratacao, dashboard, clientes, emissao, notas, relatorios, suporte e configuracoes.","textPreview":"Um roteiro visual com prints reais do SaaS: contratacao, dashboard, clientes, emissao, notas, relatorios, suporte e configuracoes.","textChars":130,"textLines":1,"bbox":[64,330,300,154]}
+{"kind":"shape","id":"sh/fyxobm58","slide":1,"bbox":[466,86,724,416]}
+{"kind":"shape","id":"sh/sfil0rqd","slide":1,"bbox":[476,532,92,28]}
+{"kind":"textbox","id":"sh/h0fepkzu","slide":1,"text":"Cliente","textPreview":"Cliente","textChars":7,"textLines":1,"bbox":[488,537,68,18]}
+{"kind":"textbox","id":"sh/a9w3m94f","slide":1,"text":"Capturado em ambiente local com dados demonstrativos","textPreview":"Capturado em ambiente local com dados demonstrativos","textChars":52,"textLines":1,"bbox":[588,534,420,26]}
+{"kind":"textbox","id":"sh/zupwb2hw","slide":1,"text":"NFSeGoo SaaS | Guia do cliente | 01","textPreview":"NFSeGoo SaaS | Guia do cliente | 01","textChars":35,"textLines":1,"bbox":[64,686,480,18]}
+{"kind":"textbox","id":"sh/orytsvu9","slide":1,"text":"Prints da interface local com dados demonstrativos","textPreview":"Prints da interface local com dados demonstrativos","textChars":50,"textLines":1,"bbox":[772,686,444,18]}
+{"kind":"image","id":"im/zed8v6ps","slide":1,"name":"","geometry":"roundRect","alt":"Print real do SaaS NFSeGoo","bbox":[476,96,704,396]}
+{"kind":"notes","id":"nt/2b9bcl","slide":1,"text":""}
+{"kind":"slide","id":"sl/tf0hyb","slide":2,"title":"Mapa da jornada do cliente","textShapes":23}
+{"kind":"textbox","id":"sh/1orytsvu","slide":2,"text":"Mapa da jornada do cliente","textPreview":"Mapa da jornada do cliente","textChars":26,"textLines":1,"bbox":[64,54,620,48]}
+{"kind":"textbox","id":"sh/u18jqh0f","slide":2,"text":"Da primeira visita ao fechamento fiscal, cada etapa abaixo corresponde a um print real da interface.","textPreview":"Da primeira visita ao fechamento fiscal, cada etapa abaixo corresponde a um print real da interface.","textChars":100,"textLines":1,"bbox":[64,108,760,34]}
+{"kind":"shape","id":"sh/jm1cfa9w","slide":2,"bbox":[86,220,178,210]}
+{"kind":"shape","id":"sh/cfa9w3m9","slide":2,"bbox":[108,244,44,44]}
+{"kind":"textbox","id":"sh/1032lszq","slide":2,"text":"1","textPreview":"1","textChars":1,"textLines":1,"bbox":[123,253,20,24]}
+{"kind":"textbox","id":"sh/u9knih4b","slide":2,"text":"Contratar","textPreview":"Contratar","textChars":9,"textLines":1,"bbox":[108,312,134,34]}
+{"kind":"textbox","id":"sh/judg7ads","slide":2,"text":"Planos, checkout e cadastro","textPreview":"Planos, checkout e cadastro","textChars":27,"textLines":1,"bbox":[108,356,134,54]}
+{"kind":"textbox","id":"sh/cj6tovah","slide":2,"text":">","textPreview":">","textChars":1,"textLines":1,"bbox":[276,302,40,40]}
+{"kind":"shape","id":"sh/54zidony","slide":2,"bbox":[316,220,178,210]}
+{"kind":"shape","id":"sh/t47y1kre","slide":2,"bbox":[338,244,44,44]}
+{"kind":"textbox","id":"sh/0je9cvix","slide":2,"text":"2","textPreview":"2","textChars":1,"textLines":1,"bbox":[353,253,20,24]}
+{"kind":"textbox","id":"sh/byhgn29g","slide":2,"text":"Preparar","textPreview":"Preparar","textChars":8,"textLines":1,"bbox":[338,312,134,34]}
+{"kind":"textbox","id":"sh/idonyd0z","slide":2,"text":"Empresa, certificado e clientes","textPreview":"Empresa, certificado e clientes","textChars":31,"textLines":1,"bbox":[338,356,134,54]}
+{"kind":"textbox","id":"sh/tcj6tova","slide":2,"text":">","textPreview":">","textChars":1,"textLines":1,"bbox":[506,302,40,40]}
+{"kind":"shape","id":"sh/0rqd4vmt","slide":2,"bbox":[546,220,178,210]}
+{"kind":"shape","id":"sh/b6xkf6dc","slide":2,"bbox":[568,244,44,44]}
+{"kind":"textbox","id":"sh/il0rqd4v","slide":2,"text":"3","textPreview":"3","textChars":1,"textLines":1,"bbox":[583,253,20,24]}
+{"kind":"textbox","id":"sh/tovahoza","slide":2,"text":"Emitir","textPreview":"Emitir","textChars":6,"textLines":1,"bbox":[568,312,134,34]}
+{"kind":"textbox","id":"sh/032lszqt","slide":2,"text":"Tomador, servico e revisao","textPreview":"Tomador, servico e revisao","textChars":26,"textLines":1,"bbox":[568,356,134,54]}
+{"kind":"textbox","id":"sh/czed8v6p","slide":2,"text":">","textPreview":">","textChars":1,"textLines":1,"bbox":[736,302,40,40]}
+{"kind":"shape","id":"sh/5kb6xkf6","slide":2,"bbox":[776,220,178,210]}
+{"kind":"shape","id":"sh/ytsvu9kn","slide":2,"bbox":[798,244,44,44]}
+{"kind":"textbox","id":"sh/neloj2t8","slide":2,"text":"4","textPreview":"4","textChars":1,"textLines":1,"bbox":[813,253,20,24]}
+{"kind":"textbox","id":"sh/cbulwval","slide":2,"text":"Acompanhar","textPreview":"Acompanhar","textChars":10,"textLines":1,"bbox":[798,312,134,34]}
+{"kind":"textbox","id":"sh/5sneloj2","slide":2,"text":"Notas, erros e documentos","textPreview":"Notas, erros e documentos","textChars":25,"textLines":1,"bbox":[798,356,134,54]}
+{"kind":"textbox","id":"sh/u54zidon","slide":2,"text":">","textPreview":">","textChars":1,"textLines":1,"bbox":[966,302,40,40]}
+{"kind":"shape","id":"sh/nqxs72x4","slide":2,"bbox":[1006,220,178,210]}
+{"kind":"shape","id":"sh/gbq1oryt","slide":2,"bbox":[1028,244,44,44]}
+{"kind":"textbox","id":"sh/5wjudg7a","slide":2,"text":"5","textPreview":"5","textChars":1,"textLines":1,"bbox":[1043,253,20,24]}
+{"kind":"textbox","id":"sh/v6psfil0","slide":2,"text":"Fechar","textPreview":"Fechar","textChars":6,"textLines":1,"bbox":[1028,312,134,34]}
+{"kind":"textbox","id":"sh/2lszqtcj","slide":2,"text":"Relatorios e suporte","textPreview":"Relatorios e suporte","textChars":20,"textLines":1,"bbox":[1028,356,134,54]}
+{"kind":"textbox","id":"sh/d8bat47y","slide":2,"text":"NFSeGoo SaaS | Guia do cliente | 02","textPreview":"NFSeGoo SaaS | Guia do cliente | 02","textChars":35,"textLines":1,"bbox":[64,686,480,18]}
+{"kind":"textbox","id":"sh/knih4byh","slide":2,"text":"Prints da interface local com dados demonstrativos","textPreview":"Prints da interface local com dados demonstrativos","textChars":50,"textLines":1,"bbox":[772,686,444,18]}
+{"kind":"notes","id":"nt/tf0hyb","slide":2,"text":""}
+{"kind":"slide","id":"sl/kxfd18","slide":3,"title":"ENTRADA","textShapes":12}
+{"kind":"shape","id":"sh/mlkjm1cf","slide":3,"bbox":[64,54,117,28]}
+{"kind":"textbox","id":"sh/xc3ylc7u","slide":3,"text":"ENTRADA","textPreview":"ENTRADA","textChars":7,"textLines":1,"bbox":[76,59,93,18]}
+{"kind":"textbox","id":"sh/4r65wjud","slide":3,"text":"Conhecer o SaaS e os planos","textPreview":"Conhecer o SaaS e os planos","textChars":27,"textLines":1,"bbox":[64,102,344,86]}
+{"kind":"textbox","id":"sh/fepkzupw","slide":3,"text":"Primeiro contato com proposta, navegacao publica e acesso a contratacao.","textPreview":"Primeiro contato com proposta, navegacao publica e acesso a contratacao.","textChars":72,"textLines":1,"bbox":[64,202,330,94]}
+{"kind":"textbox","id":"sh/mtwra5gb","slide":3,"text":"O que o cliente faz","textPreview":"O que o cliente faz","textChars":19,"textLines":1,"bbox":[64,330,280,28]}
+{"kind":"shape","id":"sh/xkf6dcbu","slide":3,"bbox":[68,380,10,10]}
+{"kind":"textbox","id":"sh/4zidonyd","slide":3,"text":"Entender o produto","textPreview":"Entender o produto","textChars":18,"textLines":1,"bbox":[90,374,300,24]}
+{"kind":"shape","id":"sh/fil0rqd4","slide":3,"bbox":[68,418,10,10]}
+{"kind":"textbox","id":"sh/qxs72x4n","slide":3,"text":"Comparar planos","textPreview":"Comparar planos","textChars":15,"textLines":1,"bbox":[90,412,300,24]}
+{"kind":"shape","id":"sh/0bi9s36h","slide":3,"bbox":[68,456,10,10]}
+{"kind":"textbox","id":"sh/pwb2hwfy","slide":3,"text":"Entrar ou cadastrar","textPreview":"Entrar ou cadastrar","textChars":19,"textLines":1,"bbox":[90,450,300,24]}
+{"kind":"shape","id":"sh/i5sneloj","slide":3,"bbox":[440,68,756,434]}
+{"kind":"textbox","id":"sh/wjudg7ad","slide":3,"text":"Tela: home planos","textPreview":"Tela: home planos","textChars":17,"textLines":1,"bbox":[450,526,500,22]}
+{"kind":"shape","id":"sh/p4r65wju","slide":3,"bbox":[450,560,736,72]}
+{"kind":"textbox","id":"sh/ed8v6psf","slide":3,"text":"Dica de apresentacao","textPreview":"Dica de apresentacao","textChars":20,"textLines":1,"bbox":[474,574,180,20]}
+{"kind":"textbox","id":"sh/7y1kre1w","slide":3,"text":"Mostre esta tela como parte do fluxo: Entender o produto -> Comparar planos -> Entrar ou cadastrar.","textPreview":"Mostre esta tela como parte do fluxo: Entender o produto -> Comparar planos -> Entrar ou cadastrar.","textChars":99,"textLines":1,"bbox":[474,598,666,22]}
+{"kind":"textbox","id":"sh/0nuxc3yl","slide":3,"text":"NFSeGoo SaaS | Guia do cliente | 03","textPreview":"NFSeGoo SaaS | Guia do cliente | 03","textChars":35,"textLines":1,"bbox":[64,686,480,18]}
+{"kind":"textbox","id":"sh/p8nqxs72","slide":3,"text":"Prints da interface local com dados demonstrativos","textPreview":"Prints da interface local com dados demonstrativos","textChars":50,"textLines":1,"bbox":[772,686,444,18]}
+{"kind":"image","id":"im/wra5gbq1","slide":3,"name":"","geometry":"roundRect","alt":"Print real do SaaS NFSeGoo","bbox":[450,78,736,414]}
+{"kind":"notes","id":"nt/kxfd18","slide":3,"text":""}
+{"kind":"slide","id":"sl/a417vj","slide":4,"title":"CONTRATACAO","textShapes":12}
+{"kind":"shape","id":"sh/t47y1kre","slide":4,"bbox":[64,54,161,28]}
+{"kind":"textbox","id":"sh/idonyd0z","slide":4,"text":"CONTRATACAO","textPreview":"CONTRATACAO","textChars":11,"textLines":1,"bbox":[76,59,137,18]}
+{"kind":"textbox","id":"sh/byhgn29g","slide":4,"text":"Montar assinatura e adicionais","textPreview":"Montar assinatura e adicionais","textChars":30,"textLines":1,"bbox":[64,102,344,86]}
+{"kind":"textbox","id":"sh/0rqd4vmt","slide":4,"text":"O cliente escolhe plano, ciclo, pacotes extras e envia a solicitacao para ativacao manual.","textPreview":"O cliente escolhe plano, ciclo, pacotes extras e envia a solicitacao para ativacao manual.","textChars":90,"textLines":1,"bbox":[64,202,330,94]}
+{"kind":"textbox","id":"sh/tcj6tova","slide":4,"text":"O que o cliente faz","textPreview":"O que o cliente faz","textChars":19,"textLines":1,"bbox":[64,330,280,28]}
+{"kind":"shape","id":"sh/il0rqd4v","slide":4,"bbox":[68,380,10,10]}
+{"kind":"textbox","id":"sh/b6xkf6dc","slide":4,"text":"Selecionar plano","textPreview":"Selecionar plano","textChars":16,"textLines":1,"bbox":[90,374,300,24]}
+{"kind":"shape","id":"sh/032lszqt","slide":4,"bbox":[68,418,10,10]}
+{"kind":"textbox","id":"sh/tovahoza","slide":4,"text":"Adicionar extras","textPreview":"Adicionar extras","textChars":16,"textLines":1,"bbox":[90,412,300,24]}
+{"kind":"shape","id":"sh/l87ed8ba","slide":4,"bbox":[68,456,10,10]}
+{"kind":"textbox","id":"sh/sneloj2t","slide":4,"text":"Solicitar contratacao","textPreview":"Solicitar contratacao","textChars":21,"textLines":1,"bbox":[90,450,300,24]}
+{"kind":"shape","id":"sh/32lszqtc","slide":4,"bbox":[440,68,756,434]}
+{"kind":"textbox","id":"sh/lkjm1cfa","slide":4,"text":"Tela: checkout contratacao","textPreview":"Tela: checkout contratacao","textChars":26,"textLines":1,"bbox":[450,526,500,22]}
+{"kind":"shape","id":"sh/szqtcj6t","slide":4,"bbox":[450,560,736,72]}
+{"kind":"textbox","id":"sh/3ex0nuxc","slide":4,"text":"Dica de apresentacao","textPreview":"Dica de apresentacao","textChars":20,"textLines":1,"bbox":[474,574,180,20]}
+{"kind":"textbox","id":"sh/at47y1kr","slide":4,"text":"Mostre esta tela como parte do fluxo: Selecionar plano -> Adicionar extras -> Solicitar contratacao.","textPreview":"Mostre esta tela como parte do fluxo: Selecionar plano -> Adicionar extras -> Solicitar contratacao.","textChars":100,"textLines":1,"bbox":[474,598,666,22]}
+{"kind":"textbox","id":"sh/loj2t83i","slide":4,"text":"NFSeGoo SaaS | Guia do cliente | 04","textPreview":"NFSeGoo SaaS | Guia do cliente | 04","textChars":35,"textLines":1,"bbox":[64,686,480,18]}
+{"kind":"textbox","id":"sh/w3m94fu1","slide":4,"text":"Prints da interface local com dados demonstrativos","textPreview":"Prints da interface local com dados demonstrativos","textChars":50,"textLines":1,"bbox":[772,686,444,18]}
+{"kind":"image","id":"im/9gr2p8nq","slide":4,"name":"","geometry":"roundRect","alt":"Print real do SaaS NFSeGoo","bbox":[450,78,736,414]}
+{"kind":"notes","id":"nt/a417vj","slide":4,"text":""}
+{"kind":"slide","id":"sl/3rc5pn","slide":5,"title":"ACESSO","textShapes":12}
+{"kind":"shape","id":"sh/re1w7mp0","slide":5,"bbox":[64,54,106,28]}
+{"kind":"textbox","id":"sh/kzupwb2h","slide":5,"text":"ACESSO","textPreview":"ACESSO","textChars":6,"textLines":1,"bbox":[76,59,82,18]}
+{"kind":"textbox","id":"sh/9knih4by","slide":5,"text":"Entrar na conta","textPreview":"Entrar na conta","textChars":15,"textLines":1,"bbox":[64,102,344,86]}
+{"kind":"textbox","id":"sh/25kb6xkf","slide":5,"text":"Tela simples para autenticar por e-mail/CPF e senha antes de acessar a area do cliente.","textPreview":"Tela simples para autenticar por e-mail/CPF e senha antes de acessar a area do cliente.","textChars":87,"textLines":1,"bbox":[64,202,330,94]}
+{"kind":"textbox","id":"sh/rqd4vmtw","slide":5,"text":"O que o cliente faz","textPreview":"O que o cliente faz","textChars":19,"textLines":1,"bbox":[64,330,280,28]}
+{"kind":"shape","id":"sh/kb6xkf6d","slide":5,"bbox":[68,380,10,10]}
+{"kind":"textbox","id":"sh/9w3m94fu","slide":5,"text":"Informar credenciais","textPreview":"Informar credenciais","textChars":20,"textLines":1,"bbox":[90,374,300,24]}
+{"kind":"shape","id":"sh/2hwfyxob","slide":5,"bbox":[68,418,10,10]}
+{"kind":"textbox","id":"sh/r2p8nqxs","slide":5,"text":"Recuperar senha","textPreview":"Recuperar senha","textChars":15,"textLines":1,"bbox":[90,412,300,24]}
+{"kind":"shape","id":"sh/7ed8bat4","slide":5,"bbox":[68,456,10,10]}
+{"kind":"textbox","id":"sh/itgfmlkj","slide":5,"text":"Acessar ambiente","textPreview":"Acessar ambiente","textChars":16,"textLines":1,"bbox":[90,450,300,24]}
+{"kind":"shape","id":"sh/pkzupwb2","slide":5,"bbox":[440,68,756,434]}
+{"kind":"textbox","id":"sh/72x4nap4","slide":5,"text":"Tela: login","textPreview":"Tela: login","textChars":11,"textLines":1,"bbox":[450,526,500,22]}
+{"kind":"shape","id":"sh/ih4byhgn","slide":5,"bbox":[450,560,736,72]}
+{"kind":"textbox","id":"sh/p8nqxs72","slide":5,"text":"Dica de apresentacao","textPreview":"Dica de apresentacao","textChars":20,"textLines":1,"bbox":[474,574,180,20]}
+{"kind":"textbox","id":"sh/0nuxc3yl","slide":5,"text":"Mostre esta tela como parte do fluxo: Informar credenciais -> Recuperar senha -> Acessar ambiente.","textPreview":"Mostre esta tela como parte do fluxo: Informar credenciais -> Recuperar senha -> Acessar ambiente.","textChars":98,"textLines":1,"bbox":[474,598,666,22]}
+{"kind":"textbox","id":"sh/7y1kre1w","slide":5,"text":"NFSeGoo SaaS | Guia do cliente | 05","textPreview":"NFSeGoo SaaS | Guia do cliente | 05","textChars":35,"textLines":1,"bbox":[64,686,480,18]}
+{"kind":"textbox","id":"sh/ed8v6psf","slide":5,"text":"Prints da interface local com dados demonstrativos","textPreview":"Prints da interface local com dados demonstrativos","textChars":50,"textLines":1,"bbox":[772,686,444,18]}
+{"kind":"image","id":"im/r2p8nqxs","slide":5,"name":"","geometry":"roundRect","alt":"Print real do SaaS NFSeGoo","bbox":[450,78,736,414]}
+{"kind":"notes","id":"nt/3rc5pn","slide":5,"text":""}
+{"kind":"slide","id":"sl/e4la5r","slide":6,"title":"ONBOARDING","textShapes":12}
+{"kind":"shape","id":"sh/54zidony","slide":6,"bbox":[64,54,150,28]}
+{"kind":"textbox","id":"sh/udg7adsj","slide":6,"text":"ONBOARDING","textPreview":"ONBOARDING","textChars":10,"textLines":1,"bbox":[76,59,126,18]}
+{"kind":"textbox","id":"sh/nyd0z610","slide":6,"text":"Criar conta de cliente","textPreview":"Criar conta de cliente","textChars":22,"textLines":1,"bbox":[64,102,344,86]}
+{"kind":"textbox","id":"sh/cvixczed","slide":6,"text":"Fluxo inicial para novo usuario iniciar o uso do SaaS e validar dados de acesso.","textPreview":"Fluxo inicial para novo usuario iniciar o uso do SaaS e validar dados de acesso.","textChars":80,"textLines":1,"bbox":[64,202,330,94]}
+{"kind":"textbox","id":"sh/5gbq1ory","slide":6,"text":"O que o cliente faz","textPreview":"O que o cliente faz","textChars":19,"textLines":1,"bbox":[64,330,280,28]}
+{"kind":"shape","id":"sh/upwb2hwf","slide":6,"bbox":[68,380,10,10]}
+{"kind":"textbox","id":"sh/nap4r65w","slide":6,"text":"Cadastrar dados","textPreview":"Cadastrar dados","textChars":15,"textLines":1,"bbox":[90,374,300,24]}
+{"kind":"shape","id":"sh/c7u54zid","slide":6,"bbox":[68,418,10,10]}
+{"kind":"textbox","id":"sh/1orytsvu","slide":6,"text":"Confirmar contato","textPreview":"Confirmar contato","textChars":17,"textLines":1,"bbox":[90,412,300,24]}
+{"kind":"shape","id":"sh/l0rqd4vm","slide":6,"bbox":[68,456,10,10]}
+{"kind":"textbox","id":"sh/wfyxobm5","slide":6,"text":"Iniciar teste/compra","textPreview":"Iniciar teste/compra","textChars":20,"textLines":1,"bbox":[90,450,300,24]}
+{"kind":"shape","id":"sh/7u54zido","slide":6,"bbox":[440,68,756,434]}
+{"kind":"textbox","id":"sh/lc7u54zi","slide":6,"text":"Tela: cadastro","textPreview":"Tela: cadastro","textChars":14,"textLines":1,"bbox":[450,526,500,22]}
+{"kind":"shape","id":"sh/wra5gbq1","slide":6,"bbox":[450,560,736,72]}
+{"kind":"textbox","id":"sh/36hcrmhk","slide":6,"text":"Dica de apresentacao","textPreview":"Dica de apresentacao","textChars":20,"textLines":1,"bbox":[474,574,180,20]}
+{"kind":"textbox","id":"sh/eloj2t83","slide":6,"text":"Mostre esta tela como parte do fluxo: Cadastrar dados -> Confirmar contato -> Iniciar teste/compra.","textPreview":"Mostre esta tela como parte do fluxo: Cadastrar dados -> Confirmar contato -> Iniciar teste/compra.","textChars":99,"textLines":1,"bbox":[474,598,666,22]}
+{"kind":"textbox","id":"sh/pg3ex0nu","slide":6,"text":"NFSeGoo SaaS | Guia do cliente | 06","textPreview":"NFSeGoo SaaS | Guia do cliente | 06","textChars":35,"textLines":1,"bbox":[64,686,480,18]}
+{"kind":"textbox","id":"sh/wval87ed","slide":6,"text":"Prints da interface local com dados demonstrativos","textPreview":"Prints da interface local com dados demonstrativos","textChars":50,"textLines":1,"bbox":[772,686,444,18]}
+{"kind":"image","id":"im/d0z61032","slide":6,"name":"","geometry":"roundRect","alt":"Print real do SaaS NFSeGoo","bbox":[450,78,736,414]}
+{"kind":"notes","id":"nt/e4la5r","slide":6,"text":""}
+{"kind":"slide","id":"sl/a7emnj","slide":7,"title":"DASHBOARD","textShapes":12}
+{"kind":"shape","id":"sh/sji5snel","slide":7,"bbox":[64,54,139,28]}
+{"kind":"textbox","id":"sh/3ylc7u54","slide":7,"text":"DASHBOARD","textPreview":"DASHBOARD","textChars":9,"textLines":1,"bbox":[76,59,115,18]}
+{"kind":"textbox","id":"sh/adsji5sn","slide":7,"text":"Ver prontidao fiscal e proximas acoes","textPreview":"Ver prontidao fiscal e proximas acoes","textChars":37,"textLines":1,"bbox":[64,102,344,86]}
+{"kind":"textbox","id":"sh/lszqtcj6","slide":7,"text":"O painel consolida alertas, certificado, plano, notas recentes e a acao mais importante do momento.","textPreview":"O painel consolida alertas, certificado, plano, notas recentes e a acao mais importante do momento.","textChars":99,"textLines":1,"bbox":[64,202,330,94]}
+{"kind":"textbox","id":"sh/s72x4nap","slide":7,"text":"O que o cliente faz","textPreview":"O que o cliente faz","textChars":19,"textLines":1,"bbox":[64,330,280,28]}
+{"kind":"shape","id":"sh/3m94fu18","slide":7,"bbox":[68,380,10,10]}
+{"kind":"textbox","id":"sh/a5gbq1or","slide":7,"text":"Ver status fiscal","textPreview":"Ver status fiscal","textChars":17,"textLines":1,"bbox":[90,374,300,24]}
+{"kind":"shape","id":"sh/hoza1gvy","slide":7,"bbox":[68,418,10,10]}
+{"kind":"textbox","id":"sh/s36hcrmh","slide":7,"text":"Emitir nova nota","textPreview":"Emitir nova nota","textChars":16,"textLines":1,"bbox":[90,412,300,24]}
+{"kind":"shape","id":"sh/q1orytsv","slide":7,"bbox":[68,456,10,10]}
+{"kind":"textbox","id":"sh/fmlkjm1c","slide":7,"text":"Acompanhar atividade","textPreview":"Acompanhar atividade","textChars":20,"textLines":1,"bbox":[90,450,300,24]}
+{"kind":"shape","id":"sh/87ed8bat","slide":7,"bbox":[440,68,756,434]}
+{"kind":"textbox","id":"sh/qtcj6tov","slide":7,"text":"Tela: dashboard cliente","textPreview":"Tela: dashboard cliente","textChars":23,"textLines":1,"bbox":[450,526,500,22]}
+{"kind":"shape","id":"sh/je9cvixc","slide":7,"bbox":[450,560,736,72]}
+{"kind":"textbox","id":"sh/8z25kb6x","slide":7,"text":"Dica de apresentacao","textPreview":"Dica de apresentacao","textChars":20,"textLines":1,"bbox":[474,574,180,20]}
+{"kind":"textbox","id":"sh/1gvy90je","slide":7,"text":"Mostre esta tela como parte do fluxo: Ver status fiscal -> Emitir nova nota -> Acompanhar atividade.","textPreview":"Mostre esta tela como parte do fluxo: Ver status fiscal -> Emitir nova nota -> Acompanhar atividade.","textChars":100,"textLines":1,"bbox":[474,598,666,22]}
+{"kind":"textbox","id":"sh/qpg3ex0n","slide":7,"text":"NFSeGoo SaaS | Guia do cliente | 07","textPreview":"NFSeGoo SaaS | Guia do cliente | 07","textChars":35,"textLines":1,"bbox":[64,686,480,18]}
+{"kind":"textbox","id":"sh/fa9w3m94","slide":7,"text":"Prints da interface local com dados demonstrativos","textPreview":"Prints da interface local com dados demonstrativos","textChars":50,"textLines":1,"bbox":[772,686,444,18]}
+{"kind":"image","id":"im/y90je9cv","slide":7,"name":"","geometry":"roundRect","alt":"Print real do SaaS NFSeGoo","bbox":[450,78,736,414]}
+{"kind":"notes","id":"nt/a7emnj","slide":7,"text":""}
+{"kind":"slide","id":"sl/cmxrdo","slide":8,"title":"NAVEGACAO","textShapes":12}
+{"kind":"shape","id":"sh/fyxobm58","slide":8,"bbox":[64,54,139,28]}
+{"kind":"textbox","id":"sh/8jqh0fep","slide":8,"text":"NAVEGACAO","textPreview":"NAVEGACAO","textChars":9,"textLines":1,"bbox":[76,59,115,18]}
+{"kind":"textbox","id":"sh/x4nap4r6","slide":8,"text":"Abrir menu e alternar areas","textPreview":"Abrir menu e alternar areas","textChars":27,"textLines":1,"bbox":[64,102,344,86]}
+{"kind":"textbox","id":"sh/qpg3ex0n","slide":8,"text":"O menu reune perfil, empresa, certificado, gestao de clientes, relatorios, ajuda, suporte e logout.","textPreview":"O menu reune perfil, empresa, certificado, gestao de clientes, relatorios, ajuda, suporte e logout.","textChars":99,"textLines":1,"bbox":[64,202,330,94]}
+{"kind":"textbox","id":"sh/fa9w3m94","slide":8,"text":"O que o cliente faz","textPreview":"O que o cliente faz","textChars":19,"textLines":1,"bbox":[64,330,280,28]}
+{"kind":"shape","id":"sh/8v6psfil","slide":8,"bbox":[68,380,10,10]}
+{"kind":"textbox","id":"sh/xczed8v6","slide":8,"text":"Ver dados da conta","textPreview":"Ver dados da conta","textChars":18,"textLines":1,"bbox":[90,374,300,24]}
+{"kind":"shape","id":"sh/qtcj6tov","slide":8,"bbox":[68,418,10,10]}
+{"kind":"textbox","id":"sh/je9cvixc","slide":8,"text":"Trocar empresa","textPreview":"Trocar empresa","textChars":14,"textLines":1,"bbox":[90,412,300,24]}
+{"kind":"shape","id":"sh/nih4byhg","slide":8,"bbox":[68,456,10,10]}
+{"kind":"textbox","id":"sh/yxobm58z","slide":8,"text":"Ir para gestao","textPreview":"Ir para gestao","textChars":14,"textLines":1,"bbox":[90,450,300,24]}
+{"kind":"shape","id":"sh/5o7qpg3e","slide":8,"bbox":[440,68,756,434]}
+{"kind":"textbox","id":"sh/r65wjudg","slide":8,"text":"Tela: menu lateral","textPreview":"Tela: menu lateral","textChars":18,"textLines":1,"bbox":[450,526,500,22]}
+{"kind":"shape","id":"sh/ylc7u54z","slide":8,"bbox":[450,560,736,72]}
+{"kind":"textbox","id":"sh/9cvixcze","slide":8,"text":"Dica de apresentacao","textPreview":"Dica de apresentacao","textChars":20,"textLines":1,"bbox":[474,574,180,20]}
+{"kind":"textbox","id":"sh/gr2p8nqx","slide":8,"text":"Mostre esta tela como parte do fluxo: Ver dados da conta -> Trocar empresa -> Ir para gestao.","textPreview":"Mostre esta tela como parte do fluxo: Ver dados da conta -> Trocar empresa -> Ir para gestao.","textChars":93,"textLines":1,"bbox":[474,598,666,22]}
+{"kind":"textbox","id":"sh/rytsvu9k","slide":8,"text":"NFSeGoo SaaS | Guia do cliente | 08","textPreview":"NFSeGoo SaaS | Guia do cliente | 08","textChars":35,"textLines":1,"bbox":[64,686,480,18]}
+{"kind":"textbox","id":"sh/yd0z6103","slide":8,"text":"Prints da interface local com dados demonstrativos","textPreview":"Prints da interface local com dados demonstrativos","textChars":50,"textLines":1,"bbox":[772,686,444,18]}
+{"kind":"image","id":"im/jm1cfa9w","slide":8,"name":"","geometry":"roundRect","alt":"Print real do SaaS NFSeGoo","bbox":[450,78,736,414]}
+{"kind":"notes","id":"nt/cmxrdo","slide":8,"text":""}
+{"kind":"slide","id":"sl/hlqcjp","slide":9,"title":"CARTEIRA","textShapes":12}
+{"kind":"shape","id":"sh/4byhgn29","slide":9,"bbox":[64,54,128,28]}
+{"kind":"textbox","id":"sh/bq1oryts","slide":9,"text":"CARTEIRA","textPreview":"CARTEIRA","textChars":8,"textLines":1,"bbox":[76,59,104,18]}
+{"kind":"textbox","id":"sh/m58z25kb","slide":9,"text":"Gerenciar tomadores PF, PJ e exterior","textPreview":"Gerenciar tomadores PF, PJ e exterior","textChars":37,"textLines":1,"bbox":[64,102,344,86]}
+{"kind":"textbox","id":"sh/t83itgfm","slide":9,"text":"Lista de clientes com busca, tipo fiscal, localizacao e edicao de cadastro.","textPreview":"Lista de clientes com busca, tipo fiscal, localizacao e edicao de cadastro.","textChars":75,"textLines":1,"bbox":[64,202,330,94]}
+{"kind":"textbox","id":"sh/4nap4r65","slide":9,"text":"O que o cliente faz","textPreview":"O que o cliente faz","textChars":19,"textLines":1,"bbox":[64,330,280,28]}
+{"kind":"shape","id":"sh/b2hwfyxo","slide":9,"bbox":[68,380,10,10]}
+{"kind":"textbox","id":"sh/mhk3q5o7","slide":9,"text":"Buscar tomador","textPreview":"Buscar tomador","textChars":14,"textLines":1,"bbox":[90,374,300,24]}
+{"kind":"shape","id":"sh/tgfmlkjm","slide":9,"bbox":[68,418,10,10]}
+{"kind":"textbox","id":"sh/4vmtwra5","slide":9,"text":"Cadastrar novo cliente","textPreview":"Cadastrar novo cliente","textChars":22,"textLines":1,"bbox":[90,412,300,24]}
+{"kind":"shape","id":"sh/i5sneloj","slide":9,"bbox":[68,456,10,10]}
+{"kind":"textbox","id":"sh/7qpg3ex0","slide":9,"text":"Editar dados fiscais","textPreview":"Editar dados fiscais","textChars":20,"textLines":1,"bbox":[90,450,300,24]}
+{"kind":"shape","id":"sh/0bi9s36h","slide":9,"bbox":[440,68,756,434]}
+{"kind":"textbox","id":"sh/ed8v6psf","slide":9,"text":"Tela: clientes carteira","textPreview":"Tela: clientes carteira","textChars":23,"textLines":1,"bbox":[450,526,500,22]}
+{"kind":"shape","id":"sh/7y1kre1w","slide":9,"bbox":[450,560,736,72]}
+{"kind":"textbox","id":"sh/wjudg7ad","slide":9,"text":"Dica de apresentacao","textPreview":"Dica de apresentacao","textChars":20,"textLines":1,"bbox":[474,574,180,20]}
+{"kind":"textbox","id":"sh/p4r65wju","slide":9,"text":"Mostre esta tela como parte do fluxo: Buscar tomador -> Cadastrar novo cliente -> Editar dados fiscais.","textPreview":"Mostre esta tela como parte do fluxo: Buscar tomador -> Cadastrar novo cliente -> Editar dados fiscais.","textChars":103,"textLines":1,"bbox":[474,598,666,22]}
+{"kind":"textbox","id":"sh/ih4byhgn","slide":9,"text":"NFSeGoo SaaS | Guia do cliente | 09","textPreview":"NFSeGoo SaaS | Guia do cliente | 09","textChars":35,"textLines":1,"bbox":[64,686,480,18]}
+{"kind":"textbox","id":"sh/72x4nap4","slide":9,"text":"Prints da interface local com dados demonstrativos","textPreview":"Prints da interface local com dados demonstrativos","textChars":50,"textLines":1,"bbox":[772,686,444,18]}
+{"kind":"image","id":"im/61032lsz","slide":9,"name":"","geometry":"roundRect","alt":"Print real do SaaS NFSeGoo","bbox":[450,78,736,414]}
+{"kind":"notes","id":"nt/hlqcjp","slide":9,"text":""}
+{"kind":"slide","id":"sl/szdww4","slide":10,"title":"EMISSAO","textShapes":12}
+{"kind":"shape","id":"sh/v6psfil0","slide":10,"bbox":[64,54,117,28]}
+{"kind":"textbox","id":"sh/knih4byh","slide":10,"text":"EMISSAO","textPreview":"EMISSAO","textChars":7,"textLines":1,"bbox":[76,59,93,18]}
+{"kind":"textbox","id":"sh/d8bat47y","slide":10,"text":"Escolher o tomador da NFS-e","textPreview":"Escolher o tomador da NFS-e","textChars":27,"textLines":1,"bbox":[64,102,344,86]}
+{"kind":"textbox","id":"sh/29gr2p8n","slide":10,"text":"Primeira etapa do assistente de emissao, com guia contextual e rascunhos recuperaveis quando aplicavel.","textPreview":"Primeira etapa do assistente de emissao, com guia contextual e rascunhos recuperaveis quando aplicavel.","textChars":103,"textLines":1,"bbox":[64,202,330,94]}
+{"kind":"textbox","id":"sh/vu9knih4","slide":10,"text":"O que o cliente faz","textPreview":"O que o cliente faz","textChars":19,"textLines":1,"bbox":[64,330,280,28]}
+{"kind":"shape","id":"sh/kf6dcbul","slide":10,"bbox":[68,380,10,10]}
+{"kind":"textbox","id":"sh/d0z61032","slide":10,"text":"Selecionar cliente","textPreview":"Selecionar cliente","textChars":18,"textLines":1,"bbox":[90,374,300,24]}
+{"kind":"shape","id":"sh/2x4nap4r","slide":10,"bbox":[68,418,10,10]}
+{"kind":"textbox","id":"sh/vixczed8","slide":10,"text":"Revisar tomador","textPreview":"Revisar tomador","textChars":15,"textLines":1,"bbox":[90,412,300,24]}
+{"kind":"shape","id":"sh/vmtwra5g","slide":10,"bbox":[68,456,10,10]}
+{"kind":"textbox","id":"sh/61032lsz","slide":10,"text":"Avancar","textPreview":"Avancar","textChars":7,"textLines":1,"bbox":[90,450,300,24]}
+{"kind":"shape","id":"sh/dsji5sne","slide":10,"bbox":[440,68,756,434]}
+{"kind":"textbox","id":"sh/vy90je9c","slide":10,"text":"Tela: emitir passo 1","textPreview":"Tela: emitir passo 1","textChars":20,"textLines":1,"bbox":[450,526,500,22]}
+{"kind":"shape","id":"sh/6dcbulwv","slide":10,"bbox":[450,560,736,72]}
+{"kind":"textbox","id":"sh/d4vmtwra","slide":10,"text":"Dica de apresentacao","textPreview":"Dica de apresentacao","textChars":20,"textLines":1,"bbox":[474,574,180,20]}
+{"kind":"textbox","id":"sh/oj2t83it","slide":10,"text":"Mostre esta tela como parte do fluxo: Selecionar cliente -> Revisar tomador -> Avancar.","textPreview":"Mostre esta tela como parte do fluxo: Selecionar cliente -> Revisar tomador -> Avancar.","textChars":87,"textLines":1,"bbox":[474,598,666,22]}
+{"kind":"textbox","id":"sh/z25kb6xk","slide":10,"text":"NFSeGoo SaaS | Guia do cliente | 10","textPreview":"NFSeGoo SaaS | Guia do cliente | 10","textChars":35,"textLines":1,"bbox":[64,686,480,18]}
+{"kind":"textbox","id":"sh/6hcrmhk3","slide":10,"text":"Prints da interface local com dados demonstrativos","textPreview":"Prints da interface local com dados demonstrativos","textChars":50,"textLines":1,"bbox":[772,686,444,18]}
+{"kind":"image","id":"im/nqxs72x4","slide":10,"name":"","geometry":"roundRect","alt":"Print real do SaaS NFSeGoo","bbox":[450,78,736,414]}
+{"kind":"notes","id":"nt/szdww4","slide":10,"text":""}
+{"kind":"slide","id":"sl/xio54v","slide":11,"title":"EMISSAO","textShapes":12}
+{"kind":"shape","id":"sh/xczed8v6","slide":11,"bbox":[64,54,117,28]}
+{"kind":"textbox","id":"sh/qpg3ex0n","slide":11,"text":"EMISSAO","textPreview":"EMISSAO","textChars":7,"textLines":1,"bbox":[76,59,93,18]}
+{"kind":"textbox","id":"sh/fa9w3m94","slide":11,"text":"Preencher servico, CNAE e valores","textPreview":"Preencher servico, CNAE e valores","textChars":33,"textLines":1,"bbox":[64,102,344,86]}
+{"kind":"textbox","id":"sh/8jqh0fep","slide":11,"text":"A segunda etapa concentra dados tributarios, valor do servico e orientacoes para evitar rejeicao.","textPreview":"A segunda etapa concentra dados tributarios, valor do servico e orientacoes para evitar rejeicao.","textChars":97,"textLines":1,"bbox":[64,202,330,94]}
+{"kind":"textbox","id":"sh/x4nap4r6","slide":11,"text":"O que o cliente faz","textPreview":"O que o cliente faz","textChars":19,"textLines":1,"bbox":[64,330,280,28]}
+{"kind":"shape","id":"sh/qd4vmtwr","slide":11,"bbox":[68,380,10,10]}
+{"kind":"textbox","id":"sh/fyxobm58","slide":11,"text":"Selecionar CNAE","textPreview":"Selecionar CNAE","textChars":15,"textLines":1,"bbox":[90,374,300,24]}
+{"kind":"shape","id":"sh/87ed8bat","slide":11,"bbox":[68,418,10,10]}
+{"kind":"textbox","id":"sh/xs72x4na","slide":11,"text":"Informar valor","textPreview":"Informar valor","textChars":14,"textLines":1,"bbox":[90,412,300,24]}
+{"kind":"shape","id":"sh/xkf6dcbu","slide":11,"bbox":[68,456,10,10]}
+{"kind":"textbox","id":"sh/4zidonyd","slide":11,"text":"Descrever servico","textPreview":"Descrever servico","textChars":17,"textLines":1,"bbox":[90,450,300,24]}
+{"kind":"shape","id":"sh/fepkzupw","slide":11,"bbox":[440,68,756,434]}
+{"kind":"textbox","id":"sh/xc3ylc7u","slide":11,"text":"Tela: emitir passo 2","textPreview":"Tela: emitir passo 2","textChars":20,"textLines":1,"bbox":[450,526,500,22]}
+{"kind":"shape","id":"sh/4r65wjud","slide":11,"bbox":[450,560,736,72]}
+{"kind":"textbox","id":"sh/f6dcbulw","slide":11,"text":"Dica de apresentacao","textPreview":"Dica de apresentacao","textChars":20,"textLines":1,"bbox":[474,574,180,20]}
+{"kind":"textbox","id":"sh/mlkjm1cf","slide":11,"text":"Mostre esta tela como parte do fluxo: Selecionar CNAE -> Informar valor -> Descrever servico.","textPreview":"Mostre esta tela como parte do fluxo: Selecionar CNAE -> Informar valor -> Descrever servico.","textChars":93,"textLines":1,"bbox":[474,598,666,22]}
+{"kind":"textbox","id":"sh/x0nuxc3y","slide":11,"text":"NFSeGoo SaaS | Guia do cliente | 11","textPreview":"NFSeGoo SaaS | Guia do cliente | 11","textChars":35,"textLines":1,"bbox":[64,686,480,18]}
+{"kind":"textbox","id":"sh/4fu18jqh","slide":11,"text":"Prints da interface local com dados demonstrativos","textPreview":"Prints da interface local com dados demonstrativos","textChars":50,"textLines":1,"bbox":[772,686,444,18]}
+{"kind":"image","id":"im/hoza1gvy","slide":11,"name":"","geometry":"roundRect","alt":"Print real do SaaS NFSeGoo","bbox":[450,78,736,414]}
+{"kind":"notes","id":"nt/xio54v","slide":11,"text":""}
+{"kind":"slide","id":"sl/l3mwct","slide":12,"title":"NOTAS","textShapes":12}
+{"kind":"shape","id":"sh/cvixczed","slide":12,"bbox":[64,54,96,28]}
+{"kind":"textbox","id":"sh/nap4r65w","slide":12,"text":"NOTAS","textPreview":"NOTAS","textChars":5,"textLines":1,"bbox":[76,59,72,18]}
+{"kind":"textbox","id":"sh/upwb2hwf","slide":12,"text":"Consultar historico e corrigir falhas","textPreview":"Consultar historico e corrigir falhas","textChars":37,"textLines":1,"bbox":[64,102,344,86]}
+{"kind":"textbox","id":"sh/54zidony","slide":12,"text":"A tela de notas mostra status, codigo de servico, valores e acoes de PDF/XML, cancelamento, ajuda ou correcao.","textPreview":"A tela de notas mostra status, codigo de servico, valores e acoes de PDF/XML, cancelamento, ajuda ou correcao.","textChars":110,"textLines":1,"bbox":[64,202,330,94]}
+{"kind":"textbox","id":"sh/cj6tovah","slide":12,"text":"O que o cliente faz","textPreview":"O que o cliente faz","textChars":19,"textLines":1,"bbox":[64,330,280,28]}
+{"kind":"shape","id":"sh/nyd0z610","slide":12,"bbox":[68,380,10,10]}
+{"kind":"textbox","id":"sh/udg7adsj","slide":12,"text":"Baixar documentos","textPreview":"Baixar documentos","textChars":17,"textLines":1,"bbox":[90,374,300,24]}
+{"kind":"shape","id":"sh/1032lszq","slide":12,"bbox":[68,418,10,10]}
+{"kind":"textbox","id":"sh/cfa9w3m9","slide":12,"text":"Cancelar nota","textPreview":"Cancelar nota","textChars":13,"textLines":1,"bbox":[90,412,300,24]}
+{"kind":"shape","id":"sh/25kb6xkf","slide":12,"bbox":[68,456,10,10]}
+{"kind":"textbox","id":"sh/rqd4vmtw","slide":12,"text":"Corrigir emissao","textPreview":"Corrigir emissao","textChars":16,"textLines":1,"bbox":[90,450,300,24]}
+{"kind":"shape","id":"sh/kb6xkf6d","slide":12,"bbox":[440,68,756,434]}
+{"kind":"textbox","id":"sh/2t83itgf","slide":12,"text":"Tela: notas emitidas","textPreview":"Tela: notas emitidas","textChars":20,"textLines":1,"bbox":[450,526,500,22]}
+{"kind":"shape","id":"sh/re1w7mp0","slide":12,"bbox":[450,560,736,72]}
+{"kind":"textbox","id":"sh/kzupwb2h","slide":12,"text":"Dica de apresentacao","textPreview":"Dica de apresentacao","textChars":20,"textLines":1,"bbox":[474,574,180,20]}
+{"kind":"textbox","id":"sh/9knih4by","slide":12,"text":"Mostre esta tela como parte do fluxo: Baixar documentos -> Cancelar nota -> Corrigir emissao.","textPreview":"Mostre esta tela como parte do fluxo: Baixar documentos -> Cancelar nota -> Corrigir emissao.","textChars":93,"textLines":1,"bbox":[474,598,666,22]}
+{"kind":"textbox","id":"sh/2p8nqxs7","slide":12,"text":"NFSeGoo SaaS | Guia do cliente | 12","textPreview":"NFSeGoo SaaS | Guia do cliente | 12","textChars":35,"textLines":1,"bbox":[64,686,480,18]}
+{"kind":"textbox","id":"sh/ra5gbq1o","slide":12,"text":"Prints da interface local com dados demonstrativos","textPreview":"Prints da interface local com dados demonstrativos","textChars":50,"textLines":1,"bbox":[772,686,444,18]}
+{"kind":"image","id":"im/6xkf6dcb","slide":12,"name":"","geometry":"roundRect","alt":"Print real do SaaS NFSeGoo","bbox":[450,78,736,414]}
+{"kind":"notes","id":"nt/l3mwct","slide":12,"text":""}
+{"kind":"slide","id":"sl/v14bdx","slide":13,"title":"RELATORIOS","textShapes":12}
+{"kind":"shape","id":"sh/vy90je9c","slide":13,"bbox":[64,54,150,28]}
+{"kind":"textbox","id":"sh/oj2t83it","slide":13,"text":"RELATORIOS","textPreview":"RELATORIOS","textChars":10,"textLines":1,"bbox":[76,59,126,18]}
+{"kind":"textbox","id":"sh/d4vmtwra","slide":13,"text":"Fechar periodo fiscal","textPreview":"Fechar periodo fiscal","textChars":21,"textLines":1,"bbox":[64,102,344,86]}
+{"kind":"textbox","id":"sh/61032lsz","slide":13,"text":"Relatorios filtram periodo, totalizam emissao e permitem exportar conferencia em PDF/XML.","textPreview":"Relatorios filtram periodo, totalizam emissao e permitem exportar conferencia em PDF/XML.","textChars":89,"textLines":1,"bbox":[64,202,330,94]}
+{"kind":"textbox","id":"sh/vmtwra5g","slide":13,"text":"O que o cliente faz","textPreview":"O que o cliente faz","textChars":19,"textLines":1,"bbox":[64,330,280,28]}
+{"kind":"shape","id":"sh/o7qpg3ex","slide":13,"bbox":[68,380,10,10]}
+{"kind":"textbox","id":"sh/dsji5sne","slide":13,"text":"Filtrar datas","textPreview":"Filtrar datas","textChars":13,"textLines":1,"bbox":[90,374,300,24]}
+{"kind":"shape","id":"sh/6tovahoz","slide":13,"bbox":[68,418,10,10]}
+{"kind":"textbox","id":"sh/vahoza1g","slide":13,"text":"Selecionar notas","textPreview":"Selecionar notas","textChars":16,"textLines":1,"bbox":[90,412,300,24]}
+{"kind":"shape","id":"sh/7qpg3ex0","slide":13,"bbox":[68,456,10,10]}
+{"kind":"textbox","id":"sh/i5sneloj","slide":13,"text":"Gerar relatorio","textPreview":"Gerar relatorio","textChars":15,"textLines":1,"bbox":[90,450,300,24]}
+{"kind":"shape","id":"sh/pwb2hwfy","slide":13,"bbox":[440,68,756,434]}
+{"kind":"textbox","id":"sh/7y1kre1w","slide":13,"text":"Tela: relatorios","textPreview":"Tela: relatorios","textChars":16,"textLines":1,"bbox":[450,526,500,22]}
+{"kind":"shape","id":"sh/ed8v6psf","slide":13,"bbox":[450,560,736,72]}
+{"kind":"textbox","id":"sh/p4r65wju","slide":13,"text":"Dica de apresentacao","textPreview":"Dica de apresentacao","textChars":20,"textLines":1,"bbox":[474,574,180,20]}
+{"kind":"textbox","id":"sh/wjudg7ad","slide":13,"text":"Mostre esta tela como parte do fluxo: Filtrar datas -> Selecionar notas -> Gerar relatorio.","textPreview":"Mostre esta tela como parte do fluxo: Filtrar datas -> Selecionar notas -> Gerar relatorio.","textChars":91,"textLines":1,"bbox":[474,598,666,22]}
+{"kind":"textbox","id":"sh/72x4nap4","slide":13,"text":"NFSeGoo SaaS | Guia do cliente | 13","textPreview":"NFSeGoo SaaS | Guia do cliente | 13","textChars":35,"textLines":1,"bbox":[64,686,480,18]}
+{"kind":"textbox","id":"sh/ih4byhgn","slide":13,"text":"Prints da interface local com dados demonstrativos","textPreview":"Prints da interface local com dados demonstrativos","textChars":50,"textLines":1,"bbox":[772,686,444,18]}
+{"kind":"image","id":"im/3m94fu18","slide":13,"name":"","geometry":"roundRect","alt":"Print real do SaaS NFSeGoo","bbox":[450,78,736,414]}
+{"kind":"notes","id":"nt/v14bdx","slide":13,"text":""}
+{"kind":"slide","id":"sl/zdbzbd","slide":14,"title":"SUPORTE","textShapes":12}
+{"kind":"shape","id":"sh/il0rqd4v","slide":14,"bbox":[64,54,117,28]}
+{"kind":"textbox","id":"sh/tcj6tova","slide":14,"text":"SUPORTE","textPreview":"SUPORTE","textChars":7,"textLines":1,"bbox":[76,59,93,18]}
+{"kind":"textbox","id":"sh/0rqd4vmt","slide":14,"text":"Abrir e acompanhar chamados","textPreview":"Abrir e acompanhar chamados","textChars":27,"textLines":1,"bbox":[64,102,344,86]}
+{"kind":"textbox","id":"sh/byhgn29g","slide":14,"text":"Central para tickets, solicitacoes de contador e acesso rapido a guias antes de chamar a equipe.","textPreview":"Central para tickets, solicitacoes de contador e acesso rapido a guias antes de chamar a equipe.","textChars":96,"textLines":1,"bbox":[64,202,330,94]}
+{"kind":"textbox","id":"sh/idonyd0z","slide":14,"text":"O que o cliente faz","textPreview":"O que o cliente faz","textChars":19,"textLines":1,"bbox":[64,330,280,28]}
+{"kind":"shape","id":"sh/t47y1kre","slide":14,"bbox":[68,380,10,10]}
+{"kind":"textbox","id":"sh/0je9cvix","slide":14,"text":"Pesquisar tickets","textPreview":"Pesquisar tickets","textChars":17,"textLines":1,"bbox":[90,374,300,24]}
+{"kind":"shape","id":"sh/bulwval8","slide":14,"bbox":[68,418,10,10]}
+{"kind":"textbox","id":"sh/i9s36hcr","slide":14,"text":"Abrir chamado","textPreview":"Abrir chamado","textChars":13,"textLines":1,"bbox":[90,412,300,24]}
+{"kind":"shape","id":"sh/0fepkzup","slide":14,"bbox":[68,456,10,10]}
+{"kind":"textbox","id":"sh/p0bi9s36","slide":14,"text":"Autorizar contador","textPreview":"Autorizar contador","textChars":18,"textLines":1,"bbox":[90,450,300,24]}
+{"kind":"shape","id":"sh/i9s36hcr","slide":14,"bbox":[440,68,756,434]}
+{"kind":"textbox","id":"sh/032lszqt","slide":14,"text":"Tela: suporte","textPreview":"Tela: suporte","textChars":13,"textLines":1,"bbox":[450,526,500,22]}
+{"kind":"shape","id":"sh/tovahoza","slide":14,"bbox":[450,560,736,72]}
+{"kind":"textbox","id":"sh/ixczed8v","slide":14,"text":"Dica de apresentacao","textPreview":"Dica de apresentacao","textChars":20,"textLines":1,"bbox":[474,574,180,20]}
+{"kind":"textbox","id":"sh/bi9s36hc","slide":14,"text":"Mostre esta tela como parte do fluxo: Pesquisar tickets -> Abrir chamado -> Autorizar contador.","textPreview":"Mostre esta tela como parte do fluxo: Pesquisar tickets -> Abrir chamado -> Autorizar contador.","textChars":95,"textLines":1,"bbox":[474,598,666,22]}
+{"kind":"textbox","id":"sh/0rqd4vmt","slide":14,"text":"NFSeGoo SaaS | Guia do cliente | 14","textPreview":"NFSeGoo SaaS | Guia do cliente | 14","textChars":35,"textLines":1,"bbox":[64,686,480,18]}
+{"kind":"textbox","id":"sh/tcj6tova","slide":14,"text":"Prints da interface local com dados demonstrativos","textPreview":"Prints da interface local com dados demonstrativos","textChars":50,"textLines":1,"bbox":[772,686,444,18]}
+{"kind":"image","id":"im/cfa9w3m9","slide":14,"name":"","geometry":"roundRect","alt":"Print real do SaaS NFSeGoo","bbox":[450,78,736,414]}
+{"kind":"notes","id":"nt/zdbzbd","slide":14,"text":""}
+{"kind":"slide","id":"sl/fc5l3k","slide":15,"title":"AJUDA","textShapes":12}
+{"kind":"shape","id":"sh/ulwval87","slide":15,"bbox":[64,54,96,28]}
+{"kind":"textbox","id":"sh/1cfa9w3m","slide":15,"text":"AJUDA","textPreview":"AJUDA","textChars":5,"textLines":1,"bbox":[76,59,72,18]}
+{"kind":"textbox","id":"sh/crmhk3q5","slide":15,"text":"Consultar central de conhecimento","textPreview":"Consultar central de conhecimento","textChars":33,"textLines":1,"bbox":[64,102,344,86]}
+{"kind":"textbox","id":"sh/ji5snelo","slide":15,"text":"Base guiada com artigos e orientacoes sobre emissao, configuracao, certificado, cancelamento e conta.","textPreview":"Base guiada com artigos e orientacoes sobre emissao, configuracao, certificado, cancelamento e conta.","textChars":101,"textLines":1,"bbox":[64,202,330,94]}
+{"kind":"textbox","id":"sh/uxc3ylc7","slide":15,"text":"O que o cliente faz","textPreview":"O que o cliente faz","textChars":19,"textLines":1,"bbox":[64,330,280,28]}
+{"kind":"shape","id":"sh/1kre1w7m","slide":15,"bbox":[68,380,10,10]}
+{"kind":"textbox","id":"sh/c3ylc7u5","slide":15,"text":"Pesquisar artigo","textPreview":"Pesquisar artigo","textChars":16,"textLines":1,"bbox":[90,374,300,24]}
+{"kind":"shape","id":"sh/jqh0fepk","slide":15,"bbox":[68,418,10,10]}
+{"kind":"textbox","id":"sh/q5o7qpg3","slide":15,"text":"Seguir passo a passo","textPreview":"Seguir passo a passo","textChars":20,"textLines":1,"bbox":[90,412,300,24]}
+{"kind":"shape","id":"sh/kzupwb2h","slide":15,"bbox":[68,456,10,10]}
+{"kind":"textbox","id":"sh/9knih4by","slide":15,"text":"Ir para tela relacionada","textPreview":"Ir para tela relacionada","textChars":24,"textLines":1,"bbox":[90,450,300,24]}
+{"kind":"shape","id":"sh/2t83itgf","slide":15,"bbox":[440,68,756,434]}
+{"kind":"textbox","id":"sh/kb6xkf6d","slide":15,"text":"Tela: ajuda","textPreview":"Tela: ajuda","textChars":11,"textLines":1,"bbox":[450,526,500,22]}
+{"kind":"shape","id":"sh/9w3m94fu","slide":15,"bbox":[450,560,736,72]}
+{"kind":"textbox","id":"sh/25kb6xkf","slide":15,"text":"Dica de apresentacao","textPreview":"Dica de apresentacao","textChars":20,"textLines":1,"bbox":[474,574,180,20]}
+{"kind":"textbox","id":"sh/rqd4vmtw","slide":15,"text":"Mostre esta tela como parte do fluxo: Pesquisar artigo -> Seguir passo a passo -> Ir para tela relacionada.","textPreview":"Mostre esta tela como parte do fluxo: Pesquisar artigo -> Seguir passo a passo -> Ir para tela relacionada.","textChars":107,"textLines":1,"bbox":[474,598,666,22]}
+{"kind":"textbox","id":"sh/kjm1cfa9","slide":15,"text":"NFSeGoo SaaS | Guia do cliente | 15","textPreview":"NFSeGoo SaaS | Guia do cliente | 15","textChars":35,"textLines":1,"bbox":[64,686,480,18]}
+{"kind":"textbox","id":"sh/94fu18jq","slide":15,"text":"Prints da interface local com dados demonstrativos","textPreview":"Prints da interface local com dados demonstrativos","textChars":50,"textLines":1,"bbox":[772,686,444,18]}
+{"kind":"image","id":"im/4zidonyd","slide":15,"name":"","geometry":"roundRect","alt":"Print real do SaaS NFSeGoo","bbox":[450,78,736,414]}
+{"kind":"notes","id":"nt/fc5l3k","slide":15,"text":""}
+{"kind":"slide","id":"sl/oy4uz7","slide":16,"title":"EMPRESA","textShapes":12}
+{"kind":"shape","id":"sh/61032lsz","slide":16,"bbox":[64,54,117,28]}
+{"kind":"textbox","id":"sh/dsji5sne","slide":16,"text":"EMPRESA","textPreview":"EMPRESA","textChars":7,"textLines":1,"bbox":[76,59,93,18]}
+{"kind":"textbox","id":"sh/o7qpg3ex","slide":16,"text":"Configurar empresa, certificado e ambiente","textPreview":"Configurar empresa, certificado e ambiente","textChars":42,"textLines":1,"bbox":[64,102,344,86]}
+{"kind":"textbox","id":"sh/vy90je9c","slide":16,"text":"Area fiscal onde o cliente atualiza dados obrigatorios, certificado A1, CNAEs e ambiente de emissao.","textPreview":"Area fiscal onde o cliente atualiza dados obrigatorios, certificado A1, CNAEs e ambiente de emissao.","textChars":100,"textLines":1,"bbox":[64,202,330,94]}
+{"kind":"textbox","id":"sh/6dcbulwv","slide":16,"text":"O que o cliente faz","textPreview":"O que o cliente faz","textChars":19,"textLines":1,"bbox":[64,330,280,28]}
+{"kind":"shape","id":"sh/d4vmtwra","slide":16,"bbox":[68,380,10,10]}
+{"kind":"textbox","id":"sh/oj2t83it","slide":16,"text":"Completar cadastro","textPreview":"Completar cadastro","textChars":18,"textLines":1,"bbox":[90,374,300,24]}
+{"kind":"shape","id":"sh/z25kb6xk","slide":16,"bbox":[68,418,10,10]}
+{"kind":"textbox","id":"sh/6hcrmhk3","slide":16,"text":"Enviar certificado","textPreview":"Enviar certificado","textChars":18,"textLines":1,"bbox":[90,412,300,24]}
+{"kind":"shape","id":"sh/gr2p8nqx","slide":16,"bbox":[68,456,10,10]}
+{"kind":"textbox","id":"sh/9cvixcze","slide":16,"text":"Ajustar ambiente","textPreview":"Ajustar ambiente","textChars":16,"textLines":1,"bbox":[90,450,300,24]}
+{"kind":"shape","id":"sh/ylc7u54z","slide":16,"bbox":[440,68,756,434]}
+{"kind":"textbox","id":"sh/g3ex0nux","slide":16,"text":"Tela: configuracoes","textPreview":"Tela: configuracoes","textChars":19,"textLines":1,"bbox":[450,526,500,22]}
+{"kind":"shape","id":"sh/5o7qpg3e","slide":16,"bbox":[450,560,736,72]}
+{"kind":"textbox","id":"sh/yxobm58z","slide":16,"text":"Dica de apresentacao","textPreview":"Dica de apresentacao","textChars":20,"textLines":1,"bbox":[474,574,180,20]}
+{"kind":"textbox","id":"sh/nih4byhg","slide":16,"text":"Mostre esta tela como parte do fluxo: Completar cadastro -> Enviar certificado -> Ajustar ambiente.","textPreview":"Mostre esta tela como parte do fluxo: Completar cadastro -> Enviar certificado -> Ajustar ambiente.","textChars":99,"textLines":1,"bbox":[474,598,666,22]}
+{"kind":"textbox","id":"sh/g7adsji5","slide":16,"text":"NFSeGoo SaaS | Guia do cliente | 16","textPreview":"NFSeGoo SaaS | Guia do cliente | 16","textChars":35,"textLines":1,"bbox":[64,686,480,18]}
+{"kind":"textbox","id":"sh/9s36hcrm","slide":16,"text":"Prints da interface local com dados demonstrativos","textPreview":"Prints da interface local com dados demonstrativos","textChars":50,"textLines":1,"bbox":[772,686,444,18]}
+{"kind":"image","id":"im/g7adsji5","slide":16,"name":"","geometry":"roundRect","alt":"Print real do SaaS NFSeGoo","bbox":[450,78,736,414]}
+{"kind":"notes","id":"nt/oy4uz7","slide":16,"text":""}
+{"kind":"slide","id":"sl/k834z3","slide":17,"title":"CONTA","textShapes":12}
+{"kind":"shape","id":"sh/nqxs72x4","slide":17,"bbox":[64,54,96,28]}
+{"kind":"textbox","id":"sh/cbulwval","slide":17,"text":"CONTA","textPreview":"CONTA","textChars":5,"textLines":1,"bbox":[76,59,72,18]}
+{"kind":"textbox","id":"sh/5sneloj2","slide":17,"text":"Gerenciar assinatura e dados pessoais","textPreview":"Gerenciar assinatura e dados pessoais","textChars":37,"textLines":1,"bbox":[64,102,344,86]}
+{"kind":"textbox","id":"sh/ytsvu9kn","slide":17,"text":"Visao de perfil, limites do plano, seguranca da conta e preferencias do usuario.","textPreview":"Visao de perfil, limites do plano, seguranca da conta e preferencias do usuario.","textChars":80,"textLines":1,"bbox":[64,202,330,94]}
+{"kind":"textbox","id":"sh/neloj2t8","slide":17,"text":"O que o cliente faz","textPreview":"O que o cliente faz","textChars":19,"textLines":1,"bbox":[64,330,280,28]}
+{"kind":"shape","id":"sh/czed8v6p","slide":17,"bbox":[68,380,10,10]}
+{"kind":"textbox","id":"sh/5kb6xkf6","slide":17,"text":"Editar perfil","textPreview":"Editar perfil","textChars":13,"textLines":1,"bbox":[90,374,300,24]}
+{"kind":"shape","id":"sh/yhgn29gr","slide":17,"bbox":[68,418,10,10]}
+{"kind":"textbox","id":"sh/n29gr2p8","slide":17,"text":"Acompanhar limites","textPreview":"Acompanhar limites","textChars":18,"textLines":1,"bbox":[90,412,300,24]}
+{"kind":"shape","id":"sh/fyxobm58","slide":17,"bbox":[68,456,10,10]}
+{"kind":"textbox","id":"sh/qd4vmtwr","slide":17,"text":"Salvar alteracoes","textPreview":"Salvar alteracoes","textChars":17,"textLines":1,"bbox":[90,450,300,24]}
+{"kind":"shape","id":"sh/x4nap4r6","slide":17,"bbox":[440,68,756,434]}
+{"kind":"textbox","id":"sh/fa9w3m94","slide":17,"text":"Tela: minha conta planos","textPreview":"Tela: minha conta planos","textChars":24,"textLines":1,"bbox":[450,526,500,22]}
+{"kind":"shape","id":"sh/qpg3ex0n","slide":17,"bbox":[450,560,736,72]}
+{"kind":"textbox","id":"sh/xczed8v6","slide":17,"text":"Dica de apresentacao","textPreview":"Dica de apresentacao","textChars":20,"textLines":1,"bbox":[474,574,180,20]}
+{"kind":"textbox","id":"sh/8v6psfil","slide":17,"text":"Mostre esta tela como parte do fluxo: Editar perfil -> Acompanhar limites -> Salvar alteracoes.","textPreview":"Mostre esta tela como parte do fluxo: Editar perfil -> Acompanhar limites -> Salvar alteracoes.","textChars":95,"textLines":1,"bbox":[474,598,666,22]}
+{"kind":"textbox","id":"sh/je9cvixc","slide":17,"text":"NFSeGoo SaaS | Guia do cliente | 17","textPreview":"NFSeGoo SaaS | Guia do cliente | 17","textChars":35,"textLines":1,"bbox":[64,686,480,18]}
+{"kind":"textbox","id":"sh/qtcj6tov","slide":17,"text":"Prints da interface local com dados demonstrativos","textPreview":"Prints da interface local com dados demonstrativos","textChars":50,"textLines":1,"bbox":[772,686,444,18]}
+{"kind":"image","id":"im/fyxobm58","slide":17,"name":"","geometry":"roundRect","alt":"Print real do SaaS NFSeGoo","bbox":[450,78,736,414]}
+{"kind":"notes","id":"nt/k834z3","slide":17,"text":""}

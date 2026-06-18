@@ -1,0 +1,6 @@
+Modo: create.
+Formato: 16:9, 1280x720.
+Paleta: slate #0f172a, blue #2563eb, emerald #10b981, amber #f59e0b, background #f8fafc.
+Fontes: Aptos Display para titulos, Aptos para corpo.
+Escala: capa 54px; titulos 30-42px; corpo 17-20px; rodape 10px.
+Estrutura: capa, mapa da jornada, uma tela por funcionalidade com print real e resumo operacional.

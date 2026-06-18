@@ -1,0 +1,4 @@
+PPTX exportado: C:\Users\edina\Documents\Sites\nfsegoo\outputs\Apresentacao-Guia-NFSeGoo-SaaS.pptx
+Slides renderizados: 17
+Verificacao: previews PNG e montagem WEBP gerados com artifact-tool.
+Observacao: screenshots sao prints reais da UI local; dados de negocio sao demonstrativos porque o banco local PostgreSQL nao estava ativo.

@@ -7,6 +7,7 @@ import { checkPlanLimits, incrementUsage, releaseEmissionCredit, reserveEmission
 import { resolveEmpresaContexto } from '@/app/utils/access-control';
 import { notifyFiscalEvent } from '@/app/services/notificationService';
 import { getMensagemErroFiscalCliente } from '@/app/utils/fiscal-error-messages';
+import { isPercentualFiscalValido, parseDecimalInput } from '@/app/utils/number-format';
 
 const prisma = new PrismaClient();
 const emissaoJobModel = (prisma as any).emissaoJob;
@@ -94,10 +95,7 @@ function optionalString(value: any) {
 }
 
 function parseNumero(value: any, fallback = 0) {
-  if (value === undefined || value === null || value === '') return fallback;
-  if (typeof value === 'number') return Number.isFinite(value) ? value : fallback;
-  const parsed = Number(String(value).replace(/[^\d,.-]/g, '').replace(/\./g, '').replace(',', '.'));
-  return Number.isFinite(parsed) ? parsed : fallback;
+  return parseDecimalInput(value, fallback);
 }
 
 function parseBoolean(value: any, fallback = false) {
@@ -754,6 +752,23 @@ async function executarEmissao(job: any) {
   codigoNbs = optionalString(firstDefined(payload.codigoNbs, codigoNbs)) || '';
   const codigoTributacaoMunicipal = optionalString(firstDefined(payload.codigoTributacaoMunicipal, regraMunicipal?.codigoTributacaoMunicipal));
   const aliquotaMunicipio = firstDefined(payload.aliquotaMunicipio, regraMunicipal?.aliquotaIss);
+  const aliquotaIss = payload.aliquota ? parseNumero(payload.aliquota) : 0;
+  const aliquotaIssEfetiva = aliquotaIss || parseNumero(prestador.aliquotaPadrao) || 0;
+  const aliquotaMunicipioNumero = aliquotaMunicipio ? parseNumero(aliquotaMunicipio) : null;
+  if (!isPercentualFiscalValido(aliquotaIssEfetiva, { allowZero: true })) {
+    throw Object.assign(new Error('Aliquota ISS invalida. Informe um percentual entre 0 e 100, por exemplo 2,01 ou 2.01.'), {
+      status: 400,
+      userAction: 'Revise a aliquota ISS antes de reenviar. Use percentual entre 0 e 100, como 2,01 ou 2.01.',
+      code: 'ALIQUOTA_ISS_INVALIDA',
+    });
+  }
+  if (aliquotaMunicipioNumero !== null && !isPercentualFiscalValido(aliquotaMunicipioNumero, { allowZero: true })) {
+    throw Object.assign(new Error('Aliquota municipal invalida. Informe um percentual entre 0 e 100.'), {
+      status: 400,
+      userAction: 'Revise a aliquota municipal antes de reenviar. Use percentual entre 0 e 100.',
+      code: 'ALIQUOTA_MUNICIPAL_INVALIDA',
+    });
+  }
   const tipoTributacao = optionalString(firstDefined(payload.tipoTributacao, prestador.tipoTributacaoPadrao));
 
   const prestadorEmissao = {
@@ -809,14 +824,14 @@ async function executarEmissao(job: any) {
       valorMoedaEstrangeira: firstDefined(payload.valorMoedaEstrangeira) ? parseNumero(payload.valorMoedaEstrangeira) : undefined,
       codigoNbs,
       codigoTributacaoMunicipal,
-      aliquotaMunicipio: aliquotaMunicipio ? parseNumero(aliquotaMunicipio) : null,
+      aliquotaMunicipio: aliquotaMunicipioNumero,
       descricao: payload.descricao,
       cnae: cnaeFinal,
       itemLc,
       itemListaServico: itemLc,
       codigoTribNacional,
       codigoTributacaoNacional: codigoTribNacional,
-      aliquota: payload.aliquota ? parseNumero(payload.aliquota) : 0,
+      aliquota: aliquotaIss,
       issRetido: parseBoolean(payload.issRetido, false),
       tipoTributacao: tipoTributacao || '1',
       retencoes: payload.retencoes,

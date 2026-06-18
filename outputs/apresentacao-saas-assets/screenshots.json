@@ -1,0 +1,77 @@
+[
+  {
+    "name": "home-planos",
+    "url": "/",
+    "file": "C:\\Users\\edina\\Documents\\Sites\\nfsegoo\\outputs\\apresentacao-saas-assets\\01-home-planos.png"
+  },
+  {
+    "name": "checkout-contratacao",
+    "url": "/checkout",
+    "file": "C:\\Users\\edina\\Documents\\Sites\\nfsegoo\\outputs\\apresentacao-saas-assets\\02-checkout-contratacao.png"
+  },
+  {
+    "name": "login",
+    "url": "/login",
+    "file": "C:\\Users\\edina\\Documents\\Sites\\nfsegoo\\outputs\\apresentacao-saas-assets\\03-login.png"
+  },
+  {
+    "name": "cadastro",
+    "url": "/cadastro",
+    "file": "C:\\Users\\edina\\Documents\\Sites\\nfsegoo\\outputs\\apresentacao-saas-assets\\04-cadastro.png"
+  },
+  {
+    "name": "dashboard-cliente",
+    "url": "/cliente/dashboard",
+    "file": "C:\\Users\\edina\\Documents\\Sites\\nfsegoo\\outputs\\apresentacao-saas-assets\\05-dashboard-cliente.png"
+  },
+  {
+    "name": "menu-lateral",
+    "url": "/cliente/dashboard",
+    "file": "C:\\Users\\edina\\Documents\\Sites\\nfsegoo\\outputs\\apresentacao-saas-assets\\06-menu-lateral.png"
+  },
+  {
+    "name": "clientes-carteira",
+    "url": "/cliente",
+    "file": "C:\\Users\\edina\\Documents\\Sites\\nfsegoo\\outputs\\apresentacao-saas-assets\\07-clientes-carteira.png"
+  },
+  {
+    "name": "emitir-passo-1",
+    "url": "/emitir",
+    "file": "C:\\Users\\edina\\Documents\\Sites\\nfsegoo\\outputs\\apresentacao-saas-assets\\08-emitir-passo-1.png"
+  },
+  {
+    "name": "emitir-passo-2",
+    "url": "/emitir",
+    "file": "C:\\Users\\edina\\Documents\\Sites\\nfsegoo\\outputs\\apresentacao-saas-assets\\09-emitir-passo-2.png"
+  },
+  {
+    "name": "notas-emitidas",
+    "url": "/cliente/notas",
+    "file": "C:\\Users\\edina\\Documents\\Sites\\nfsegoo\\outputs\\apresentacao-saas-assets\\10-notas-emitidas.png"
+  },
+  {
+    "name": "relatorios",
+    "url": "/relatorios",
+    "file": "C:\\Users\\edina\\Documents\\Sites\\nfsegoo\\outputs\\apresentacao-saas-assets\\11-relatorios.png"
+  },
+  {
+    "name": "suporte",
+    "url": "/cliente/suporte",
+    "file": "C:\\Users\\edina\\Documents\\Sites\\nfsegoo\\outputs\\apresentacao-saas-assets\\12-suporte.png"
+  },
+  {
+    "name": "ajuda",
+    "url": "/cliente/ajuda",
+    "file": "C:\\Users\\edina\\Documents\\Sites\\nfsegoo\\outputs\\apresentacao-saas-assets\\13-ajuda.png"
+  },
+  {
+    "name": "configuracoes",
+    "url": "/configuracoes",
+    "file": "C:\\Users\\edina\\Documents\\Sites\\nfsegoo\\outputs\\apresentacao-saas-assets\\14-configuracoes.png"
+  },
+  {
+    "name": "minha-conta-planos",
+    "url": "/configuracoes/minha-conta",
+    "file": "C:\\Users\\edina\\Documents\\Sites\\nfsegoo\\outputs\\apresentacao-saas-assets\\15-minha-conta-planos.png"
+  }
+]

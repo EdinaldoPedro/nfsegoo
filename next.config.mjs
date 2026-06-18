@@ -13,6 +13,12 @@ const nextConfig = {
                     { key: 'Referrer-Policy', value: 'same-origin' },
                     { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' }
                 ]
+            },
+            {
+                source: '/showcases/:path*',
+                headers: [
+                    { key: 'X-Frame-Options', value: 'SAMEORIGIN' }
+                ]
             }
         ];
     }

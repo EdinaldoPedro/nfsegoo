@@ -5,6 +5,7 @@ import { MeiHandler } from '@/app/services/emissor/handlers/MeiHandler';
 import { SimplesNacionalHandler } from '@/app/services/emissor/handlers/SimplesNacionalHandler';
 import { ICanonicalRps } from '@/app/services/emissor/interfaces/ICanonicalRps';
 import { stripEmpresaSecrets } from '@/app/utils/safe-data';
+import { isPercentualFiscalValido, parseDecimalInput } from '@/app/utils/number-format';
 
 type CheckStatus = 'ok' | 'warn' | 'error' | 'info';
 
@@ -79,10 +80,7 @@ function optionalText(value: any) {
 }
 
 function asNumber(value: any, fallback = 0) {
-  if (value === null || value === undefined || value === '') return fallback;
-  if (typeof value === 'number') return Number.isFinite(value) ? value : fallback;
-  const parsed = Number(String(value).replace(/\./g, '').replace(',', '.'));
-  return Number.isFinite(parsed) ? parsed : fallback;
+  return parseDecimalInput(value, fallback);
 }
 
 function asBoolean(value: any, fallback = false) {
@@ -299,6 +297,8 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
   const codigoNbsResolvido = regraMunicipal?.exigeNbs ? (regraGlobal as any)?.codigoNbs || cnaePrincipal?.codigoNbs || '' : '';
   const codigoNbs = optionalText(firstDefined(overrides.codigoNbs, codigoNbsResolvido));
   const aliquotaMunicipio = firstDefined(overrides.aliquotaMunicipio, regraMunicipal?.aliquotaIss);
+  const aliquotaIss = (overrides.aliquota !== undefined ? asNumber(overrides.aliquota) : 0) || asNumber(prestador.aliquotaPadrao);
+  const aliquotaMunicipioNumero = aliquotaMunicipio ? asNumber(aliquotaMunicipio) : null;
 
   addCheck(checks, {
     id: 'tributacao-nacional',
@@ -329,6 +329,32 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
       message: codigoNbs ? `NBS ${codigoNbs}.` : 'Municipio exige NBS, mas nenhum codigo foi resolvido.',
       tag: 'serv/cServ/cNBS',
       field: 'servico.codigoNbs',
+    });
+  }
+
+  addCheck(checks, {
+    id: 'tributacao-aliquota-iss',
+    group: 'Tributacao',
+    label: 'Aliquota ISS',
+    status: isPercentualFiscalValido(aliquotaIss, { allowZero: true }) ? 'ok' : 'error',
+    message: isPercentualFiscalValido(aliquotaIss, { allowZero: true })
+      ? `Aliquota ISS ${aliquotaIss.toFixed(2)}%.`
+      : 'Aliquota ISS invalida. Use percentual entre 0 e 100, como 2,01 ou 2.01.',
+    tag: 'trib/tribMun/pAliq',
+    field: 'servico.aliquota',
+  });
+
+  if (aliquotaMunicipioNumero !== null) {
+    addCheck(checks, {
+      id: 'tributacao-aliquota-municipal',
+      group: 'Tributacao',
+      label: 'Aliquota municipal',
+      status: isPercentualFiscalValido(aliquotaMunicipioNumero, { allowZero: true }) ? 'ok' : 'error',
+      message: isPercentualFiscalValido(aliquotaMunicipioNumero, { allowZero: true })
+        ? `Aliquota municipal ${aliquotaMunicipioNumero.toFixed(2)}%.`
+        : 'Aliquota municipal invalida. Use percentual entre 0 e 100.',
+      tag: 'totTrib/pTotTribMun',
+      field: 'servico.aliquotaMunicipio',
     });
   }
 
@@ -370,14 +396,14 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
     valorMoedaEstrangeira: firstDefined(overrides.valorMoedaEstrangeira) ? asNumber(overrides.valorMoedaEstrangeira) : undefined,
     codigoNbs,
     codigoTributacaoMunicipal,
-    aliquotaMunicipio: aliquotaMunicipio ? asNumber(aliquotaMunicipio) : null,
+    aliquotaMunicipio: aliquotaMunicipioNumero,
     descricao: descricaoFinal,
     cnae: cnaeFinal,
     itemLc,
     itemListaServico: itemLc,
     codigoTribNacional,
     codigoTributacaoNacional: codigoTribNacional,
-    aliquota: overrides.aliquota !== undefined ? asNumber(overrides.aliquota) : 0,
+    aliquota: aliquotaIss,
     issRetido: asBoolean(overrides.issRetido, false),
     tipoTributacao: tipoTributacaoFinal,
     retencoes: overrides.retencoes,

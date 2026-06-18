@@ -146,6 +146,60 @@ body {
   }
 }
 
+@media (max-width: 1280px), (max-height: 760px) {
+  .saas-container {
+    padding: 1rem;
+  }
+
+  .saas-page-header > div {
+    padding-top: 0.85rem;
+    padding-bottom: 0.85rem;
+  }
+
+  .saas-card,
+  .saas-card-soft {
+    border-radius: 1.1rem;
+    box-shadow: 0 8px 22px rgba(15, 23, 42, 0.055);
+  }
+
+  .saas-section-title {
+    font-size: 1.1rem;
+    line-height: 1.45rem;
+  }
+
+  .saas-btn-primary,
+  .saas-btn-secondary {
+    min-height: 2.6rem;
+    padding: 0.65rem 0.95rem;
+  }
+}
+
+@media (max-width: 900px) {
+  .saas-container {
+    padding: 0.85rem;
+  }
+
+  .saas-page-header h1 {
+    font-size: 1.2rem;
+    line-height: 1.4rem;
+  }
+
+  .saas-page-header img {
+    height: 2.2rem;
+    width: 2.2rem;
+    border-radius: 0.9rem;
+  }
+
+  .saas-card,
+  .saas-card-soft {
+    border-radius: 1rem;
+  }
+
+  table {
+    font-size: 0.82rem;
+  }
+}
+
 /* Classes utilitárias para garantir que componentes fiquem escuros */
 .dark .bg-white {
     background-color: var(--card-bg);

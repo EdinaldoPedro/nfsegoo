@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState, useEffect, useRef, ReactNode } from "react";
-import { CheckCircle, ArrowRight, MapPin, Info, Loader2, Zap, Shield, Users, ChevronLeft, ChevronRight, ChevronDown, Briefcase, Calculator, Handshake, RefreshCw, FileDown, LifeBuoy, Bell, ClipboardCheck, Building2 } from "lucide-react";
+import { CheckCircle, ArrowRight, MapPin, Info, Loader2, Zap, Shield, Users, ChevronLeft, ChevronRight, ChevronDown, Briefcase, Calculator, Handshake, RefreshCw, FileDown, LifeBuoy, Bell, ClipboardCheck, Building2, Laptop, Smartphone } from "lucide-react";
 
 // === COMPONENTE DE ANIMAÇÃO DE ROLAGEM (SCROLL REVEAL) ===
 function Reveal({ children, delay = 0, className = "" }: { children: ReactNode, delay?: number, className?: string }) {
@@ -279,7 +279,7 @@ export default function LandingPage() {
             </Reveal>
 
             <Reveal delay={520} className="mt-14">
-                <ProductShowcase />
+                <ProductPresentationShowcase />
             </Reveal>
         </div>
        
@@ -559,7 +559,388 @@ export default function LandingPage() {
 }
 
 // Componentes Visuais de Apoio
+function ProductPresentationShowcase() {
+    const showcases = [
+        {
+            id: 'web',
+            eyebrow: 'Web',
+            title: 'SaaS no navegador',
+            desc: 'Veja a apresentação da plataforma web com dashboard, emissão, clientes, notas, suporte e central de ajuda.',
+            href: '/showcases/web/index.html',
+            preview: '/showcases/web/assets/05-dashboard-cliente.png',
+            icon: Laptop,
+            tone: 'blue',
+            deviceLabel: 'Notebook',
+        },
+        {
+            id: 'mobile',
+            eyebrow: 'Mobile',
+            title: 'Aplicativo no celular',
+            desc: 'Abra a apresentação mobile com as telas do app, jornada de emissão, histórico, clientes e notificações.',
+            href: '/showcases/mobile/index.html',
+            preview: '/showcases/mobile/assets/dashboard.png',
+            icon: Smartphone,
+            tone: 'emerald',
+            deviceLabel: 'Smartphone',
+        },
+    ];
+
+    const [activeShowcase, setActiveShowcase] = useState<(typeof showcases)[number] | null>(null);
+    const [showcaseDoc, setShowcaseDoc] = useState<string | null>(null);
+    const [showcaseError, setShowcaseError] = useState<string | null>(null);
+    const [isLoadingShowcase, setIsLoadingShowcase] = useState(false);
+    const ActiveShowcaseIcon = activeShowcase?.icon;
+
+    useEffect(() => {
+        document.body.style.overflow = '';
+        return () => {
+            document.body.style.overflow = '';
+        };
+    }, []);
+
+    const closeShowcase = () => {
+        setActiveShowcase(null);
+        setShowcaseDoc(null);
+        setShowcaseError(null);
+        setIsLoadingShowcase(false);
+        document.body.style.overflow = '';
+    };
+
+    const openShowcase = async (item: (typeof showcases)[number]) => {
+        setActiveShowcase(item);
+        setShowcaseDoc(null);
+        setShowcaseError(null);
+        setIsLoadingShowcase(true);
+
+        try {
+            const response = await fetch(item.href, { cache: 'no-store' });
+            if (!response.ok) {
+                throw new Error(`Apresentacao indisponivel (${response.status}).`);
+            }
+
+            const html = await response.text();
+            const basePath = item.href.slice(0, item.href.lastIndexOf('/') + 1);
+            const baseHref = `${window.location.origin}${basePath}`;
+            const htmlWithBase = html.replace(/<head>/i, `<head><base href="${baseHref}">`);
+            setShowcaseDoc(htmlWithBase);
+        } catch (error) {
+            setShowcaseError(error instanceof Error ? error.message : 'Nao foi possivel carregar a apresentacao.');
+        } finally {
+            setIsLoadingShowcase(false);
+        }
+    };
+
+    return (
+        <>
+            <div className="relative mx-auto max-w-6xl rounded-[32px] border border-slate-200 bg-white/90 p-5 text-left shadow-2xl shadow-slate-200/70 backdrop-blur">
+                <div className="pointer-events-none absolute inset-x-6 top-0 h-px overflow-hidden">
+                    <div className="h-px w-1/2 bg-blue-500/70 animate-scan-line" />
+                </div>
+
+                <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+                    <div>
+                        <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-600">Experiencia completa</p>
+                        <h2 className="mt-2 text-2xl font-black text-slate-950 md:text-3xl">Escolha como quer visualizar o NFSe Goo</h2>
+                    </div>
+                    <p className="max-w-md text-sm leading-6 text-slate-500">
+                        Uma prévia rápida das telas. Clique para expandir a apresentação HTML completa.
+                    </p>
+                </div>
+
+                <div className="grid gap-5 lg:grid-cols-2">
+                    {showcases.map((item) => {
+                        const Icon = item.icon;
+                        const toneClass = item.tone === 'emerald'
+                            ? 'text-emerald-600 bg-emerald-50 border-emerald-100'
+                            : 'text-blue-600 bg-blue-50 border-blue-100';
+                        const ringClass = item.tone === 'emerald'
+                            ? 'hover:border-emerald-300 hover:shadow-emerald-100'
+                            : 'hover:border-blue-300 hover:shadow-blue-100';
+
+                        return (
+                            <button
+                                key={item.id}
+                                type="button"
+                                onClick={() => openShowcase(item)}
+                                className={`group overflow-hidden rounded-[28px] border border-slate-200 bg-slate-50 text-left shadow-lg shadow-slate-200/60 transition hover:-translate-y-1 hover:shadow-2xl ${ringClass}`}
+                            >
+                                <div className="flex items-center justify-between gap-4 p-5">
+                                    <div className="flex items-center gap-3">
+                                        <span className={`flex h-12 w-12 items-center justify-center rounded-2xl border ${toneClass}`}>
+                                            <Icon size={23} />
+                                        </span>
+                                        <div>
+                                            <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">{item.eyebrow}</p>
+                                            <h3 className="mt-1 text-xl font-black text-slate-950">{item.title}</h3>
+                                        </div>
+                                    </div>
+                                    <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-slate-500 shadow-sm">
+                                        {item.deviceLabel}
+                                    </span>
+                                </div>
+
+                                <div className="px-5 pb-5">
+                                    <p className="min-h-[48px] text-sm leading-6 text-slate-500">{item.desc}</p>
+                                </div>
+
+                                <div className="mx-5 mb-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-inner">
+                                    <img src={item.preview} alt={`Prévia ${item.title}`} className="h-64 w-full object-cover object-top transition duration-500 group-hover:scale-[1.03]" />
+                                </div>
+
+                                <div className="flex items-center justify-between border-t border-slate-200 bg-white px-5 py-4">
+                                    <span className="text-sm font-black text-slate-700">Expandir apresentação</span>
+                                    <span className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-black ${item.tone === 'emerald' ? 'bg-emerald-600 text-white' : 'bg-blue-600 text-white'}`}>
+                                        Abrir <ArrowRight size={16} />
+                                    </span>
+                                </div>
+                            </button>
+                        );
+                    })}
+                </div>
+            </div>
+
+            {activeShowcase && (
+                <div className="fixed inset-0 z-[9999] overflow-hidden rounded-[34px] bg-slate-950/75 p-3 backdrop-blur-sm md:p-6" role="dialog" aria-modal="true">
+                    <div className="mx-auto flex h-full max-w-7xl flex-col overflow-hidden rounded-[28px] border border-white/10 bg-white shadow-2xl">
+                        <div className="flex flex-col gap-3 border-b border-slate-200 bg-white px-4 py-3 md:flex-row md:items-center md:justify-between md:px-5">
+                            <div className="flex items-center gap-3">
+                                <span className={`flex h-10 w-10 items-center justify-center rounded-2xl ${activeShowcase.tone === 'emerald' ? 'bg-emerald-50 text-emerald-600' : 'bg-blue-50 text-blue-600'}`}>
+                                    {ActiveShowcaseIcon && <ActiveShowcaseIcon size={20} />}
+                                </span>
+                                <div>
+                                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">{activeShowcase.eyebrow}</p>
+                                    <h3 className="text-base font-black text-slate-950">{activeShowcase.title}</h3>
+                                </div>
+                            </div>
+                            <div className="flex gap-2">
+                                <a href={activeShowcase.href} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-4 py-2 text-sm font-black text-slate-700 transition hover:bg-slate-50">
+                                    Nova aba
+                                </a>
+                                <button type="button" onClick={closeShowcase} className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 text-xl font-black text-white transition hover:bg-slate-800" aria-label="Fechar apresentação">
+                                    ×
+                                </button>
+                            </div>
+                        </div>
+                        <div className="relative min-h-0 flex-1 bg-white">
+                            {isLoadingShowcase && (
+                                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-white text-slate-500">
+                                    <Loader2 className="animate-spin text-blue-600" size={28} />
+                                    <p className="text-sm font-bold">Carregando apresentação...</p>
+                                </div>
+                            )}
+
+                            {showcaseError && (
+                                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-slate-50 p-8 text-center">
+                                    <p className="text-lg font-black text-slate-950">Não foi possível carregar a apresentação</p>
+                                    <p className="max-w-md text-sm leading-6 text-slate-500">{showcaseError}</p>
+                                    <a href={activeShowcase.href} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-5 py-3 text-sm font-black text-white transition hover:bg-blue-700">
+                                        Abrir em nova aba
+                                    </a>
+                                </div>
+                            )}
+
+                            {showcaseDoc && (
+                                <iframe
+                                    title={`Apresentação ${activeShowcase.title}`}
+                                    srcDoc={showcaseDoc}
+                                    className="h-full min-h-0 w-full bg-white"
+                                />
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+        </>
+    );
+}
+
 function ProductShowcase() {
+    const webNotes = [
+        { cliente: 'Cliente Exemplo LTDA', status: 'AUTORIZADA', valor: 'R$ 2.300,00' },
+        { cliente: 'Pessoa Fisica Exemplo', status: 'CANCELADA', valor: 'R$ 0,01' },
+        { cliente: 'Servico recorrente', status: 'AUTORIZADA', valor: 'R$ 980,00' },
+    ];
+
+    const mobileEvents = [
+        { title: 'Nota autorizada', desc: 'PDF e XML prontos', tone: 'emerald' },
+        { title: 'Rascunho salvo', desc: 'Retome na revisao', tone: 'blue' },
+    ];
+
+    return (
+        <div className="relative mx-auto max-w-6xl rounded-[32px] border border-slate-200 bg-white/90 p-5 text-left shadow-2xl shadow-slate-200/70 backdrop-blur">
+            <div className="pointer-events-none absolute inset-x-6 top-0 h-px overflow-hidden">
+                <div className="h-px w-1/2 bg-blue-500/70 animate-scan-line" />
+            </div>
+
+            <div className="grid items-end gap-8 lg:grid-cols-[1.25fr_0.75fr]">
+                <section className="min-w-0">
+                    <div className="mb-4 flex items-center gap-3">
+                        <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
+                            <Laptop size={22} />
+                        </span>
+                        <div>
+                            <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-600">Web</p>
+                            <h3 className="text-xl font-black text-slate-950">SaaS completo no notebook</h3>
+                        </div>
+                    </div>
+
+                    <div className="relative rounded-[28px] bg-slate-950 p-3 shadow-2xl shadow-blue-900/15">
+                        <div className="absolute left-1/2 top-1.5 h-1.5 w-16 -translate-x-1/2 rounded-full bg-white/20" />
+                        <div className="overflow-hidden rounded-[20px] bg-slate-100">
+                            <div className="flex h-8 items-center gap-2 border-b border-slate-200 bg-white px-4">
+                                <span className="h-2.5 w-2.5 rounded-full bg-red-300" />
+                                <span className="h-2.5 w-2.5 rounded-full bg-amber-300" />
+                                <span className="h-2.5 w-2.5 rounded-full bg-emerald-300" />
+                                <div className="ml-3 h-3 flex-1 rounded-full bg-slate-100" />
+                            </div>
+
+                            <div className="grid min-h-[360px] grid-cols-[170px_minmax(0,1fr)] bg-slate-50">
+                                <aside className="hidden bg-slate-950 p-4 text-white sm:block">
+                                    <div className="flex items-center gap-3">
+                                        <img src="/icons/G.png" alt="NFSeGoo" className="h-9 w-9 rounded-2xl bg-white p-1.5" />
+                                        <div>
+                                            <p className="text-[9px] font-black uppercase tracking-[0.2em] text-blue-300">Dashboard</p>
+                                            <h4 className="text-base font-black">NFSe Goo</h4>
+                                        </div>
+                                    </div>
+
+                                    <div className="mt-7 space-y-3">
+                                        {['Emitir NFS-e', 'Clientes', 'Minhas Notas', 'Suporte'].map((item, index) => (
+                                            <div key={item} className={`rounded-2xl px-4 py-3 text-xs font-bold ${index === 0 ? 'bg-blue-600 text-white' : 'bg-white/5 text-slate-300'}`}>
+                                                {item}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </aside>
+
+                                <div className="col-span-full p-4 sm:col-span-1 sm:p-5">
+                                    <div className="grid gap-4 xl:grid-cols-[1fr_0.92fr]">
+                                        <div className="rounded-3xl bg-blue-600 p-5 text-white shadow-lg shadow-blue-200">
+                                            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-100">Proxima acao</p>
+                                            <h4 className="mt-3 text-xl font-black">Voce ja pode emitir</h4>
+                                            <p className="mt-2 text-xs leading-5 text-blue-50">Cadastro, IBGE e certificado prontos para NFS-e.</p>
+                                            <div className="mt-5 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-xs font-black text-blue-700">
+                                                Emitir nota <ArrowRight size={14} />
+                                            </div>
+                                        </div>
+
+                                        <div className="rounded-3xl border border-slate-200 bg-white p-4">
+                                            <div className="flex items-center justify-between">
+                                                <h4 className="text-base font-black text-slate-900">Prontidao</h4>
+                                                <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700 animate-status-pulse">4/4</span>
+                                            </div>
+                                            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                                                {['Cadastro', 'Certificado', 'IBGE', 'Ambiente'].map((item) => (
+                                                    <div key={item} className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3">
+                                                        <div className="flex items-center gap-2 text-emerald-700">
+                                                            <CheckCircle size={14} />
+                                                            <p className="text-xs font-black">{item}</p>
+                                                        </div>
+                                                        <p className="mt-1 text-[11px] font-medium text-emerald-700/80">OK</p>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="mt-4 rounded-3xl border border-slate-200 bg-white p-4">
+                                        <div className="mb-3 flex items-center justify-between">
+                                            <h4 className="text-base font-black text-slate-900">Minhas notas</h4>
+                                            <span className="text-[11px] font-black text-blue-600">PDF/XML</span>
+                                        </div>
+                                        {webNotes.map((nota) => (
+                                            <div key={nota.cliente} className="grid grid-cols-[1fr_90px_82px] items-center gap-3 border-t border-slate-100 py-3">
+                                                <span className="truncate text-xs font-bold text-slate-700">{nota.cliente}</span>
+                                                <span className={`w-fit rounded-full px-2 py-1 text-[9px] font-black ${nota.status === 'CANCELADA' ? 'bg-slate-100 text-slate-500' : 'bg-emerald-50 text-emerald-700'}`}>
+                                                    {nota.status}
+                                                </span>
+                                                <span className="text-right text-xs font-black text-slate-900">{nota.valor}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="mx-auto h-4 w-[86%] rounded-b-[26px] bg-slate-800 shadow-xl shadow-slate-300/70" />
+                </section>
+
+                <section className="mx-auto w-full max-w-[330px]">
+                    <div className="mb-4 flex items-center gap-3 lg:justify-center">
+                        <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
+                            <Smartphone size={22} />
+                        </span>
+                        <div>
+                            <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-600">Mobile</p>
+                            <h3 className="text-xl font-black text-slate-950">Operacao no celular</h3>
+                        </div>
+                    </div>
+
+                    <div className="relative mx-auto rounded-[42px] bg-slate-950 p-3 shadow-2xl shadow-emerald-900/15">
+                        <div className="absolute left-1/2 top-3 z-10 h-5 w-24 -translate-x-1/2 rounded-full bg-slate-950" />
+                        <div className="overflow-hidden rounded-[32px] bg-slate-50">
+                            <div className="bg-white px-5 pb-4 pt-9">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-3">
+                                        <img src="/icons/G.png" alt="NFSeGoo" className="h-9 w-9 rounded-2xl border border-slate-100 bg-white p-1.5 shadow-sm" />
+                                        <div>
+                                            <p className="text-[9px] font-black uppercase tracking-[0.18em] text-blue-600">NFSe Goo</p>
+                                            <h4 className="text-sm font-black text-slate-950">Meu painel</h4>
+                                        </div>
+                                    </div>
+                                    <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
+                                        <Bell size={17} />
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div className="space-y-3 p-4">
+                                <div className="rounded-3xl bg-blue-600 p-4 text-white shadow-lg shadow-blue-200">
+                                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-100">Hoje</p>
+                                    <h4 className="mt-2 text-lg font-black">Emitir NFS-e</h4>
+                                    <p className="mt-2 text-xs leading-5 text-blue-50">Cadastre, revise e acompanhe tudo pelo app.</p>
+                                    <div className="mt-4 inline-flex rounded-xl bg-white px-4 py-2 text-xs font-black text-blue-700">
+                                        Comecar
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div className="rounded-2xl border border-slate-200 bg-white p-3">
+                                        <p className="text-[10px] font-black uppercase text-slate-400">Notas</p>
+                                        <p className="mt-2 text-2xl font-black text-slate-950">12</p>
+                                    </div>
+                                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3">
+                                        <p className="text-[10px] font-black uppercase text-emerald-700">Status</p>
+                                        <p className="mt-2 text-sm font-black text-emerald-700">Pronto</p>
+                                    </div>
+                                </div>
+
+                                {mobileEvents.map((event) => (
+                                    <div key={event.title} className={`rounded-2xl border p-3 ${event.tone === 'emerald' ? 'border-emerald-200 bg-emerald-50' : 'border-blue-200 bg-blue-50'}`}>
+                                        <div className="flex items-start gap-3">
+                                            <CheckCircle size={17} className={event.tone === 'emerald' ? 'text-emerald-600' : 'text-blue-600'} />
+                                            <div>
+                                                <p className="text-sm font-black text-slate-900">{event.title}</p>
+                                                <p className="mt-1 text-xs text-slate-500">{event.desc}</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+
+                                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3">
+                                    <p className="text-[10px] font-black uppercase tracking-[0.16em] text-amber-700">Aviso</p>
+                                    <p className="mt-1 text-sm font-black text-slate-900">Certificado vence em 15 dias</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </div>
+    );
+}
+
+function ProductShowcaseLegacy() {
     const checklist = [
         { label: 'Cadastro da empresa', status: 'OK' },
         { label: 'Certificado A1', status: 'Vence em 15 dias' },
