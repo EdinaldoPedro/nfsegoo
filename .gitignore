@@ -12,6 +12,10 @@
 
 # testing
 /coverage
+/tmp/pdfs/
+
+# artefatos locais gerados para validar o DANFSe
+/output/pdf/
 
 # next.js
 /.next/
