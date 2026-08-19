@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import zlib from 'zlib';
-import { NfsePortalDownloader } from '@/app/services/pdf/NfsePortalDownloader';
+import { generateDanfsePdf } from '@/app/services/pdf/DanfseGenerator';
 import { createLog } from '@/app/services/logger';
 import { forbidden, getAuthenticatedUser, unauthorized } from '@/app/utils/api-middleware';
 import { hasEmpresaAccess } from '@/app/utils/access-control';
@@ -35,30 +35,22 @@ export async function POST(request: Request) {
       });
     }
 
-    const empresa = nota.empresa;
-    if (!empresa.certificadoA1 || !empresa.senhaCertificado) {
-      return NextResponse.json({ error: 'Empresa sem certificado digital configurado.' }, { status: 400 });
+    const xmlOficial = nota.xmlAutorizadoBase64 || nota.xmlBase64;
+    if (!xmlOficial) {
+      return NextResponse.json({ error: 'XML autorizado ausente para gerar o DANFSe.' }, { status: 400 });
     }
 
-    const downloader = new NfsePortalDownloader();
     let pdfBuffer: Buffer;
     try {
-      pdfBuffer = await downloader.downloadPdfOficialComRetry(
-        nota.chaveAcesso,
-        empresa.certificadoA1,
-        empresa.senhaCertificado,
-        empresa.id,
-        {
-          attempts: 5,
-          retryDelayMs: 1500,
-          requestTimeoutMs: 40000,
-        },
-      );
+      pdfBuffer = await generateDanfsePdf(xmlOficial, {
+        cancelada: nota.status === 'CANCELADA',
+        eventoCancelamentoXml: nota.xmlCancelamentoEventoBase64,
+      });
     } catch (error: any) {
       await createLog({
         level: 'ALERTA',
-        action: 'FALHA_BOT_PDF_MANUAL',
-        message: 'O usuario tentou baixar o PDF, mas o robo nao conseguiu capturar o arquivo.',
+        action: 'FALHA_GERACAO_DANFSE_MANUAL',
+        message: 'O usuario tentou baixar o DANFSe, mas o PDF nao pode ser gerado a partir do XML.',
         details: {
           erro: error.message,
           origem: 'menu_cliente',
@@ -70,9 +62,9 @@ export async function POST(request: Request) {
       });
 
       return NextResponse.json({
-        error: 'O Portal Nacional esta instavel e nao entregou o PDF agora. Tente baixar novamente em alguns instantes.',
+        error: 'Nao foi possivel gerar o DANFSe a partir do XML autorizado.',
         details: error.message,
-      }, { status: 504 });
+      }, { status: 422 });
     }
 
     const pdfGzip = zlib.gzipSync(pdfBuffer);
@@ -85,8 +77,8 @@ export async function POST(request: Request) {
 
     await createLog({
       level: 'INFO',
-      action: 'PDF_CAPTURADO_MANUAL',
-      message: 'PDF Oficial capturado por tentativa manual do usuario.',
+      action: 'DANFSE_GERADO_MANUAL',
+      message: 'DANFSe gerado localmente a partir do XML autorizado.',
       details: { notaId: nota.id, numeroNota: nota.numero },
       empresaId: nota.empresaId,
       vendaId: nota.vendaId || undefined,

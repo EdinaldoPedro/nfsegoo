@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import zlib from 'zlib';
-import { NfsePortalDownloader } from '@/app/services/pdf/NfsePortalDownloader';
+import { generateDanfsePdf } from '@/app/services/pdf/DanfseGenerator';
 import { createLog } from '@/app/services/logger';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 import { isSupportRole } from '@/app/utils/access-control';
@@ -57,10 +57,6 @@ export async function POST(request: Request, { params }: { params: { id: string 
       });
     }
 
-    if (!venda.empresa.certificadoA1 || !venda.empresa.senhaCertificado) {
-      return NextResponse.json({ error: 'Empresa sem certificado digital configurado.' }, { status: 400 });
-    }
-
     await createLog({
       level: 'INFO',
       action: 'REPROCESSAMENTO_PDF_INICIADO',
@@ -74,18 +70,11 @@ export async function POST(request: Request, { params }: { params: { id: string 
       vendaId: venda.id,
     });
 
-    const downloader = new NfsePortalDownloader();
-    const pdfBuffer = await downloader.downloadPdfOficialComRetry(
-      nota.chaveAcesso,
-      venda.empresa.certificadoA1,
-      venda.empresa.senhaCertificado,
-      venda.empresa.id,
-      {
-        attempts: 10,
-        retryDelayMs: 2000,
-        requestTimeoutMs: 40000,
-      },
-    );
+    const xmlOficial = nota.xmlAutorizadoBase64 || nota.xmlBase64;
+    const pdfBuffer = await generateDanfsePdf(xmlOficial!, {
+      cancelada: nota.status === 'CANCELADA',
+      eventoCancelamentoXml: nota.xmlCancelamentoEventoBase64,
+    });
 
     const pdfBase64 = zlib.gzipSync(pdfBuffer).toString('base64');
     await prisma.notaFiscal.update({
@@ -95,8 +84,8 @@ export async function POST(request: Request, { params }: { params: { id: string 
 
     await createLog({
       level: 'INFO',
-      action: 'PDF_CAPTURADO_REPROCESSAMENTO',
-      message: 'PDF Oficial salvo por reprocessamento manual da bancada.',
+      action: 'DANFSE_GERADO_REPROCESSAMENTO',
+      message: 'DANFSe gerado a partir do XML autorizado pela bancada.',
       details: {
         notaId: nota.id,
         numeroNota: nota.numero,
@@ -115,8 +104,8 @@ export async function POST(request: Request, { params }: { params: { id: string 
   } catch (error: any) {
     await createLog({
       level: 'ALERTA',
-      action: 'FALHA_BOT_PDF_REPROCESSAMENTO',
-      message: 'O robo nao conseguiu baixar o PDF no reprocessamento manual.',
+      action: 'FALHA_GERACAO_DANFSE_REPROCESSAMENTO',
+      message: 'O DANFSe nao pode ser gerado no reprocessamento manual.',
       details: {
         erro: error.message,
         vendaId: params.id,
@@ -125,8 +114,8 @@ export async function POST(request: Request, { params }: { params: { id: string 
     });
 
     return NextResponse.json({
-      error: 'O Portal Nacional nao entregou o PDF agora. Tente novamente em alguns instantes.',
+      error: 'Nao foi possivel gerar o DANFSe a partir do XML autorizado.',
       details: error.message,
-    }, { status: 504 });
+    }, { status: 422 });
   }
 }

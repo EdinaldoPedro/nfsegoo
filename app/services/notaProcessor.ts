@@ -1,6 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { EmissorFactory } from '@/app/services/emissor/factories/EmissorFactory';
-import { NfsePortalDownloader } from '@/app/services/pdf/NfsePortalDownloader';
+import { generateDanfsePdf } from '@/app/services/pdf/DanfseGenerator';
 import { createLog } from '@/app/services/logger';
 import zlib from 'zlib';
 
@@ -50,37 +50,28 @@ export async function processarRetornoNota(notaId: string, empresaId: string, ve
             });
         }
 
-        // B. PDF VIA BOT
-        await createLog({ level: 'INFO', action: 'BOT_PDF_INICIADO', message: 'Baixando PDF Oficial...', empresaId, vendaId });
+        // B. DANFSe gerado a partir do XML autorizado
+        await createLog({ level: 'INFO', action: 'GERACAO_DANFSE_INICIADA', message: 'Gerando DANFSe a partir do XML autorizado...', empresaId, vendaId });
         
         try {
-            const downloader = new NfsePortalDownloader();
-            const pdfBuffer = await downloader.downloadPdfOficialComRetry(
-                nota.chaveAcesso,
-                nota.empresa.certificadoA1!,
-                nota.empresa.senhaCertificado!,
-                nota.empresa.id,
-                {
-                    attempts: 5,
-                    retryDelayMs: 1500,
-                    requestTimeoutMs: 40000,
-                }
-            );
+            const xmlOficial = consultaRes.xmlDistribuicao || nota.xmlAutorizadoBase64 || nota.xmlBase64;
+            if (!xmlOficial) throw new Error('XML autorizado ausente para gerar o DANFSe.');
+            const pdfBuffer = await generateDanfsePdf(xmlOficial);
             const pdfGzip = zlib.gzipSync(pdfBuffer);
             const pdfBase64 = pdfGzip.toString('base64');
 
             await prisma.notaFiscal.update({ where: { id: notaId }, data: { pdfBase64: pdfBase64 } });
             await createLog({ 
                 level: 'INFO', 
-                action: 'PDF_CAPTURADO', 
-                message: 'PDF Oficial salvo com sucesso!', 
+                action: 'DANFSE_GERADO',
+                message: 'DANFSe gerado e salvo com sucesso.',
                 empresaId, 
                 vendaId,
                 details: { pdf: pdfBase64 } 
             });
 
         } catch (errBot: any) {
-            await createLog({ level: 'ALERTA', action: 'FALHA_BOT_PDF', message: 'O robô não conseguiu baixar o PDF agora.', details: { erro: errBot.message }, empresaId, vendaId });
+            await createLog({ level: 'ALERTA', action: 'FALHA_GERACAO_DANFSE', message: 'O DANFSe não pôde ser gerado a partir do XML.', details: { erro: errBot.message }, empresaId, vendaId });
         }
 
         // C. FINALIZAÇÃO
@@ -130,26 +121,20 @@ export async function processarCancelamentoNota(notaId: string, empresaId: strin
             });
         }
 
-        // 2. SUBSTITUIÇÃO DO PDF (BOT)
+        // 2. SUBSTITUIÇÃO DO DANFSe
         await createLog({
-            level: 'INFO', action: 'BOT_PDF_CANCELAMENTO',
-            message: 'Acionando robô para baixar novo PDF com tarja de CANCELADO...',
+            level: 'INFO', action: 'GERACAO_DANFSE_CANCELAMENTO',
+            message: 'Gerando DANFSe com indicação de cancelamento...',
             empresaId, vendaId
         });
 
         try {
-            const downloader = new NfsePortalDownloader();
-            const pdfBuffer = await downloader.downloadPdfOficialComRetry(
-                nota.chaveAcesso,
-                nota.empresa.certificadoA1!,
-                nota.empresa.senhaCertificado!,
-                nota.empresa.id,
-                {
-                    attempts: 5,
-                    retryDelayMs: 1500,
-                    requestTimeoutMs: 40000,
-                }
-            );
+            const xmlOficial = (nota as any).xmlAutorizadoBase64 || nota.xmlBase64 || consultaRes.xmlDistribuicao;
+            if (!xmlOficial) throw new Error('XML autorizado ausente para gerar o DANFSe cancelado.');
+            const pdfBuffer = await generateDanfsePdf(xmlOficial, {
+                cancelada: true,
+                eventoCancelamentoXml: consultaRes.xmlDistribuicao || (nota as any).xmlCancelamentoEventoBase64,
+            });
 
             // Compacta e Substitui
             const pdfGzip = zlib.gzipSync(pdfBuffer);
@@ -161,16 +146,16 @@ export async function processarCancelamentoNota(notaId: string, empresaId: strin
             });
 
             await createLog({
-                level: 'INFO', action: 'PDF_ATUALIZADO',
-                message: 'PDF atualizado com a tarja de CANCELAMENTO.',
+                level: 'INFO', action: 'DANFSE_CANCELADO_GERADO',
+                message: 'DANFSe atualizado com a indicação de cancelamento.',
                 empresaId, vendaId,
                 details: { pdf: pdfBase64 } 
             });
 
         } catch (errBot: any) {
             await createLog({
-                level: 'ALERTA', action: 'FALHA_BOT_CANCELAMENTO',
-                message: 'Não foi possível baixar o PDF Cancelado. O arquivo antigo permanece.',
+                level: 'ALERTA', action: 'FALHA_GERACAO_DANFSE_CANCELAMENTO',
+                message: 'Não foi possível gerar o DANFSe cancelado. O arquivo antigo permanece.',
                 details: { erro: errBot.message },
                 empresaId, vendaId
             });

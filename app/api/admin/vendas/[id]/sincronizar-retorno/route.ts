@@ -3,7 +3,7 @@ import zlib from 'zlib';
 import { EmissorFactory } from '@/app/services/emissor/factories/EmissorFactory';
 import { createLog } from '@/app/services/logger';
 import { notifyFiscalEvent } from '@/app/services/notificationService';
-import { NfsePortalDownloader } from '@/app/services/pdf/NfsePortalDownloader';
+import { generateDanfsePdf } from '@/app/services/pdf/DanfseGenerator';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 import { isSupportRole } from '@/app/utils/access-control';
 import { prisma } from '@/app/utils/prisma';
@@ -170,18 +170,12 @@ export async function POST(request: Request, { params }: { params: { id: string 
       if (consultaRes.situacao === 'CANCELADA' || !nota.pdfBase64) {
         dadosNota.pdfBase64 = null;
         try {
-          const downloader = new NfsePortalDownloader();
-          const pdfBuffer = await downloader.downloadPdfOficialComRetry(
-            nota.chaveAcesso,
-            venda.empresa.certificadoA1,
-            venda.empresa.senhaCertificado,
-            venda.empresa.id,
-            {
-              attempts: 5,
-              retryDelayMs: 1500,
-              requestTimeoutMs: 40000,
-            },
-          );
+          const xmlOficial = nota.xmlAutorizadoBase64 || nota.xmlBase64;
+          if (!xmlOficial) throw new Error('XML autorizado ausente para gerar o DANFSe cancelado.');
+          const pdfBuffer = await generateDanfsePdf(xmlOficial, {
+            cancelada: true,
+            eventoCancelamentoXml: consultaRes.xmlDistribuicao || nota.xmlCancelamentoEventoBase64,
+          });
 
           dadosNota.pdfBase64 = zlib.gzipSync(pdfBuffer).toString('base64');
           pdfAtualizado = true;
