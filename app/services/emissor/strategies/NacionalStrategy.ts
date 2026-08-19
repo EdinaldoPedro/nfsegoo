@@ -8,6 +8,8 @@ import { NacionalAdapter } from '../adapters/NacionalAdapter';
 import { ICanonicalRps } from '../interfaces/ICanonicalRps';
 import { MeiHandler } from '../handlers/MeiHandler';
 import { SimplesNacionalHandler } from '../handlers/SimplesNacionalHandler';
+import { assertValidDpsXml } from '../validation/DpsPreflightValidator';
+import { validateNationalAddress } from '@/app/utils/customer-address';
 
 export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
     
@@ -20,18 +22,33 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
 
     async executar(dados: IDadosEmissao): Promise<IResultadoEmissao> {
         // === 0. SANITIZAÇÃO DE DADOS ===
-        const omitirEnderecoTomador = dados.tomador.tipo === 'PF' && dados.tomador.semEndereco === true;
+        const paisTomador = String(dados.tomador.pais || '').trim().toUpperCase();
+        const tomadorExterior = dados.tomador.tipo === 'EXT' || (!!paisTomador && !['BR', 'BRASIL', 'BRAZIL'].includes(paisTomador));
 
-        if (!omitirEnderecoTomador && (!dados.tomador.numero || dados.tomador.numero.trim() === '')) {
-            dados.tomador.numero = 'S/N';
-        }
-        if (!omitirEnderecoTomador && (!dados.tomador.bairro || dados.tomador.bairro.trim() === '')) {
-            dados.tomador.bairro = 'Bairro';
-        }
-        
         // Garante que CEP tenha apenas números (EXCETO SE FOR EXTERIOR)
-        if (dados.tomador.cep && dados.tomador.tipo !== 'EXT') {
+        if (dados.tomador.cep && !tomadorExterior) {
             dados.tomador.cep = dados.tomador.cep.replace(/\D/g, '');
+        }
+        if (!tomadorExterior) {
+            const endereco = validateNationalAddress(dados.tomador);
+            if (!endereco.valid) {
+                const prefixo = dados.tomador.tipo === 'PF' ? 'Endereco obrigatorio da pessoa fisica' : 'Endereco do tomador incompleto';
+                throw new Error(`${prefixo}: ${endereco.message}`);
+            }
+            dados.tomador.semEndereco = false;
+        }
+        if (tomadorExterior) {
+            const camposExterior = [
+                ['pais', dados.tomador.pais],
+                ['moeda', dados.tomador.moeda],
+                ['codigo postal', dados.tomador.cep],
+                ['cidade', dados.tomador.cidade],
+                ['estado/provincia/regiao', dados.tomador.uf],
+                ['logradouro', dados.tomador.logradouro],
+            ].filter(([, value]) => !String(value || '').trim());
+            if (camposExterior.length) {
+                throw new Error(`Cadastro do tomador exterior incompleto: ${camposExterior.map(([field]) => field).join(', ')}.`);
+            }
         }
 
         const { prestador, tomador, servico, numeroDPS, serieDPS, ambiente, dataCompetencia } = dados as any;
@@ -55,6 +72,26 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
 
             // 3. Obtenção dos Dados Tributários
             const dadosTributarios = await handler.getDadosTributarios(servico, prestador);
+            const servicoCanonico: any = { ...dadosTributarios, ...servico };
+
+            // O payload da tela/admin nao pode reintroduzir campos dispensados para MEI.
+            // NBS e IBS/CBS permanecem porque aparecem no XML oficial autorizado do cenario de referencia.
+            if (regime === 'MEI') {
+                servicoCanonico.codigoTributacaoMunicipal = undefined;
+                servicoCanonico.aliquotaAplicada = 0;
+                servicoCanonico.aliquotaMunicipio = undefined;
+                servicoCanonico.valorIss = 0;
+                servicoCanonico.issRetido = false;
+                servicoCanonico.tipoTributacao = '1';
+                servicoCanonico.tributosFederaisDevidos = undefined;
+                servicoCanonico.retencoes = {
+                    pis: { valor: 0, retido: false },
+                    cofins: { valor: 0, retido: false },
+                    inss: { valor: 0, retido: false },
+                    ir: { valor: 0, retido: false },
+                    csll: { valor: 0, retido: false },
+                };
+            }
 
             // 4. Montagem do Objeto Canônico
             const rps: ICanonicalRps = {
@@ -63,6 +100,8 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
                     documento: prestador.documento,
                     inscricaoMunicipal: prestador.inscricaoMunicipal,
                     regimeTributario: prestador.regimeTributario as any,
+                    telefone: prestador.telefone,
+                    email: prestador.email,
                     endereco: {
                         codigoIbge: prestador.codigoIbge,
                         uf: prestador.uf
@@ -86,7 +125,7 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
                     nif: tomador.nif,
                     pais: tomador.pais,
                     moeda: tomador.moeda,
-                    semEndereco: tomador.semEndereco,
+                    semEndereco: false,
 
                     endereco: {
                         cep: tomador.cep,
@@ -100,22 +139,22 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
                     }
                 },
                 // === MERGE DO SERVIÇO (Garante que valorMoedaEstrangeira e codigoNbs não sejam perdidos) ===
-                servico: {
-                    ...dadosTributarios,
-                    ...servico
-                } as ICanonicalRps['servico'],
+                servico: servicoCanonico as ICanonicalRps['servico'],
                 
                 meta: {
                     ambiente: ambiente,
                     serie: serieDPS,
                     numero: numeroDPS,
                     dataEmissao: new Date(),
-                    dataCompetencia: dataCompetencia
+                    dataCompetencia: dataCompetencia,
+                    layoutVersion: (dados as any).layoutVersion || '1.01',
+                    fiscalSnapshot: (dados as any).fiscalSnapshot,
                 }
             };
 
             // 5. Adapter: Transformar RPS em XML
             const xmlGerado = this.adapter.toXml(rps);
+            assertValidDpsXml(xmlGerado);
 
             // 6. Assinar e Transmitir
             const idDps = `DPS${this.cleanString(rps.prestador.endereco.codigoIbge).padStart(7,'0')}2${this.cleanString(rps.prestador.documento).padStart(14,'0')}${this.cleanString(rps.meta.serie).padStart(5,'0')}${String(rps.meta.numero).padStart(15,'0')}`;

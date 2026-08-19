@@ -388,6 +388,7 @@ export default function ConfiguracoesEmpresa() {
                           <option value="MEI">Microempreendedor Individual (MEI)</option>
                           <option value="SIMPLES">Simples Nacional</option>
                           <option value="LUCRO_PRESUMIDO">Lucro Presumido</option>
+                          <option value="LUCRO_REAL">Lucro Real</option>
                       </select>
                   </div>
               </div>

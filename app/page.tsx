@@ -123,7 +123,7 @@ export default function LandingPage() {
   const productFeatures = [
       { title: "Emissão em poucos passos", desc: "Cadastre o tomador, revise os dados e transmita sua NFS-e com uma experiência guiada do início ao fim.", icon: Zap, corTexto: "text-amber-600", corFundo: "bg-amber-100" },
       { title: "Retomada inteligente", desc: "Se o Portal pedir algum ajuste, seus dados ficam salvos para continuar de onde parou, sem redigitar tudo.", icon: RefreshCw, corTexto: "text-blue-600", corFundo: "bg-blue-100" },
-      { title: "Clientes sempre prontos", desc: "Organize tomadores PJ, PF, exterior e PF sem endereço para emitir com mais agilidade no dia a dia.", icon: Users, corTexto: "text-indigo-600", corFundo: "bg-indigo-100" },
+      { title: "Clientes sempre prontos", desc: "Organize tomadores PJ, PF com endereço validado e clientes do exterior para emitir com mais agilidade no dia a dia.", icon: Users, corTexto: "text-indigo-600", corFundo: "bg-indigo-100" },
       { title: "Arquivos fiscais organizados", desc: "PDF, XML, eventos e cancelamentos ficam acessíveis no mesmo lugar, sempre que você precisar.", icon: FileDown, corTexto: "text-emerald-600", corFundo: "bg-emerald-100" },
       { title: "Ajuda dentro da plataforma", desc: "Guias rápidos e visuais mostram o caminho certo para cada rotina, sem depender de tentativa e erro.", icon: LifeBuoy, corTexto: "text-sky-600", corFundo: "bg-sky-100" },
       { title: "Certificado A1 monitorado", desc: "Acompanhe validade, envio e uso do certificado digital com alertas antes de virar urgência.", icon: Shield, corTexto: "text-rose-600", corFundo: "bg-rose-100" },

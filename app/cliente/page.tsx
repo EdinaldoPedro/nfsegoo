@@ -10,6 +10,7 @@ import { useRouter } from 'next/navigation';
 import { useDialog } from '@/app/contexts/DialogContext';
 import { validarCPF } from '@/app/utils/cpf';
 import AppHeader from '@/components/AppHeader';
+import { hasCompleteNationalAddress, validateNationalAddress } from '@/app/utils/customer-address';
 
 // Lista de Países para Padronização (ISO 3166 / BACEN simplificado) - SEM ACENTOS PARA SEGURANÇA
 const LISTA_PAISES = [
@@ -35,6 +36,7 @@ interface Cliente {
   cep?: string;
   logradouro?: string;
   numero?: string;
+  complemento?: string;
   bairro?: string;
   codigoIbge?: string;
   pais?: string;
@@ -70,7 +72,6 @@ export default function MeusClientes() {
 
   const isPJ = clienteAtual.tipo === 'PJ';
   const isEdicaoPJ = !!clienteAtual.id && clienteAtual.tipo === 'PJ';
-  const isEnderecoDispensado = clienteAtual.tipo === 'PF' && clienteAtual.semEndereco === true;
 
   // --- CARREGAMENTO ---
   const carregarClientes = async () => {
@@ -106,7 +107,7 @@ export default function MeusClientes() {
       const lower = termoBusca.toLowerCase();
       const filtrados = clientes.filter(c => 
         c.nome.toLowerCase().includes(lower) || 
-        c.documento.includes(lower) || 
+        String(c.documento || '').includes(lower) ||
         (c.nomeFantasia && c.nomeFantasia.toLowerCase().includes(lower))
       );
       setFilteredClientes(filtrados);
@@ -145,7 +146,7 @@ export default function MeusClientes() {
 
   const abrirEdicao = (cliente: Cliente) => {
     setNomePfBloqueado(false);
-    setClienteAtual({ ...cliente, pais: cliente.pais || 'Brasil' });
+    setClienteAtual({ ...cliente, pais: cliente.pais || 'Brasil', semEndereco: false });
     setModalStep('FORMULARIO'); 
     setIsFormOpen(true);
   }
@@ -175,7 +176,7 @@ export default function MeusClientes() {
                 const dados = await res.json();
                 if (dados) {
                     setNomePfBloqueado(false);
-                    setClienteAtual(prev => ({ ...prev, ...dados }));
+                    setClienteAtual(prev => ({ ...prev, ...dados, semEndereco: false }));
                     dialog.showAlert({ type: 'info', title: 'Cliente Encontrado', description: 'Dados carregados da sua base.' });
                     return true;
                 }
@@ -213,16 +214,19 @@ export default function MeusClientes() {
           }
 
           if (dados?.nome) {
+              const validadoNoPortal = dados.origem === 'PORTAL_NACIONAL';
               setClienteAtual(prev => ({
                   ...prev,
                   tipo: 'PF',
                   nome: dados.nome,
               }));
-              setNomePfBloqueado(dados.origem === 'PORTAL_NACIONAL');
+              setNomePfBloqueado(validadoNoPortal);
               dialog.showAlert({
-                  type: 'success',
-                  title: 'CPF validado no Portal Nacional',
-                  description: 'Nome oficial carregado automaticamente.',
+                  type: validadoNoPortal ? 'success' : 'info',
+                  title: validadoNoPortal ? 'CPF validado no Portal Nacional' : 'Cliente encontrado na sua base',
+                  description: validadoNoPortal
+                      ? 'Nome oficial carregado automaticamente.'
+                      : 'Os dados ja cadastrados foram carregados.',
               });
               return true;
           }
@@ -373,7 +377,7 @@ export default function MeusClientes() {
   };
 
   const handleBuscarCep = async () => {
-      if (clienteAtual.tipo === 'EXT' || isEnderecoDispensado) return;
+      if (clienteAtual.tipo === 'EXT') return;
       const cepLimpo = clienteAtual.cep?.replace(/\D/g, '');
       if (!cepLimpo || cepLimpo.length !== 8) return; 
 
@@ -402,25 +406,13 @@ export default function MeusClientes() {
     }
     if (!clienteAtual.nome) return dialog.showAlert("Nome é obrigatório.");
     
-    if (clienteAtual.tipo === 'PF' && !isEnderecoDispensado) {
-      const camposObrigatorios = [
-        ['CEP', clienteAtual.cep],
-        ['logradouro', clienteAtual.logradouro],
-        ['numero', clienteAtual.numero],
-        ['bairro', clienteAtual.bairro],
-        ['cidade', clienteAtual.cidade],
-        ['UF', clienteAtual.uf],
-        ['codigo IBGE', clienteAtual.codigoIbge],
-      ];
-      const faltantes = camposObrigatorios
-        .filter(([, valor]) => !String(valor || '').trim())
-        .map(([label]) => label);
-
-      if (faltantes.length > 0) {
+    if (clienteAtual.tipo === 'PF') {
+      const endereco = validateNationalAddress(clienteAtual);
+      if (!endereco.valid) {
         return dialog.showAlert({
           type: 'warning',
-          title: 'Endereco incompleto',
-          description: `Informe ${faltantes.join(', ')} ou marque a opcao de emitir sem informar endereco.`,
+          title: 'Endereço obrigatório para PF',
+          description: `${endereco.message} Complete o cadastro antes de emitir.`,
         });
       }
     }
@@ -441,16 +433,7 @@ export default function MeusClientes() {
         },
         body: JSON.stringify({
             ...clienteAtual,
-            ...(isEnderecoDispensado ? {
-                cep: '',
-                logradouro: '',
-                numero: '',
-                complemento: '',
-                bairro: '',
-                cidade: '',
-                uf: '',
-                codigoIbge: '',
-            } : {}),
+            semEndereco: false,
             nomeValidadoPortal: nomePfBloqueado,
         })
       });
@@ -658,33 +641,7 @@ export default function MeusClientes() {
                                         <h4 className="font-bold text-sm text-slate-700 flex items-center gap-2">
                                             <MapPin size={16}/> Endereco {clienteAtual.tipo === 'EXT' && '(Exterior)'}
                                         </h4>
-                                        {clienteAtual.tipo === 'PF' && (
-                                            <label className="flex shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-blue-700">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={clienteAtual.semEndereco === true}
-                                                    disabled={formularioBloqueado}
-                                                    onChange={(e) => {
-                                                        const marcado = e.target.checked;
-                                                        setClienteAtual(prev => ({
-                                                            ...prev,
-                                                            semEndereco: marcado,
-                                                            ...(marcado ? {
-                                                                cep: '',
-                                                                logradouro: '',
-                                                                numero: '',
-                                                                bairro: '',
-                                                                cidade: '',
-                                                                uf: '',
-                                                                codigoIbge: '',
-                                                            } : {}),
-                                                        }));
-                                                    }}
-                                                    className="h-4 w-4 accent-blue-600"
-                                                />
-                                                Emitir sem informar endereco
-                                            </label>
-                                        )}
+                                        {clienteAtual.tipo === 'PF' && <span className="text-xs font-bold text-amber-700">Obrigatório para emissão</span>}
                                     </div>
                                     {buscandoDados && (
                                         <div className="mb-3 flex items-center gap-2 text-xs font-medium text-blue-600">
@@ -692,11 +649,6 @@ export default function MeusClientes() {
                                         </div>
                                     )}
 
-                                    {isEnderecoDispensado ? (
-                                        <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm font-medium text-blue-800">
-                                            A DPS sera enviada somente com CPF e nome do tomador, sem o bloco de endereco.
-                                        </div>
-                                    ) : (
                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                         {clienteAtual.tipo === 'EXT' && (
                                             <>
@@ -789,7 +741,6 @@ export default function MeusClientes() {
                                             />
                                         </div>
                                     </div>
-                                    )}
                                 </div>
                             </form>
                         )}
@@ -866,6 +817,11 @@ export default function MeusClientes() {
                                             {cliente.tipo === 'EXT' ? <Globe size={10}/> : cliente.tipo === 'PJ' ? <Building2 size={10}/> : <User size={10}/>}
                                             {cliente.tipo}
                                         </span>
+                                        {cliente.tipo === 'PF' && !hasCompleteNationalAddress(cliente) && (
+                                            <span className="mt-1 flex w-fit items-center gap-1 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-bold text-amber-800">
+                                                <MapPin size={10}/> Endereço pendente
+                                            </span>
+                                        )}
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600">
                                         {cliente.cidade ? `${cliente.cidade}/${cliente.uf}` : <span className="text-slate-300 italic">--</span>}

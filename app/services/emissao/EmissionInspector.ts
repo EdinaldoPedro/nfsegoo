@@ -6,6 +6,8 @@ import { SimplesNacionalHandler } from '@/app/services/emissor/handlers/SimplesN
 import { ICanonicalRps } from '@/app/services/emissor/interfaces/ICanonicalRps';
 import { stripEmpresaSecrets } from '@/app/utils/safe-data';
 import { isPercentualFiscalValido, parseDecimalInput } from '@/app/utils/number-format';
+import { resolveFiscalDecision } from '@/app/services/emissor/fiscal/FiscalRuleEngine';
+import { validateNationalAddress } from '@/app/utils/customer-address';
 
 type CheckStatus = 'ok' | 'warn' | 'error' | 'info';
 
@@ -147,14 +149,26 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
   const prestadorRegimeEspecial = optionalText(firstDefined(overrides.regimeEspecialTributacao, prestador.regimeEspecialTributacao));
   const tipoTributacaoFinal = asText(firstDefined(overrides.tipoTributacao, prestador.tipoTributacaoPadrao, '1'), '1');
 
-  const tomadorTipo = asText(firstDefined(overrides.tomadorTipo, tomador.tipo), tomador.tipo || '');
+  const cadastroPf = String(tomador.tipo || '').toUpperCase() === 'PF';
+  const tomadorTipo = cadastroPf ? 'PF' : asText(firstDefined(overrides.tomadorTipo, tomador.tipo), tomador.tipo || '');
   const tomadorPais = asText(firstDefined(overrides.tomadorPais, tomador.pais), tomador.pais || '');
-  const tomadorSemEndereco = asBoolean(overrides.tomadorSemEndereco, (tomador as any).semEndereco === true);
   const isExterior = tomadorTipo === 'EXT' || (tomadorPais && tomadorPais !== 'Brasil' && tomadorPais !== 'BR');
-  const omitirEnderecoTomador = tomadorTipo === 'PF' && tomadorSemEndereco === true;
   const tomadorDocumento = asText(firstDefined(overrides.tomadorDocumento, tomador.documento), tomador.documento || '');
   const tomadorNome = asText(firstDefined(overrides.tomadorNome, tomador.nome), tomador.nome || '');
-  const tomadorCodigoIbge = omitirEnderecoTomador ? '' : asText(firstDefined(overrides.tomadorCodigoIbge, tomador.codigoIbge, '9999999'), '9999999');
+  const enderecoCadastroOuOverride = (override: any, cadastro: any) => cadastroPf
+    ? asText(cadastro)
+    : asText(firstDefined(override, cadastro), '');
+  const enderecoTomador = {
+    cep: enderecoCadastroOuOverride(overrides.tomadorCep, tomador.cep),
+    logradouro: enderecoCadastroOuOverride(overrides.tomadorLogradouro, tomador.logradouro),
+    numero: enderecoCadastroOuOverride(overrides.tomadorNumero, tomador.numero),
+    complemento: cadastroPf ? optionalText(tomador.complemento) : optionalText(firstDefined(overrides.tomadorComplemento, tomador.complemento)),
+    bairro: enderecoCadastroOuOverride(overrides.tomadorBairro, tomador.bairro),
+    cidade: enderecoCadastroOuOverride(overrides.tomadorCidade, tomador.cidade),
+    codigoIbge: enderecoCadastroOuOverride(overrides.tomadorCodigoIbge, tomador.codigoIbge),
+    uf: enderecoCadastroOuOverride(overrides.tomadorUf, tomador.uf),
+  };
+  const enderecoNacional = !isExterior ? validateNationalAddress(enderecoTomador) : null;
 
   addCheck(checks, {
     id: 'prestador-cnpj',
@@ -227,25 +241,26 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
     field: 'cliente.nome',
   });
 
-  if (!isExterior && !omitirEnderecoTomador) {
+  if (!isExterior) {
+    addCheck(checks, {
+      id: 'tomador-endereco',
+      group: 'Tomador',
+      label: cadastroPf ? 'Endereço obrigatório da PF' : 'Endereço do tomador',
+      status: enderecoNacional?.valid ? 'ok' : 'error',
+      message: enderecoNacional?.valid
+        ? 'Endereço completo será enviado no bloco toma/end.'
+        : `${enderecoNacional?.message || 'Endereço incompleto.'} Atualize o cadastro do cliente antes de emitir.`,
+      tag: 'toma/end',
+      field: 'cliente.endereco',
+    });
     addCheck(checks, {
       id: 'tomador-ibge',
       group: 'Tomador',
       label: 'Codigo IBGE do tomador',
-      status: onlyDigits(tomadorCodigoIbge).length >= 7 ? 'ok' : 'warn',
-      message: onlyDigits(tomadorCodigoIbge).length >= 7 ? `IBGE ${tomadorCodigoIbge}.` : 'Sem IBGE do tomador. O sistema usara fallback se a emissao permitir.',
+      status: onlyDigits(enderecoTomador.codigoIbge).length === 7 ? 'ok' : 'error',
+      message: onlyDigits(enderecoTomador.codigoIbge).length === 7 ? `IBGE ${enderecoTomador.codigoIbge}.` : 'Codigo IBGE do tomador ausente; o sistema nao inventara uma localidade fiscal.',
       tag: 'toma/end/endNac/cMun',
       field: 'cliente.codigoIbge',
-    });
-  } else if (omitirEnderecoTomador) {
-    addCheck(checks, {
-      id: 'tomador-sem-endereco',
-      group: 'Tomador',
-      label: 'Endereco do tomador',
-      status: 'ok',
-      message: 'PF marcada para emissao sem endereco; o bloco toma/end sera omitido.',
-      tag: 'toma',
-      field: 'cliente.semEndereco',
     });
   }
 
@@ -279,10 +294,28 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
   });
 
   const infoEstatica = getTributacaoPorCnae(cnaeFinal);
-  const regraGlobal = cnaeFinal ? await prisma.globalCnae.findUnique({ where: { codigo: cnaeFinal } }) : null;
+  const competenciaRegra = new Date(`${String(overrides.dataCompetencia || new Date().toISOString().slice(0, 10)).slice(0, 10)}T12:00:00.000Z`);
+  const regraGlobal = cnaeFinal ? await prisma.globalCnae.findFirst({
+    where: {
+      codigo: cnaeFinal,
+      AND: [
+        { OR: [{ inicioVigencia: null }, { inicioVigencia: { lte: competenciaRegra } }] },
+        { OR: [{ fimVigencia: null }, { fimVigencia: { gte: competenciaRegra } }] },
+      ],
+    },
+  }) : null;
   const regraMunicipal = cnaeFinal
     ? await prisma.tributacaoMunicipal.findFirst({
-        where: { cnae: cnaeFinal, codigoIbge: prestador.codigoIbge || '' },
+        where: {
+          cnae: cnaeFinal,
+          codigoIbge: prestador.codigoIbge || '',
+          ativo: true,
+          AND: [
+            { OR: [{ inicioVigencia: null }, { inicioVigencia: { lte: competenciaRegra } }] },
+            { OR: [{ fimVigencia: null }, { fimVigencia: { gte: competenciaRegra } }] },
+          ],
+        },
+        orderBy: [{ prioridade: 'desc' }, { updatedAt: 'desc' }],
       })
     : null;
 
@@ -297,7 +330,8 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
   const codigoNbsResolvido = regraMunicipal?.exigeNbs ? (regraGlobal as any)?.codigoNbs || cnaePrincipal?.codigoNbs || '' : '';
   const codigoNbs = optionalText(firstDefined(overrides.codigoNbs, codigoNbsResolvido));
   const aliquotaMunicipio = firstDefined(overrides.aliquotaMunicipio, regraMunicipal?.aliquotaIss);
-  const aliquotaIss = (overrides.aliquota !== undefined ? asNumber(overrides.aliquota) : 0) || asNumber(prestador.aliquotaPadrao);
+  const isMei = String(prestador.regimeTributario || '').toUpperCase() === 'MEI';
+  const aliquotaIss = isMei ? 0 : (overrides.aliquota !== undefined ? asNumber(overrides.aliquota) : 0) || asNumber(prestador.aliquotaPadrao);
   const aliquotaMunicipioNumero = aliquotaMunicipio ? asNumber(aliquotaMunicipio) : null;
 
   addCheck(checks, {
@@ -314,8 +348,10 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
     id: 'tributacao-municipal',
     group: 'Tributacao',
     label: 'Regra municipal',
-    status: regraMunicipal || codigoTributacaoMunicipal ? 'ok' : 'warn',
-    message: regraMunicipal || codigoTributacaoMunicipal ? `cTribMun ${codigoTributacaoMunicipal || 'nao informado pela regra'}.` : 'Sem regra municipal especifica. Sera usado apenas o mapeamento nacional/local padrao.',
+    status: isMei || regraMunicipal || codigoTributacaoMunicipal ? 'ok' : 'warn',
+    message: isMei
+      ? 'cTribMun dispensado e omitido para MEI.'
+      : regraMunicipal || codigoTributacaoMunicipal ? `cTribMun ${codigoTributacaoMunicipal || 'nao informado pela regra'}.` : 'Sem regra municipal especifica. Sera usado apenas o mapeamento nacional/local padrao.',
     tag: 'serv/cServ/cTribMun',
     field: 'tributacaoMunicipal.codigoTributacaoMunicipal',
   });
@@ -378,17 +414,8 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
     nif: optionalText(firstDefined(overrides.tomadorNif, tomador.nif)),
     pais: optionalText(tomadorPais),
     moeda: optionalText(firstDefined(overrides.tomadorMoeda, tomador.moeda)),
-    semEndereco: omitirEnderecoTomador,
-    endereco: {
-      cep: omitirEnderecoTomador ? '' : asText(firstDefined(overrides.tomadorCep, tomador.cep), ''),
-      logradouro: omitirEnderecoTomador ? '' : asText(firstDefined(overrides.tomadorLogradouro, tomador.logradouro), ''),
-      numero: omitirEnderecoTomador ? '' : asText(firstDefined(overrides.tomadorNumero, tomador.numero), ''),
-      complemento: optionalText(firstDefined(overrides.tomadorComplemento, tomador.complemento)),
-      bairro: omitirEnderecoTomador ? '' : asText(firstDefined(overrides.tomadorBairro, tomador.bairro), ''),
-      cidade: omitirEnderecoTomador ? '' : asText(firstDefined(overrides.tomadorCidade, tomador.cidade), ''),
-      codigoIbge: tomadorCodigoIbge,
-      uf: omitirEnderecoTomador ? '' : asText(firstDefined(overrides.tomadorUf, tomador.uf), ''),
-    },
+    semEndereco: false,
+    endereco: enderecoTomador,
   };
 
   const servico = {
@@ -409,10 +436,61 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
     retencoes: overrides.retencoes,
   };
 
+  const fiscalDecision = await resolveFiscalDecision({
+    cnae: cnaeFinal,
+    itemLc,
+    codigoIbge: asText(firstDefined(overrides.localPrestacaoIbge, prestador.codigoIbge), ''),
+    regimeTributario: prestador.regimeTributario || 'MEI',
+    dataCompetencia: overrides.dataCompetencia,
+    valor: valorFinal,
+    codigoNbs,
+    codigoTributacaoMunicipal,
+    tomadorTipo,
+    tomadorPais,
+    retencoes: overrides.retencoes,
+    tributosFederaisDevidos: (overrides as any).tributosFederaisDevidos,
+    ibscbs: (overrides as any).ibscbs,
+  });
+
+  for (const issue of fiscalDecision.issues) {
+    addCheck(checks, {
+      id: `motor-${issue.code.toLowerCase()}`,
+      group: 'Motor fiscal',
+      label: issue.code,
+      status: issue.severity === 'ERROR' ? 'error' : 'warn',
+      message: issue.userAction ? `${issue.message} ${issue.userAction}` : issue.message,
+    });
+  }
+  servico.codigoNbs = fiscalDecision.codigoNbs || servico.codigoNbs;
+  servico.codigoTributacaoMunicipal = isMei ? undefined : fiscalDecision.codigoTributacaoMunicipal || servico.codigoTributacaoMunicipal;
+  (servico as any).aliquotaMunicipio = isMei ? undefined : fiscalDecision.aliquotaIssMunicipal ?? servico.aliquotaMunicipio;
+  (servico as any).aliquotaTotTribSN = fiscalDecision.aliquotaTotTribSN;
+  (servico as any).aliquotaTotTribFederal = fiscalDecision.aliquotaTotTribFederal;
+  (servico as any).cstPisCofins = fiscalDecision.cstPisCofins;
+  (servico as any).retencoes = fiscalDecision.retencoes;
+  (servico as any).tributosFederaisDevidos = fiscalDecision.tributosFederaisDevidos;
+  (servico as any).ibscbs = fiscalDecision.ibscbs;
+  (servico as any).dataCompetencia = overrides.dataCompetencia;
+
   const handler = String(prestador.regimeTributario).toUpperCase() === 'MEI'
     ? new MeiHandler()
     : new SimplesNacionalHandler();
   const dadosTributarios = await handler.getDadosTributarios(servico, prestador);
+  const servicoCanonico: any = { ...dadosTributarios, ...servico };
+  if (isMei) {
+    servicoCanonico.codigoTributacaoMunicipal = undefined;
+    servicoCanonico.aliquotaAplicada = 0;
+    servicoCanonico.aliquotaMunicipio = undefined;
+    servicoCanonico.valorIss = 0;
+    servicoCanonico.issRetido = false;
+    servicoCanonico.tipoTributacao = '1';
+    servicoCanonico.tributosFederaisDevidos = undefined;
+    servicoCanonico.retencoes = {
+      pis: { valor: 0, retido: false }, cofins: { valor: 0, retido: false },
+      inss: { valor: 0, retido: false }, ir: { valor: 0, retido: false },
+      csll: { valor: 0, retido: false },
+    };
+  }
 
   const rps: ICanonicalRps = {
     prestador: {
@@ -432,16 +510,15 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
       },
     },
     tomador: tomadorAdaptado,
-    servico: {
-      ...dadosTributarios,
-      ...servico,
-    } as ICanonicalRps['servico'],
+    servico: servicoCanonico as ICanonicalRps['servico'],
     meta: {
       ambiente: prestador.ambiente as 'HOMOLOGACAO' | 'PRODUCAO',
       serie: serieFinal,
       numero: numeroDPSFinal,
       dataEmissao: new Date(),
       dataCompetencia: overrides.dataCompetencia,
+      layoutVersion: fiscalDecision.layoutVersion,
+      fiscalSnapshot: fiscalDecision,
     },
   };
 
@@ -480,12 +557,13 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
       cnae: cnaeFinal,
       itemLc,
       codigoTributacaoNacional: codigoTribNacional,
-      codigoTributacaoMunicipal: codigoTributacaoMunicipal || null,
+      codigoTributacaoMunicipal: fiscalDecision.codigoTributacaoMunicipal || null,
       exigeNbs: !!regraMunicipal?.exigeNbs,
       codigoNbs: codigoNbs || null,
       ambiente: prestador.ambiente,
       serieDPS: serieFinal,
       numeroDPS: numeroDPSFinal,
+      fiscalDecision,
     },
   };
 }

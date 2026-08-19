@@ -8,6 +8,8 @@ import { resolveEmpresaContexto } from '@/app/utils/access-control';
 import { notifyFiscalEvent } from '@/app/services/notificationService';
 import { getMensagemErroFiscalCliente } from '@/app/utils/fiscal-error-messages';
 import { isPercentualFiscalValido, parseDecimalInput } from '@/app/utils/number-format';
+import { assertFiscalDecision, resolveFiscalDecision } from '@/app/services/emissor/fiscal/FiscalRuleEngine';
+import { getPfAddressRequiredMessage, PF_ADDRESS_REQUIRED_CODE } from '@/app/utils/customer-address';
 
 const prisma = new PrismaClient();
 const emissaoJobModel = (prisma as any).emissaoJob;
@@ -141,7 +143,6 @@ function normalizarPayload(body: any) {
     tomadorNif,
     tomadorPais,
     tomadorMoeda,
-    tomadorSemEndereco,
     tomadorCep,
     tomadorLogradouro,
     tomadorNumero,
@@ -186,7 +187,7 @@ function normalizarPayload(body: any) {
     tomadorNif,
     tomadorPais,
     tomadorMoeda,
-    tomadorSemEndereco,
+    tomadorSemEndereco: false,
     tomadorCep,
     tomadorLogradouro,
     tomadorNumero,
@@ -197,6 +198,18 @@ function normalizarPayload(body: any) {
     tomadorCodigoIbge,
     idempotencyKey,
   };
+}
+
+function assertTomadorPfComEndereco(tomador: any) {
+  if (String(tomador?.tipo || '').toUpperCase() !== 'PF') return;
+  const message = getPfAddressRequiredMessage(tomador);
+  if (!message) return;
+
+  throw Object.assign(new Error(message), {
+    status: 400,
+    code: PF_ADDRESS_REQUIRED_CODE,
+    userAction: message,
+  });
 }
 
 function montarErroFinal(resultado: any, dpsFinal: number, tentativasEmissao: number) {
@@ -212,6 +225,7 @@ function montarErroFinal(resultado: any, dpsFinal: number, tentativasEmissao: nu
   } else if (erroFiscalCliente) {
     customUserAction = erroFiscalCliente.message;
     draftReasonType = erroFiscalCliente.reasonType;
+    draftEligible = erroFiscalCliente.needsSupport !== true;
   } else if (errorStr.includes('inscrição municipal') || errorStr.includes('inscriÃ§Ã£o municipal') || errorStr.includes('im ') || errorStr.includes('e0180') || errorStr.includes('e0183') || errorStr.includes('e0184')) {
     customUserAction = 'Sua Inscricao Municipal esta ausente ou incorreta. Por favor, acesse as Configuracoes da Empresa e atualize o numero da sua I.M.';
     draftEligible = true;
@@ -280,6 +294,8 @@ export async function criarEmissaoJob(params: CriarEmissaoJobParams): Promise<Cr
 
   const tomador = await prisma.cliente.findUnique({ where: { id: payload.clienteId } });
   if (!tomador) throw Object.assign(new Error('Tomador (Cliente) nao encontrado.'), { status: 400 });
+  // Valida antes da reserva do credito do plano: cadastro incompleto nao consome emissao.
+  assertTomadorPfComEndereco(tomador);
 
   let billingUserId = await resolveBillingUserId({
     empresaId: empresaIdAlvo,
@@ -589,16 +605,21 @@ async function registrarFalhaInesperadaJob(jobId: string, error: any) {
   const creditReserved = payload._creditReserved === true;
   const attempts = jobAtual.attempts || 1;
   const maxAttempts = jobAtual.maxAttempts || 5;
-  const erroTemporario = isErroTemporarioPortal({ motivo: error?.message, erros: [error?.message, error?.code] }) || !!jobAtual.reservedDpsNumero;
+  const erroDeterministico = Number(error?.status) === 400 || [
+    'NBS_OBRIGATORIO', 'CODIGO_MUNICIPAL_OBRIGATORIO', 'IBSCBS_CLASSIFICACAO_PENDENTE',
+    'IBSCBS_CLASSE_INCOMPATIVEL', 'DPS_PREFLIGHT_INVALIDA',
+  ].includes(String(error?.code || '')) || String(error?.code || '').startsWith('RETENCAO_');
+  const erroTemporario = !erroDeterministico && isErroTemporarioPortal({ motivo: error?.message, erros: [error?.message, error?.code] });
   const erroPayload = {
     error: 'Falha inesperada no processamento da emissao.',
     motivo: error?.message || 'Erro interno no motor de emissao.',
     code: error?.code,
+    fiscalIssues: error?.fiscalIssues || error?.validationIssues,
     stack: process.env.NODE_ENV === 'production' ? undefined : error?.stack,
     temporario: erroTemporario,
-    userAction: erroTemporario
+    userAction: error?.userAction || (erroTemporario
       ? 'A emissao teve uma falha tecnica ou retorno incerto do Portal. O sistema fara nova tentativa preservando a mesma DPS.'
-      : 'A emissao falhou antes da transmissao fiscal. Revise os dados e tente novamente.',
+      : 'A emissao falhou antes da transmissao fiscal. Revise os dados e tente novamente.'),
   };
 
   if (erroTemporario && attempts < maxAttempts) {
@@ -692,6 +713,8 @@ async function executarEmissao(job: any) {
   if (!user || !prestador || !tomador || !venda) {
     throw new Error('Job de emissao sem usuario, empresa, tomador ou venda vinculado.');
   }
+  // Protege jobs antigos que tenham sido enfileirados antes da obrigatoriedade.
+  assertTomadorPfComEndereco(tomador);
 
   const valorFloat = parseNumero(payload.valor);
   const serieFinal = payload.serieDPS || prestador.serieDPS || '900';
@@ -729,7 +752,16 @@ async function executarEmissao(job: any) {
     if ((infoEstatica as any).codigoNbs) nbsEncontrado = (infoEstatica as any).codigoNbs;
   }
 
-  const regraGlobal = await prisma.globalCnae.findUnique({ where: { codigo: cnaeFinal } });
+  const dataCompetenciaRegra = new Date(`${String(payload.dataCompetencia || new Date().toISOString().slice(0, 10)).slice(0, 10)}T12:00:00.000Z`);
+  const regraGlobal = await prisma.globalCnae.findFirst({
+    where: {
+      codigo: cnaeFinal,
+      AND: [
+        { OR: [{ inicioVigencia: null }, { inicioVigencia: { lte: dataCompetenciaRegra } }] },
+        { OR: [{ fimVigencia: null }, { fimVigencia: { gte: dataCompetenciaRegra } }] },
+      ],
+    },
+  });
   if (regraGlobal) {
     if (regraGlobal.itemLc) itemLc = regraGlobal.itemLc;
     if (regraGlobal.codigoTributacaoNacional) codigoTribNacional = regraGlobal.codigoTributacaoNacional.replace(/\D/g, '');
@@ -740,7 +772,13 @@ async function executarEmissao(job: any) {
     where: {
       cnae: cnaeFinal,
       codigoIbge: prestador.codigoIbge || '',
+      ativo: true,
+      AND: [
+        { OR: [{ inicioVigencia: null }, { inicioVigencia: { lte: dataCompetenciaRegra } }] },
+        { OR: [{ fimVigencia: null }, { fimVigencia: { gte: dataCompetenciaRegra } }] },
+      ],
     },
+    orderBy: [{ prioridade: 'desc' }, { updatedAt: 'desc' }],
   });
 
   if (regraMunicipal?.exigeNbs && nbsEncontrado) {
@@ -750,8 +788,35 @@ async function executarEmissao(job: any) {
   codigoTribNacional = optionalString(firstDefined(payload.codigoTributacaoNacional, payload.codigoTribNacional, codigoTribNacional))?.replace(/\D/g, '') || codigoTribNacional;
   itemLc = optionalString(firstDefined(payload.itemLc, itemLc)) || itemLc;
   codigoNbs = optionalString(firstDefined(payload.codigoNbs, codigoNbs)) || '';
-  const codigoTributacaoMunicipal = optionalString(firstDefined(payload.codigoTributacaoMunicipal, regraMunicipal?.codigoTributacaoMunicipal));
-  const aliquotaMunicipio = firstDefined(payload.aliquotaMunicipio, regraMunicipal?.aliquotaIss);
+  let codigoTributacaoMunicipal = optionalString(firstDefined(payload.codigoTributacaoMunicipal, regraMunicipal?.codigoTributacaoMunicipal));
+  let aliquotaMunicipio = firstDefined(payload.aliquotaMunicipio, regraMunicipal?.aliquotaIss);
+  const cadastroPf = String(tomador.tipo || '').toUpperCase() === 'PF';
+  const tomadorTipo = cadastroPf ? 'PF' : optionalString(firstDefined(payload.tomadorTipo, tomador.tipo)) || tomador.tipo;
+  const tomadorPais = optionalString(firstDefined(payload.tomadorPais, tomador.pais)) || tomador.pais;
+  const fiscalDecision = await resolveFiscalDecision({
+    cnae: cnaeFinal,
+    itemLc,
+    codigoIbge: optionalString(firstDefined(payload.localPrestacaoIbge, prestador.codigoIbge)) || '',
+    regimeTributario: prestador.regimeTributario || 'MEI',
+    dataCompetencia: payload.dataCompetencia,
+    valor: valorFloat,
+    codigoNbs,
+    codigoTributacaoMunicipal,
+    tomadorTipo,
+    tomadorPais: tomadorPais || undefined,
+    retencoes: payload.retencoes,
+    tributosFederaisDevidos: payload.tributosFederaisDevidos,
+    ibscbs: payload.ibscbs,
+  });
+  assertFiscalDecision(fiscalDecision);
+  codigoNbs = fiscalDecision.codigoNbs || codigoNbs;
+  const regimePrestador = String(prestador.regimeTributario || '').toUpperCase();
+  codigoTributacaoMunicipal = regimePrestador === 'MEI'
+    ? undefined
+    : fiscalDecision.codigoTributacaoMunicipal || codigoTributacaoMunicipal;
+  aliquotaMunicipio = regimePrestador === 'MEI'
+    ? undefined
+    : firstDefined(payload.aliquotaMunicipio, fiscalDecision.aliquotaIssMunicipal, regraMunicipal?.aliquotaIss);
   const aliquotaIss = payload.aliquota ? parseNumero(payload.aliquota) : 0;
   const aliquotaIssEfetiva = aliquotaIss || parseNumero(prestador.aliquotaPadrao) || 0;
   const aliquotaMunicipioNumero = aliquotaMunicipio ? parseNumero(aliquotaMunicipio) : null;
@@ -779,9 +844,9 @@ async function executarEmissao(job: any) {
     codigoIbge: optionalString(firstDefined(payload.localPrestacaoIbge, prestador.codigoIbge)) || prestador.codigoIbge,
   };
 
-  const tomadorTipo = optionalString(firstDefined(payload.tomadorTipo, tomador.tipo)) || tomador.tipo;
-  const tomadorPais = optionalString(firstDefined(payload.tomadorPais, tomador.pais)) || tomador.pais;
-  const semEnderecoTomador = tomadorTipo === 'PF' && parseBoolean(payload.tomadorSemEndereco, (tomador as any).semEndereco === true);
+  const enderecoCadastroOuOverride = (override: any, cadastro: any) => cadastroPf
+    ? optionalString(cadastro) || ''
+    : optionalString(firstDefined(override, cadastro)) || '';
   const tomadorAdaptado = {
     ...tomador,
     razaoSocial: optionalString(firstDefined(payload.tomadorNome, tomador.nome)) || tomador.nome,
@@ -790,28 +855,28 @@ async function executarEmissao(job: any) {
     inscricaoMunicipal: optionalString(firstDefined(payload.tomadorInscricaoMunicipal, tomador.inscricaoMunicipal)),
     email: optionalString(firstDefined(payload.tomadorEmail, tomador.email)),
     telefone: optionalString(firstDefined(payload.tomadorTelefone, tomador.telefone)),
-    codigoIbge: semEnderecoTomador ? '' : optionalString(firstDefined(payload.tomadorCodigoIbge, tomador.codigoIbge, '9999999')) || '9999999',
+    codigoIbge: enderecoCadastroOuOverride(payload.tomadorCodigoIbge, tomador.codigoIbge),
     tipo: tomadorTipo,
     nif: optionalString(firstDefined(payload.tomadorNif, tomador.nif)),
     pais: tomadorPais,
     moeda: optionalString(firstDefined(payload.tomadorMoeda, tomador.moeda)),
-    semEndereco: semEnderecoTomador,
-    cep: semEnderecoTomador ? '' : optionalString(firstDefined(payload.tomadorCep, tomador.cep)) || '',
-    logradouro: semEnderecoTomador ? '' : optionalString(firstDefined(payload.tomadorLogradouro, tomador.logradouro)) || '',
-    numero: semEnderecoTomador ? '' : optionalString(firstDefined(payload.tomadorNumero, tomador.numero)) || '',
-    complemento: optionalString(firstDefined(payload.tomadorComplemento, tomador.complemento)),
-    bairro: semEnderecoTomador ? '' : optionalString(firstDefined(payload.tomadorBairro, tomador.bairro)) || '',
-    cidade: semEnderecoTomador ? '' : optionalString(firstDefined(payload.tomadorCidade, tomador.cidade)) || '',
-    uf: semEnderecoTomador ? '' : optionalString(firstDefined(payload.tomadorUf, tomador.uf)) || '',
+    semEndereco: false,
+    cep: enderecoCadastroOuOverride(payload.tomadorCep, tomador.cep),
+    logradouro: enderecoCadastroOuOverride(payload.tomadorLogradouro, tomador.logradouro),
+    numero: enderecoCadastroOuOverride(payload.tomadorNumero, tomador.numero),
+    complemento: cadastroPf ? optionalString(tomador.complemento) : optionalString(firstDefined(payload.tomadorComplemento, tomador.complemento)),
+    bairro: enderecoCadastroOuOverride(payload.tomadorBairro, tomador.bairro),
+    cidade: enderecoCadastroOuOverride(payload.tomadorCidade, tomador.cidade),
+    uf: enderecoCadastroOuOverride(payload.tomadorUf, tomador.uf),
     endereco: {
-      cep: semEnderecoTomador ? '' : optionalString(firstDefined(payload.tomadorCep, tomador.cep)) || '',
-      logradouro: semEnderecoTomador ? '' : optionalString(firstDefined(payload.tomadorLogradouro, tomador.logradouro)) || '',
-      numero: semEnderecoTomador ? '' : optionalString(firstDefined(payload.tomadorNumero, tomador.numero)) || '',
-      complemento: optionalString(firstDefined(payload.tomadorComplemento, tomador.complemento)),
-      bairro: semEnderecoTomador ? '' : optionalString(firstDefined(payload.tomadorBairro, tomador.bairro)) || '',
-      cidade: semEnderecoTomador ? '' : optionalString(firstDefined(payload.tomadorCidade, tomador.cidade)) || '',
-      codigoIbge: semEnderecoTomador ? '' : optionalString(firstDefined(payload.tomadorCodigoIbge, tomador.codigoIbge, '9999999')) || '9999999',
-      uf: semEnderecoTomador ? '' : optionalString(firstDefined(payload.tomadorUf, tomador.uf)) || '',
+      cep: enderecoCadastroOuOverride(payload.tomadorCep, tomador.cep),
+      logradouro: enderecoCadastroOuOverride(payload.tomadorLogradouro, tomador.logradouro),
+      numero: enderecoCadastroOuOverride(payload.tomadorNumero, tomador.numero),
+      complemento: cadastroPf ? optionalString(tomador.complemento) : optionalString(firstDefined(payload.tomadorComplemento, tomador.complemento)),
+      bairro: enderecoCadastroOuOverride(payload.tomadorBairro, tomador.bairro),
+      cidade: enderecoCadastroOuOverride(payload.tomadorCidade, tomador.cidade),
+      codigoIbge: enderecoCadastroOuOverride(payload.tomadorCodigoIbge, tomador.codigoIbge),
+      uf: enderecoCadastroOuOverride(payload.tomadorUf, tomador.uf),
     },
   };
 
@@ -825,6 +890,9 @@ async function executarEmissao(job: any) {
       codigoNbs,
       codigoTributacaoMunicipal,
       aliquotaMunicipio: aliquotaMunicipioNumero,
+      aliquotaTotTribSN: fiscalDecision.aliquotaTotTribSN,
+      aliquotaTotTribFederal: fiscalDecision.aliquotaTotTribFederal,
+      cstPisCofins: fiscalDecision.cstPisCofins,
       descricao: payload.descricao,
       cnae: cnaeFinal,
       itemLc,
@@ -834,13 +902,23 @@ async function executarEmissao(job: any) {
       aliquota: aliquotaIss,
       issRetido: parseBoolean(payload.issRetido, false),
       tipoTributacao: tipoTributacao || '1',
-      retencoes: payload.retencoes,
+      retencoes: fiscalDecision.retencoes,
+      tributosFederaisDevidos: fiscalDecision.tributosFederaisDevidos,
+      ibscbs: fiscalDecision.ibscbs,
+      dataCompetencia: payload.dataCompetencia,
     },
     ambiente: prestadorEmissao.ambiente as 'HOMOLOGACAO' | 'PRODUCAO',
     numeroDPS: dpsFinal,
     serieDPS: serieFinal,
     dataCompetencia: payload.dataCompetencia,
+    layoutVersion: fiscalDecision.layoutVersion,
+    fiscalSnapshot: fiscalDecision,
   };
+
+  await emissaoJobModel.update({
+    where: { id: job.id },
+    data: { fiscalSnapshotJson: JSON.stringify(fiscalDecision) },
+  });
 
   const strategy = EmissorFactory.getStrategy(prestador);
   let resultado: any;
@@ -1010,6 +1088,7 @@ async function executarEmissao(job: any) {
       protocolo: resultado.notaGov!.protocolo,
       xmlBase64: resultado.notaGov!.xml,
       xmlAutorizadoBase64: resultado.notaGov!.xml,
+      fiscalSnapshotJson: JSON.stringify(fiscalDecision),
       cnae: cnaeFinal,
       dataEmissao: new Date(),
     } as any,

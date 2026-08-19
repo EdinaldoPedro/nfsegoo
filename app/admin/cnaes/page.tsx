@@ -22,7 +22,8 @@ export default function AdminCnaes() {
   }, [page, termoBusca]);
 
   const carregar = (pagina: number, busca: string) => {
-    fetch(`/api/admin/cnaes?page=${pagina}&limit=${limit}&search=${busca}`, { headers: {} })
+    const token = localStorage.getItem('token');
+    fetch(`/api/admin/cnaes?page=${pagina}&limit=${limit}&search=${busca}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
       .then(res => {
         setCnaes(res.data || []);
@@ -33,21 +34,44 @@ export default function AdminCnaes() {
   };
 
   const handleSave = async () => {
-    const payloadToSave = { ...editing, aliquotaCrsf: editing.retemCrsf ? editing.aliquotaCrsf : null, aliquotaIr: editing.retemIr ? editing.aliquotaIr : null };
-    const res = await fetch('/api/admin/cnaes', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payloadToSave) });
+    const pis = editing.aliquotaPisRetencao === '' || editing.aliquotaPisRetencao == null ? 0.65 : Number(editing.aliquotaPisRetencao);
+    const cofins = editing.aliquotaCofinsRetencao === '' || editing.aliquotaCofinsRetencao == null ? 3 : Number(editing.aliquotaCofinsRetencao);
+    const csll = editing.aliquotaCsllRetencao === '' || editing.aliquotaCsllRetencao == null ? 1 : Number(editing.aliquotaCsllRetencao);
+    const payloadToSave = {
+      ...editing,
+      modoRetencoes: editing.modoRetencoes || 'SUGERIR',
+      aliquotaPisRetencao: editing.retemCrsf ? pis : editing.aliquotaPisRetencao,
+      aliquotaCofinsRetencao: editing.retemCrsf ? cofins : editing.aliquotaCofinsRetencao,
+      aliquotaCsllRetencao: editing.retemCrsf ? csll : editing.aliquotaCsllRetencao,
+      aliquotaCrsf: editing.retemCrsf ? Number((pis + cofins + csll).toFixed(2)) : null,
+      valorMinimoRetencaoCrsf: editing.retemCrsf && (editing.valorMinimoRetencaoCrsf === '' || editing.valorMinimoRetencaoCrsf == null) ? 10.01 : editing.valorMinimoRetencaoCrsf,
+      aliquotaIr: editing.retemIr ? editing.aliquotaIr : null,
+      valorMinimoRetencaoIr: editing.retemIr && (editing.valorMinimoRetencaoIr === '' || editing.valorMinimoRetencaoIr == null) ? 10.01 : editing.valorMinimoRetencaoIr,
+    };
+    const token = localStorage.getItem('token');
+    const res = await fetch('/api/admin/cnaes', { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(payloadToSave) });
     if (res.ok) {
       setEditing(null);
       carregar(page, termoBusca);
       dialog.showAlert({ type: 'success', description: 'Tributação atualizada!' });
     } else {
-      dialog.showAlert({ type: 'danger', description: 'Erro ao salvar.' });
+      const data = await res.json().catch(() => null);
+      dialog.showAlert({ type: 'danger', description: data?.error || 'Erro ao salvar.' });
     }
   };
 
   const handleToggleRetencao = (campoBooleano: string, campoAliquota: string, valorPadrao: number) => {
     setEditing((prev: any) => {
       const isAtivando = !prev[campoBooleano];
-      return { ...prev, [campoBooleano]: isAtivando, [campoAliquota]: isAtivando ? valorPadrao : null };
+      const next = { ...prev, [campoBooleano]: isAtivando, [campoAliquota]: isAtivando ? valorPadrao : null };
+      if (campoBooleano === 'retemCrsf' && isAtivando) {
+        next.aliquotaPisRetencao = prev.aliquotaPisRetencao ?? 0.65;
+        next.aliquotaCofinsRetencao = prev.aliquotaCofinsRetencao ?? 3;
+        next.aliquotaCsllRetencao = prev.aliquotaCsllRetencao ?? 1;
+        next.valorMinimoRetencaoCrsf = prev.valorMinimoRetencaoCrsf ?? 10.01;
+      }
+      if (campoBooleano === 'retemIr' && isAtivando) next.valorMinimoRetencaoIr = prev.valorMinimoRetencaoIr ?? 10.01;
+      return next;
     });
   };
 
@@ -100,14 +124,45 @@ export default function AdminCnaes() {
               <div>
                 <h4 className="mb-3 text-sm font-black uppercase text-slate-500">Regras de retenção</h4>
                 <div className="space-y-3">
+                  <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
+                    <label className="mb-1 block text-xs font-black uppercase text-blue-700">Comportamento padrão na emissão</label>
+                    <select className={inputBase} value={editing.modoRetencoes || 'SUGERIR'} onChange={e => setEditing({ ...editing, modoRetencoes: e.target.value })}>
+                      <option value="SUGERIR">Exibir aplicáveis desmarcadas</option>
+                      <option value="AUTOMATICO">Marcar aplicáveis por padrão</option>
+                    </select>
+                    <p className="mt-2 text-xs leading-5 text-blue-700">O operador sempre poderá desmarcar. Para PF e exterior, o servidor zera as retenções independentemente desta escolha.</p>
+                  </div>
                   <button type="button" onClick={() => setEditing({ ...editing, temRetencaoInss: !editing.temRetencaoInss })} className={`w-full rounded-2xl border p-4 text-left transition ${editing.temRetencaoInss ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}><p className="font-black">Reter INSS?</p><p className="text-sm opacity-75">11% calculado automaticamente no app.</p></button>
                   <div className={`rounded-2xl border p-4 ${editing.retemCrsf ? 'border-purple-200 bg-purple-50' : 'border-slate-200 bg-white'}`}>
-                    <div className="flex items-center justify-between gap-4"><button type="button" onClick={() => handleToggleRetencao('retemCrsf', 'aliquotaCrsf', 4.65)} className="text-left"><p className="font-black text-slate-800">Reter CRSF?</p><p className="text-sm text-slate-500">PIS/COFINS/CSLL.</p></button>{editing.retemCrsf && <div className="relative w-28"><Percent className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} /><input type="number" step="0.01" className={`${inputBase} pl-8 text-center`} value={editing.aliquotaCrsf || ''} onChange={e => setEditing({ ...editing, aliquotaCrsf: e.target.value })} /></div>}</div>
+                    <div className="flex items-center justify-between gap-4"><button type="button" onClick={() => handleToggleRetencao('retemCrsf', 'aliquotaCrsf', 4.65)} className="text-left"><p className="font-black text-slate-800">Reter CRSF?</p><p className="text-sm text-slate-500">PIS/COFINS/CSLL.</p></button>{editing.retemCrsf && <span className="rounded-xl bg-white px-3 py-2 text-sm font-black text-purple-700 ring-1 ring-purple-200">Total {(Number(editing.aliquotaPisRetencao ?? 0.65) + Number(editing.aliquotaCofinsRetencao ?? 3) + Number(editing.aliquotaCsllRetencao ?? 1)).toFixed(2)}%</span>}</div>
                   </div>
                   <div className={`rounded-2xl border p-4 ${editing.retemIr ? 'border-orange-200 bg-orange-50' : 'border-slate-200 bg-white'}`}>
                     <div className="flex items-center justify-between gap-4"><button type="button" onClick={() => handleToggleRetencao('retemIr', 'aliquotaIr', 1.50)} className="text-left"><p className="font-black text-slate-800">Reter IR?</p><p className="text-sm text-slate-500">Imposto de renda retido na fonte.</p></button>{editing.retemIr && <div className="relative w-28"><Percent className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} /><input type="number" step="0.01" className={`${inputBase} pl-8 text-center`} value={editing.aliquotaIr || ''} onChange={e => setEditing({ ...editing, aliquotaIr: e.target.value })} /></div>}</div>
                   </div>
                 </div>
+              </div>
+
+              <div className="rounded-2xl border border-purple-200 bg-purple-50 p-4">
+                <h4 className="mb-3 text-sm font-black uppercase text-purple-800">Composição e limite das retenções</h4>
+                <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
+                  <div><label className="mb-1 block text-xs font-bold">PIS ret. %</label><input type="number" step="0.01" className={inputBase} value={editing.aliquotaPisRetencao ?? ''} onChange={e => setEditing({ ...editing, aliquotaPisRetencao: e.target.value })} /></div>
+                  <div><label className="mb-1 block text-xs font-bold">COFINS ret. %</label><input type="number" step="0.01" className={inputBase} value={editing.aliquotaCofinsRetencao ?? ''} onChange={e => setEditing({ ...editing, aliquotaCofinsRetencao: e.target.value })} /></div>
+                  <div><label className="mb-1 block text-xs font-bold">CSLL ret. %</label><input type="number" step="0.01" className={inputBase} value={editing.aliquotaCsllRetencao ?? ''} onChange={e => setEditing({ ...editing, aliquotaCsllRetencao: e.target.value })} /></div>
+                  <div><label className="mb-1 block text-xs font-bold">INSS %</label><input type="number" step="0.01" className={inputBase} value={editing.aliquotaInss ?? ''} onChange={e => setEditing({ ...editing, aliquotaInss: e.target.value })} /></div>
+                  <div><label className="mb-1 block text-xs font-bold">Reter a partir de R$</label><input type="number" step="0.01" className={inputBase} value={editing.valorMinimoRetencaoCrsf ?? ''} onChange={e => setEditing({ ...editing, valorMinimoRetencaoCrsf: e.target.value })} /><p className="mt-1 text-[10px] text-purple-700">Padrão: 10,01; até R$ 10,00 é dispensado.</p></div>
+                  <div><label className="mb-1 block text-xs font-bold">IRRF a partir de R$</label><input type="number" step="0.01" className={inputBase} value={editing.valorMinimoRetencaoIr ?? ''} onChange={e => setEditing({ ...editing, valorMinimoRetencaoIr: e.target.value })} /><p className="mt-1 text-[10px] text-purple-700">Limite calculado sobre o IRRF.</p></div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                <div className="grid grid-cols-1 items-end gap-3 md:grid-cols-[1fr_220px]"><div><h4 className="text-sm font-black uppercase text-amber-800">PIS/COFINS de apuração própria</h4><p className="text-xs text-amber-700">Separado das retenções, conforme NT 007. Automático usa 0,65% e 3% somente no Lucro Presumido.</p></div><select className={inputBase} value={String(editing.calculaPisCofinsDevido ?? '')} onChange={e => setEditing({ ...editing, calculaPisCofinsDevido: e.target.value })}><option value="">Automático pelo regime</option><option value="true">Calcular</option><option value="false">Não calcular</option></select></div>
+                {editing.calculaPisCofinsDevido !== false && editing.calculaPisCofinsDevido !== 'false' && <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-5"><div><label className="mb-1 block text-xs font-bold">CST</label><input className={inputBase} value={editing.cstPisCofins || '01'} onChange={e => setEditing({ ...editing, cstPisCofins: e.target.value })} /></div><div><label className="mb-1 block text-xs font-bold">PIS devido %</label><input type="number" step="0.01" className={inputBase} value={editing.aliquotaPisDevido ?? ''} onChange={e => setEditing({ ...editing, aliquotaPisDevido: e.target.value })} /></div><div><label className="mb-1 block text-xs font-bold">COFINS devido %</label><input type="number" step="0.01" className={inputBase} value={editing.aliquotaCofinsDevido ?? ''} onChange={e => setEditing({ ...editing, aliquotaCofinsDevido: e.target.value })} /></div><div><label className="mb-1 block text-xs font-bold">Tot. trib. federal %</label><input type="number" step="0.01" className={inputBase} value={editing.aliquotaTotTribFederal ?? ''} onChange={e => setEditing({ ...editing, aliquotaTotTribFederal: e.target.value })} /></div><div><label className="mb-1 block text-xs font-bold">Tot. SN %</label><input type="number" step="0.01" className={inputBase} value={editing.aliquotaTotTribSN ?? '6.00'} onChange={e => setEditing({ ...editing, aliquotaTotTribSN: e.target.value })} /></div></div>}
+              </div>
+
+              <div className="space-y-3 rounded-2xl border border-blue-200 bg-blue-50 p-4">
+                <div className="grid grid-cols-1 items-end gap-3 md:grid-cols-[1fr_220px]"><div><h4 className="text-sm font-black uppercase text-blue-800">IBS/CBS para este CNAE</h4><p className="text-xs text-blue-700">Automático acompanha a transição e o cronograma oficial; o município pode sobrepor.</p></div><select className={inputBase} value={String(editing.habilitaIbsCbs ?? '')} onChange={e => setEditing({ ...editing, habilitaIbsCbs: e.target.value })}><option value="">Automático</option><option value="true">Ativar antecipadamente</option><option value="false">Desativar até obrigatoriedade</option></select></div>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-4"><div><label className="mb-1 block text-xs font-bold">Obrigatório a partir de</label><input type="date" className={inputBase} value={editing.inicioObrigatoriedadeIbsCbs ? String(editing.inicioObrigatoriedadeIbsCbs).slice(0, 10) : ''} onChange={e => setEditing({ ...editing, inicioObrigatoriedadeIbsCbs: e.target.value })} /></div><div><label className="mb-1 block text-xs font-bold">cIndOp</label><input className={inputBase} value={editing.codigoIndicadorOperacao || ''} onChange={e => setEditing({ ...editing, codigoIndicadorOperacao: e.target.value })} placeholder="100301" /></div><div><label className="mb-1 block text-xs font-bold">CST</label><input className={inputBase} value={editing.cstIbsCbs || ''} onChange={e => setEditing({ ...editing, cstIbsCbs: e.target.value })} placeholder="000" /></div><div><label className="mb-1 block text-xs font-bold">cClassTrib</label><input className={inputBase} value={editing.classeTribIbsCbs || ''} onChange={e => setEditing({ ...editing, classeTribIbsCbs: e.target.value })} placeholder="000001" /></div></div>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-3"><div><label className="mb-1 block text-xs font-bold">Início de vigência</label><input type="date" className={inputBase} value={editing.inicioVigencia ? String(editing.inicioVigencia).slice(0, 10) : ''} onChange={e => setEditing({ ...editing, inicioVigencia: e.target.value })} /></div><div><label className="mb-1 block text-xs font-bold">Fim de vigência</label><input type="date" className={inputBase} value={editing.fimVigencia ? String(editing.fimVigencia).slice(0, 10) : ''} onChange={e => setEditing({ ...editing, fimVigencia: e.target.value })} /></div><div><label className="mb-1 block text-xs font-bold">Fonte normativa</label><input className={inputBase} value={editing.fonteNormativa || ''} onChange={e => setEditing({ ...editing, fonteNormativa: e.target.value })} /></div></div>
               </div>
             </div>
             <div className="flex justify-end gap-2 border-t bg-slate-50 p-5"><button onClick={() => setEditing(null)} className="rounded-xl px-5 py-3 text-sm font-bold text-slate-600 hover:bg-white">Cancelar</button><button onClick={handleSave} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-6 py-3 text-sm font-bold text-white hover:bg-blue-700"><Save size={18} /> Salvar alterações</button></div>

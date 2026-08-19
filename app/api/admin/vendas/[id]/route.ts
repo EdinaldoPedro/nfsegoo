@@ -120,7 +120,7 @@ async function montarPayloadRecuperado(venda: any, logsSeguros: any[]) {
     tomadorNif: venda.cliente?.nif || '',
     tomadorPais: venda.cliente?.pais || '',
     tomadorMoeda: venda.cliente?.moeda || '',
-    tomadorSemEndereco: venda.cliente?.semEndereco === true,
+    tomadorSemEndereco: false,
     tomadorCep: venda.cliente?.cep || '',
     tomadorLogradouro: venda.cliente?.logradouro || '',
     tomadorNumero: venda.cliente?.numero || '',
@@ -147,15 +147,39 @@ async function montarPayloadRecuperado(venda: any, logsSeguros: any[]) {
     mergeFirst(payloadRecuperado, extractCorrectionFields(parseJsonObject(log.details)));
   }
 
+  // Compatibilidade: registros antigos podem conter a antiga opcao de omissao.
+  payloadRecuperado.tomadorSemEndereco = false;
+
   const cnae = onlyDigits(payloadRecuperado.codigoCnae || payloadRecuperado.cnae || venda.notas?.[0]?.cnae || '');
   if (cnae) {
     payloadRecuperado.cnae = cnae;
     payloadRecuperado.codigoCnae = cnae;
 
     const infoEstatica = getTributacaoPorCnae(cnae);
-    const regraGlobal = await prisma.globalCnae.findUnique({ where: { codigo: cnae } });
+    const dataRegra = payloadRecuperado.dataCompetencia
+      ? String(payloadRecuperado.dataCompetencia).slice(0, 10)
+      : venda.createdAt.toISOString().slice(0, 10);
+    const competenciaRegra = new Date(`${dataRegra}T12:00:00.000Z`);
+    const regraGlobal = await prisma.globalCnae.findFirst({
+      where: {
+        codigo: cnae,
+        AND: [
+          { OR: [{ inicioVigencia: null }, { inicioVigencia: { lte: competenciaRegra } }] },
+          { OR: [{ fimVigencia: null }, { fimVigencia: { gte: competenciaRegra } }] },
+        ],
+      },
+    });
     const regraMunicipal = await prisma.tributacaoMunicipal.findFirst({
-      where: { cnae, codigoIbge: venda.empresa?.codigoIbge || '' },
+      where: {
+        cnae,
+        codigoIbge: venda.empresa?.codigoIbge || '',
+        ativo: true,
+        AND: [
+          { OR: [{ inicioVigencia: null }, { inicioVigencia: { lte: competenciaRegra } }] },
+          { OR: [{ fimVigencia: null }, { fimVigencia: { gte: competenciaRegra } }] },
+        ],
+      },
+      orderBy: [{ prioridade: 'desc' }, { updatedAt: 'desc' }],
     });
 
     payloadRecuperado.itemLc = firstDefined(payloadRecuperado.itemLc, regraGlobal?.itemLc, infoEstatica.itemLC);

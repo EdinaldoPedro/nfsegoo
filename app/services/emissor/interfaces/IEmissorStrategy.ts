@@ -42,6 +42,9 @@ export interface IDadosEmissao {
     ambiente: 'HOMOLOGACAO' | 'PRODUCAO';
     numeroDPS: number;
     serieDPS: string;
+    dataCompetencia?: string;
+    layoutVersion?: string;
+    fiscalSnapshot?: unknown;
 }
 
 export interface IEmissorStrategy {

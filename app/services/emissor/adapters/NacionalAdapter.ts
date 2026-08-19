@@ -1,5 +1,6 @@
-import { ICanonicalRps } from '../interfaces/ICanonicalRps';
-import { decrypt } from '@/app/utils/crypto';
+import type { ICanonicalRps } from '../interfaces/ICanonicalRps';
+import { retentionType } from '../fiscal/FiscalMath.ts';
+import { validateNationalAddress } from '../../../utils/customer-address.ts';
 
 export class NacionalAdapter {
     
@@ -22,12 +23,12 @@ export class NacionalAdapter {
     }
 
     private mapRegime(regime: string): string {
-        switch(regime) {
+        switch(String(regime || '').toUpperCase()) {
             case 'MEI': return '2'; 
             case 'SIMPLES': return '3';
             case 'LUCRO_PRESUMIDO': 
             case 'LUCRO_REAL': return '1';
-            default: return '1';
+            default: throw new Error(`Regime tributario nao suportado para a DPS: ${regime || 'nao informado'}.`);
         }
     }
 
@@ -47,7 +48,7 @@ export class NacionalAdapter {
 
     private mapPais(pais: string): string {
         // Converte para minúsculas e remove espaços extras para garantir a correspondência
-        const p = pais.trim().toLowerCase();
+        const p = pais.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
         
         // Dicionário universal em minúsculas e sem acentos
         const dict: Record<string, string> = {
@@ -65,7 +66,11 @@ export class NacionalAdapter {
             "tailandia": "TH", "turquia": "TR", "uruguai": "UY", "venezuela": "VE"
         };
         
-        return dict[p] || "XX"; // Se algo muito estranho acontecer, o fallback de segurança é US
+        const isoInformado = pais.trim().toUpperCase();
+        if (/^[A-Z]{2}$/.test(isoInformado) && !['XX', 'ZZ'].includes(isoInformado)) return isoInformado;
+        const codigo = dict[p];
+        if (!codigo) throw new Error(`Pais exterior nao reconhecido: ${pais}. Revise o cadastro do tomador.`);
+        return codigo;
     }
 
     private mapMoeda(moeda: string): string {
@@ -88,8 +93,9 @@ export class NacionalAdapter {
             "UYU": "858"  // Peso Uruguaio
         };
         
-        // Retorna a moeda correspondente ou o Dólar (840) como fallback padrão para exportação
-        return dict[moeda?.toUpperCase()] || "840";
+        const codigo = dict[moeda?.toUpperCase()];
+        if (!codigo) throw new Error(`Moeda exterior nao reconhecida: ${moeda || 'nao informada'}. Revise o cadastro do tomador.`);
+        return codigo;
     }
 
     public toXml(rps: ICanonicalRps): string {
@@ -103,18 +109,42 @@ export class NacionalAdapter {
         const dhEmi = this.formatData(m.dataEmissao);
         // Usa a data de competência fornecida ou cai para a data de emissão como fallback
         const dCompet = m.dataCompetencia ? m.dataCompetencia : dhEmi.split('T')[0]; 
-        const idDps = `DPS${this.clean(p.endereco.codigoIbge).padStart(7,'0')}2${this.clean(p.documento).padStart(14,'0')}${this.clean(m.serie).padStart(5,'0')}${String(m.numero).padStart(15,'0')}`;
+        const documentoPrestador = this.clean(p.documento);
+        const municipioPrestador = this.clean(p.endereco.codigoIbge);
+        const serie = this.clean(m.serie);
+        if (documentoPrestador.length !== 14) throw new Error('CNPJ do prestador deve possuir 14 digitos no leiaute de producao vigente.');
+        if (municipioPrestador.length !== 7) throw new Error('Codigo IBGE do prestador deve possuir 7 digitos.');
+        if (!/^\d{1,5}$/.test(serie)) throw new Error('Serie da DPS deve possuir de 1 a 5 digitos.');
+        if (!Number.isInteger(Number(m.numero)) || Number(m.numero) <= 0 || String(m.numero).length > 15) throw new Error('Numero da DPS invalido.');
+        const idDps = `DPS${municipioPrestador}2${documentoPrestador}${serie.padStart(5,'0')}${String(m.numero).padStart(15,'0')}`;
         
         const tpAmb = m.ambiente === 'PRODUCAO' ? '1' : '2';
         const opSimpNac = this.mapRegime(p.regimeTributario);
         
-        const isExterior = t.tipo === 'EXT' || (t.pais && t.pais !== 'Brasil' && t.pais !== 'BR');
-        const codPais = this.mapPais(t.pais || 'Estados Unidos');
-        const codMoeda = this.mapMoeda(t.moeda || 'USD');
+        const paisNormalizado = String(t.pais || '').trim().toUpperCase();
+        const isExterior = t.tipo === 'EXT' || (!!paisNormalizado && !['BR', 'BRASIL', 'BRAZIL'].includes(paisNormalizado));
+        const codPais = isExterior ? this.mapPais(t.pais || '') : 'BR';
+        const codMoeda = isExterior ? this.mapMoeda(t.moeda || '') : '986';
 
         const docTomador = this.clean(t.documento);
+        if (!isExterior && ![11, 14].includes(docTomador.length)) {
+            throw new Error('CPF/CNPJ do tomador nacional invalido para a DPS.');
+        }
         const tagDocTomador = docTomador.length === 11 ? `<CPF>${docTomador}</CPF>` : `<CNPJ>${docTomador}</CNPJ>`;
-        const omitirEnderecoTomador = !isExterior && docTomador.length === 11 && t.semEndereco === true;
+        if (!isExterior) {
+            const endereco = validateNationalAddress(t.endereco || {});
+            if (!endereco.valid) throw new Error(`Endereco do tomador incompleto: ${endereco.message}`);
+        }
+        if (isExterior) {
+            const camposExterior = [
+                ['codigo postal', t.endereco?.cep],
+                ['cidade', t.endereco?.cidade],
+                ['estado/provincia/regiao', t.endereco?.uf],
+            ].filter(([, value]) => !String(value || '').trim());
+            if (camposExterior.length) {
+                throw new Error(`Endereco exterior incompleto: ${camposExterior.map(([field]) => field).join(', ')}.`);
+            }
+        }
 
         const razaoSocialTomador = this.escapeXml(t.razaoSocial);
         const enderecoLogradouro = this.escapeXml(t.endereco?.logradouro);
@@ -123,12 +153,12 @@ export class NacionalAdapter {
 
         // --- PRESTADOR ---
         let prestXml = `<prest>` + 
-            `<CNPJ>${this.clean(p.documento)}</CNPJ>` + 
+            `<CNPJ>${documentoPrestador}</CNPJ>` +
             (p.inscricaoMunicipal ? `<IM>${this.clean(p.inscricaoMunicipal)}</IM>` : '');
         
         // Dados de contato do Prestador (Requisito Sefin)
         if (p.telefone) prestXml += `<fone>${this.clean(p.telefone)}</fone>`;
-        if (p.email) prestXml += `<email>${p.email}</email>`;
+        if (p.email) prestXml += `<email>${this.escapeXml(p.email)}</email>`;
         
         prestXml += `<regTrib><opSimpNac>${opSimpNac}</opSimpNac>`;
         if (opSimpNac === '3') prestXml += `<regApTribSN>1</regApTribSN>`;
@@ -152,25 +182,23 @@ export class NacionalAdapter {
 
         tomaXml += `<xNome>${razaoSocialTomador}</xNome>`;
 
-        if (!omitirEnderecoTomador) {
-            tomaXml += `<end>`;
-            if (isExterior) {
-                tomaXml += `<endExt>` +
-                           `<cPais>${codPais}</cPais>` +
-                           `<cEndPost>${this.escapeXml(this.clean(t.endereco?.cep) || '00000')}</cEndPost>` +
-                           `<xCidade>${this.escapeXml(t.endereco?.cidade || 'Exterior')}</xCidade>` +
-                           `<xEstProvReg>${this.escapeXml(t.endereco?.uf || 'EX')}</xEstProvReg>` +
-                           `</endExt>`;
-            } else {
-                tomaXml += `<endNac><cMun>${this.clean(t.endereco?.codigoIbge)}</cMun><CEP>${this.clean(t.endereco?.cep)}</CEP></endNac>`;
-            }
-            tomaXml += `<xLgr>${enderecoLogradouro}</xLgr>` +
-                       `<nro>${this.escapeXml(t.endereco?.numero) || 'SN'}</nro>`;
-            if (t.endereco?.complemento) tomaXml += `<xCpl>${this.escapeXml(t.endereco.complemento)}</xCpl>`;
-            if (enderecoBairro) tomaXml += `<xBairro>${enderecoBairro}</xBairro>`;
-            tomaXml += `</end>`;
+        tomaXml += `<end>`;
+        if (isExterior) {
+            tomaXml += `<endExt>` +
+                       `<cPais>${codPais}</cPais>` +
+                       `<cEndPost>${this.escapeXml(String(t.endereco?.cep || '').trim())}</cEndPost>` +
+                       `<xCidade>${this.escapeXml(t.endereco?.cidade)}</xCidade>` +
+                       `<xEstProvReg>${this.escapeXml(t.endereco?.uf)}</xEstProvReg>` +
+                       `</endExt>`;
+        } else {
+            tomaXml += `<endNac><cMun>${this.clean(t.endereco?.codigoIbge)}</cMun><CEP>${this.clean(t.endereco?.cep)}</CEP></endNac>`;
         }
-        if (t.email) tomaXml += `<email>${t.email}</email>`;
+        tomaXml += `<xLgr>${enderecoLogradouro}</xLgr>` +
+                   `<nro>${this.escapeXml(t.endereco?.numero)}</nro>`;
+        if (t.endereco?.complemento) tomaXml += `<xCpl>${this.escapeXml(t.endereco.complemento)}</xCpl>`;
+        if (enderecoBairro) tomaXml += `<xBairro>${enderecoBairro}</xBairro>`;
+        tomaXml += `</end>`;
+        if (t.email) tomaXml += `<email>${this.escapeXml(t.email)}</email>`;
         if (t.telefone) tomaXml += `<fone>${this.clean(t.telefone)}</fone>`;
         tomaXml += `</toma>`;
 
@@ -185,7 +213,7 @@ export class NacionalAdapter {
         // === O "LEÃO DE CHÁCARA" ENTRA EM AÇÃO AQUI ===
         // Limpa a variável primeiro. Só desenha a tag se sobrar algum número de verdade.
         const codTribMunLimpo = this.clean(s.codigoTributacaoMunicipal);
-        if (codTribMunLimpo.length > 0) {
+        if (opSimpNac !== '2' && codTribMunLimpo.length > 0) {
             servXml += `<cTribMun>${codTribMunLimpo}</cTribMun>`;
         }
         
@@ -240,34 +268,34 @@ export class NacionalAdapter {
         const hasCsll = r.csll?.retido && (r.csll.valor || 0) > 0;
         const hasInss = r.inss?.retido && (r.inss.valor || 0) > 0;
 
-        if (opSimpNac === '1' && !isExterior && (hasPis || hasCofins || hasIr || hasCsll || hasInss)) {
+        const federaisDevidos = s.tributosFederaisDevidos;
+        const hasFederalDue = !!(federaisDevidos?.pis || federaisDevidos?.cofins);
+
+        if (opSimpNac === '1' && !isExterior && (hasPis || hasCofins || hasIr || hasCsll || hasInss || hasFederalDue)) {
             tribXml += `<tribFed>`;
             
-            // Mantém as tags PIS e COFINS intactas, apenas adiciona o tpRetPisCofins no final do bloco
-            if (hasPis || hasCofins || hasCsll) {
-                // Tabela tpRetPisCofins da NT 007
-                let tpRet = '0';
-                if (hasPis && hasCofins && hasCsll) tpRet = '3';
-                else if (hasPis && hasCofins && !hasCsll) tpRet = '1';
-                else if (hasPis && !hasCofins && !hasCsll) tpRet = '5';
-                else if (!hasPis && hasCofins && !hasCsll) tpRet = '6';
-                else if (!hasPis && !hasCofins && hasCsll) tpRet = '8';
-                
-                tribXml += `<piscofins><CST>01</CST><vBCPisCofins>${s.valor.toFixed(2)}</vBCPisCofins>`;
-                
-                // DE VOLTA: Tags de alíquota e valor do PIS e COFINS
-                if (hasPis) tribXml += `<pAliqPis>${Number(r.pis.aliquota).toFixed(2)}</pAliqPis>`;
-                if (hasCofins) tribXml += `<pAliqCofins>${Number(r.cofins.aliquota).toFixed(2)}</pAliqCofins>`;
-                if (hasPis) tribXml += `<vPis>${Number(r.pis.valor).toFixed(2)}</vPis>`;
-                if (hasCofins) tribXml += `<vCofins>${Number(r.cofins.valor).toFixed(2)}</vCofins>`;
-                
+            if (hasPis || hasCofins || hasCsll || hasFederalDue) {
+                const tpRet = retentionType({
+                    pis: { retido: !!hasPis, valor: Number(r.pis?.valor || 0) },
+                    cofins: { retido: !!hasCofins, valor: Number(r.cofins?.valor || 0) },
+                    csll: { retido: !!hasCsll, valor: Number(r.csll?.valor || 0) },
+                });
+
+                tribXml += `<piscofins><CST>${this.clean(federaisDevidos?.cst || s.cstPisCofins || '01').padStart(2, '0')}</CST>`;
+                if (hasFederalDue) {
+                    tribXml += `<vBCPisCofins>${Number(federaisDevidos.baseCalculo).toFixed(2)}</vBCPisCofins>`;
+                    if (federaisDevidos.pis) tribXml += `<pAliqPis>${Number(federaisDevidos.pis.aliquota).toFixed(2)}</pAliqPis>`;
+                    if (federaisDevidos.cofins) tribXml += `<pAliqCofins>${Number(federaisDevidos.cofins.aliquota).toFixed(2)}</pAliqCofins>`;
+                    if (federaisDevidos.pis) tribXml += `<vPis>${Number(federaisDevidos.pis.valor).toFixed(2)}</vPis>`;
+                    if (federaisDevidos.cofins) tribXml += `<vCofins>${Number(federaisDevidos.cofins.valor).toFixed(2)}</vCofins>`;
+                }
                 tribXml += `<tpRetPisCofins>${tpRet}</tpRetPisCofins></piscofins>`;
             }
 
             if (hasInss) tribXml += `<vRetCP>${Number(r.inss.valor).toFixed(2)}</vRetCP>`;
             if (hasIr) tribXml += `<vRetIRRF>${Number(r.ir.valor).toFixed(2)}</vRetIRRF>`;
             
-            // AQUI ESTÁ A MÁGICA: A tag vRetCSLL recebe a soma (PIS + COFINS + CSLL)
+            // NT 007: vRetCSLL agrega os valores retidos de PIS, COFINS e CSLL.
             if (hasPis || hasCofins || hasCsll) {
                 const totalPcc = (hasPis ? Number(r.pis.valor) : 0) + 
                                  (hasCofins ? Number(r.cofins.valor) : 0) + 
@@ -280,16 +308,15 @@ export class NacionalAdapter {
 
         // === TOTAIS DE TRIBUTOS (Transparência / IBPT) ===
         if (opSimpNac === '3') {
-            // 1. REGRA DO SIMPLES NACIONAL (Fixo em 6.00%)
-            tribXml += `<totTrib><pTotTribSN>6.00</pTotTribSN></totTrib>`;
+            const pSn = Number(s.aliquotaTotTribSN ?? 6);
+            tribXml += `<totTrib><pTotTribSN>${pSn.toFixed(2)}</pTotTribSN></totTrib>`;
             
         } else if (opSimpNac === '1') {
             // 2. REGRA DO LUCRO PRESUMIDO / LUCRO REAL
-            let pFed = 0;
-            // Soma APENAS PIS, COFINS e CSLL (Para cravar os 4.65%)
-            if (hasPis) pFed += Number(r.pis.aliquota || 0);
-            if (hasCofins) pFed += Number(r.cofins.aliquota || 0);
-            if (hasCsll) pFed += Number(r.csll.aliquota || 0);
+            let pFed = Number(s.aliquotaTotTribFederal || 0);
+            if (!pFed && hasFederalDue) {
+                pFed = Number(federaisDevidos?.pis?.aliquota || 0) + Number(federaisDevidos?.cofins?.aliquota || 0);
+            }
 
             // CORREÇÃO: Prioriza a alíquota vinda da Tabela Municipal (regra do SaaS). Se não achar, usa a alíquota genérica.
             const pMun = s.aliquotaMunicipio ? Number(s.aliquotaMunicipio) : (s.aliquota ? Number(s.aliquota) : 0);
@@ -301,9 +328,28 @@ export class NacionalAdapter {
             tribXml += `<totTrib><indTotTrib>0</indTotTrib></totTrib>`;
         }
 
+        let ibsCbsXml = '';
+        const ibscbs = s.ibscbs;
+        if (ibscbs?.enabled) {
+            if (!ibscbs.finNFSe || !ibscbs.cIndOp || !ibscbs.indDest || !ibscbs.cst || !ibscbs.cClassTrib) {
+                throw new Error('Classificacao IBS/CBS incompleta para gerar a DPS.');
+            }
+            ibsCbsXml = `<IBSCBS>` +
+                `<finNFSe>${this.clean(ibscbs.finNFSe)}</finNFSe>` +
+                (ibscbs.indFinal !== undefined ? `<indFinal>${this.clean(ibscbs.indFinal)}</indFinal>` : '') +
+                `<cIndOp>${this.clean(ibscbs.cIndOp)}</cIndOp>` +
+                `<indDest>${this.clean(ibscbs.indDest)}</indDest>` +
+                `<valores><trib><gIBSCBS>` +
+                    `<CST>${this.clean(ibscbs.cst).padStart(3, '0')}</CST>` +
+                    `<cClassTrib>${this.clean(ibscbs.cClassTrib).padStart(6, '0')}</cClassTrib>` +
+                `</gIBSCBS></trib></valores>` +
+            `</IBSCBS>`;
+        }
+
         // --- FINAL XML ---
+        const layoutVersion = m.layoutVersion || '1.01';
         let xml = `<?xml version="1.0" encoding="UTF-8"?>` + 
-        `<DPS xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.01">` + 
+        `<DPS xmlns="http://www.sped.fazenda.gov.br/nfse" versao="${layoutVersion}">` +
             `<infDPS Id="${idDps}">` + 
                 `<tpAmb>${tpAmb}</tpAmb>` + 
                 `<dhEmi>${dhEmi}</dhEmi>` + 
@@ -320,6 +366,7 @@ export class NacionalAdapter {
                     `<vServPrest><vServ>${s.valor.toFixed(2)}</vServ></vServPrest>` +
                     `<trib>${tribXml}</trib>` +
                 `</valores>` + 
+                ibsCbsXml +
             `</infDPS>` + 
         `</DPS>`;
 

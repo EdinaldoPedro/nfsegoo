@@ -128,7 +128,12 @@ function formatDocument(value: string) {
 
 function formatCep(value: string) {
   const digits = onlyDigits(value);
-  return digits.length === 8 ? digits.replace(/^(\d{5})(\d{3})$/, '$1-$2') : value;
+  return digits.length === 8 ? digits.replace(/^(\d{2})(\d{3})(\d{3})$/, '$1.$2-$3') : value;
+}
+
+function formatCodigoMunicipio(value: string) {
+  const digits = onlyDigits(value);
+  return digits.length === 7 ? digits.replace(/^(\d{2})(\d{5})$/, '$1.$2') : value;
 }
 
 function formatPhone(value: string) {
@@ -191,7 +196,7 @@ function participante(node: XmlNode, tipo: string, emitNode?: XmlNode): Particip
     telefone: formatPhone(text(source, ['fone'])),
     nome: text(source, ['xNome']),
     municipioUf: [municipio, uf].filter(Boolean).join(' / '),
-    codigoIbgeCep: [codigoMunicipio || emitMunicipio, formatCep(cep)].filter(Boolean).join(' / '),
+    codigoIbgeCep: [formatCodigoMunicipio(codigoMunicipio || emitMunicipio), formatCep(cep)].filter(Boolean).join(' / '),
     endereco: endereco(source),
     email: text(source, ['email']),
     simplesNacional: '',
@@ -228,23 +233,22 @@ function regimeEspecial(value: string) {
 
 function tipoRetPisCofins(value: string) {
   const values: Record<string, string> = {
+    '0': 'PIS/COFINS/CSLL Não Retidos',
     '1': 'PIS/COFINS Retido',
     '2': 'PIS/COFINS Não Retido',
     '3': 'PIS/COFINS/CSLL Retidos',
     '4': 'PIS/COFINS Retidos e CSLL Não Retida',
-    '5': 'PIS/COFINS Não Retidos e CSLL Retida',
-    '6': 'PIS Retido e COFINS/CSLL Não Retidos',
-    '7': 'COFINS Retida e PIS/CSLL Não Retidos',
-    '8': 'PIS/CSLL Retidos e COFINS Não Retida',
-    '9': 'COFINS/CSLL Retidos e PIS Não Retido',
+    '5': 'PIS Retido e COFINS/CSLL Não Retidos',
+    '6': 'COFINS Retida e PIS/CSLL Não Retidos',
+    '7': 'COFINS/CSLL Retidos e PIS Não Retido',
+    '8': 'CSLL Retida e PIS/COFINS Não Retidos',
+    '9': 'PIS/CSLL Retidos e COFINS Não Retida',
   };
   return values[value] || value;
 }
 
-function situacaoNfse(value: string, options: DanfseGeneratorOptions) {
-  if (options.cancelada) return 'NFS-e Cancelada';
-  if (options.substituida) return 'NFS-e Substituída';
-  const values: Record<string, string> = { '100': 'NFS-e Gerada' };
+function situacaoNfse(value: string) {
+  const values: Record<string, string> = { '100': 'NFS-e Gerada', '107': 'NFS-e - MEI' };
   return values[value] || value;
 }
 
@@ -302,15 +306,19 @@ export function parseDanfseXml(input: string | Buffer, options: DanfseGeneratorO
   }
   const tomadorData = participante(toma, 'TOMADOR / ADQUIRENTE');
   const codigoTomador = text(first(toma, 'end'), ['endNac', 'cMun']);
-  if (!tomadorData.municipioUf && codigoTomador && codigoTomador === text(info, ['cLocIncid'])) {
-    tomadorData.municipioUf = [text(info, ['xLocIncid']), ufEmissao].filter(Boolean).join(' / ');
+  if (!tomadorData.municipioUf && codigoTomador) {
+    if (codigoTomador === text(info, ['cLocIncid'])) {
+      tomadorData.municipioUf = [text(info, ['xLocIncid']), ufEmissao].filter(Boolean).join(' / ');
+    } else if (codigoTomador === text(ibscbsNfse, ['cLocalidadeIncid'])) {
+      tomadorData.municipioUf = [text(ibscbsNfse, ['xLocalidadeIncid']), ufEmissao].filter(Boolean).join(' / ');
+    }
   }
   const destinatarioData = participante(dest, 'DESTINATÁRIO DA OPERAÇÃO');
   const codigoTribNac = text(first(serv, 'cServ'), ['cTribNac']);
   const codigoTribMun = text(first(serv, 'cServ'), ['cTribMun']);
   const codigoNbs = text(first(serv, 'cServ'), ['cNBS']);
   const localPrestacao = text(info, ['xLocPrestacao']) || text(info, ['xLocIncid']);
-  const localUfPais = [localPrestacao, ufEmissao, text(first(serv, 'locPrest'), ['cPaisPrestacao'])].filter(Boolean).join(' / ');
+  const localUfPais = [localPrestacao || '-', ufEmissao || '-', text(first(serv, 'locPrest'), ['cPaisPrestacao']) || '-'].join(' / ');
   const piscofins = first(tribFed, 'piscofins');
   const tpRetPisCofins = text(piscofins, ['tpRetPisCofins']);
   const retencoesSociais = [text(tribFed, ['vRetCSLL'])];
@@ -336,11 +344,11 @@ export function parseDanfseXml(input: string | Buffer, options: DanfseGeneratorO
   const totalIbsCbs = decimal(totalIbs) !== null || decimal(totalCbs) !== null
     ? String((decimal(totalIbs) || 0) + (decimal(totalCbs) || 0))
     : '';
-  const percentuais = [
+  const percentuais = totalTrib ? [
     ['Federais', text(totalTrib, ['pTotTrib', 'pTotTribFed'])],
     ['Estaduais', text(totalTrib, ['pTotTrib', 'pTotTribEst'])],
     ['Municipais', text(totalTrib, ['pTotTrib', 'pTotTribMun'])],
-  ].filter(([, value]) => value).map(([label, value]) => `${label}: ${percent(value)}`);
+  ].map(([label, value]) => `${label}: ${percent(value) || '-'}`) : [];
   const infoParts = [
     text(first(serv, 'infoCompl'), ['xInfComp']) || text(first(serv, 'infoCompl'), ['xOutInf']),
     text(infoDps, ['subst', 'chSubstda']) ? `NFS-e Subst.: ${text(infoDps, ['subst', 'chSubstda'])}` : '',
@@ -352,7 +360,7 @@ export function parseDanfseXml(input: string | Buffer, options: DanfseGeneratorO
     text(first(first(serv, 'infoCompl'), 'gItemPed'), ['xPed']) ? `Núm. Ped.: ${text(first(first(serv, 'infoCompl'), 'gItemPed'), ['xPed'])}` : '',
     text(first(first(serv, 'infoCompl'), 'gItemPed'), ['xItemPed']) ? `Item Ped.: ${text(first(first(serv, 'infoCompl'), 'gItemPed'), ['xItemPed'])}` : '',
     text(first(serv, 'infoCompl'), ['xInfATMun']) ? `Inf. A. T. Mun.: ${text(first(serv, 'infoCompl'), ['xInfATMun'])}` : '',
-    percentuais.length ? `Totais Aproximados dos Tributos cfe. Lei nº 12.741/2012: ${percentuais.join('; ')}` : '',
+    percentuais.length ? `Totais Aproximados dos Tributos cfe. Lei nº 12.741/2012: ${percentuais.join('; ')};` : '',
   ].filter(Boolean);
 
   return {
@@ -366,7 +374,7 @@ export function parseDanfseXml(input: string | Buffer, options: DanfseGeneratorO
     serieDps: text(infoDps, ['serie']),
     emissaoDps: formatDate(text(infoDps, ['dhEmi']), true),
     emitenteTipo: finalidadeEmitente(text(infoDps, ['tpEmit'])),
-    situacao: situacaoNfse(text(info, ['cStat']), options),
+    situacao: situacaoNfse(text(info, ['cStat'])),
     finalidade: finalidade(text(ibscbsDps, ['finNFSe'])),
     municipioEmissao,
     ufEmissao,
@@ -383,7 +391,7 @@ export function parseDanfseXml(input: string | Buffer, options: DanfseGeneratorO
     },
     issqn: {
       tipo: text(tribMun, ['tribISSQN']) === '1' ? 'Operação Tributável' : text(tribMun, ['tribISSQN']),
-      incidencia: [text(info, ['xLocIncid']), ufEmissao].filter(Boolean).join(' / '),
+      incidencia: [text(info, ['xLocIncid']) || '-', ufEmissao || '-', '-'].join(' / '),
       base: money(text(valoresNfse, ['vBC'])),
       aliquota: percent(text(valoresNfse, ['pAliqAplic'])),
       retencao: text(tribMun, ['tpRetISSQN']) === '1' ? 'Não Retido' : text(tribMun, ['tpRetISSQN']),
@@ -458,7 +466,8 @@ function row(doc: jsPDF, y: number, height: number, cells: Cell[], options: RowO
     }
     pdfText(doc, cell.label, x + 1.2, y + 3.2, width - 2.4, 6.2, true, 1);
     if (cell.value !== undefined) {
-      pdfText(doc, cell.value || '-', x + 1.2, y + 6.4, width - 2.4, 7.2, false, Math.max(1, Math.floor((height - 5.5) / 3.1)));
+      const maxLines = Math.max(1, Math.floor((height - 6.4) / 2.7) + 1);
+      pdfText(doc, cell.value || '-', x + 1.2, y + 6.4, width - 2.4, 7.2, false, maxLines);
     }
     x += width;
   }
@@ -475,18 +484,20 @@ function hasParticipant(participant: Participante) {
 }
 
 function participantBlock(doc: jsPDF, y: number, participant: Participante) {
+  const nomeHeight = doc.splitTextToSize(participant.nome || '-', 99.6).length > 1 ? 10 : 7;
+  const enderecoHeight = doc.splitTextToSize(participant.endereco || '-', 99.6).length > 1 ? 10 : 7;
   y = row(doc, y, 7, [
     { label: participant.tipo, shaded: true },
     { label: 'CNPJ / CPF / NIF', value: participant.documento },
     { label: 'Indicador Municipal (Inscrição)', value: participant.inscricaoMunicipal },
     { label: 'Telefone', value: participant.telefone },
   ]);
-  y = row(doc, y, 7, [
+  y = row(doc, y, nomeHeight, [
     { label: 'Nome / Nome Empresarial', value: participant.nome, width: 102 },
     { label: 'Município / Sigla UF', value: participant.municipioUf, width: 50 },
     { label: 'Código IBGE / CEP', value: participant.codigoIbgeCep, width: 51 },
   ], { topLine: false });
-  y = row(doc, y, 7, [
+  y = row(doc, y, enderecoHeight, [
     { label: 'Endereço', value: participant.endereco, width: 102 },
     { label: 'E-mail', value: participant.email, width: 102 },
   ], { topLine: false });
@@ -646,8 +657,8 @@ export async function generateDanfsePdf(input: string | Buffer, options: DanfseG
   if (watermark) {
     doc.setTextColor(166, 166, 166);
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(50);
-    doc.text(watermark, 105, 160, { align: 'center', angle: 35 });
+    doc.setFontSize(70);
+    doc.text(watermark, 105, 175, { align: 'center', angle: 45 });
     doc.setTextColor(0);
   }
 

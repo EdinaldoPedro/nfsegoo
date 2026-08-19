@@ -21,7 +21,24 @@ export function isErroNbsExportacao(value: unknown) {
   );
 }
 
+export function isErroEnderecoTomadorPf(value: unknown) {
+  const text = stringifySafe(value).toLowerCase();
+  return text.includes('e0234') || (
+    text.includes('endere')
+    && text.includes('tomador')
+    && (text.includes('cpf') || text.includes('pessoa física') || text.includes('pessoa fisica'))
+  );
+}
+
 export function getMensagemErroFiscalCliente(value: unknown) {
+  if (isErroEnderecoTomadorPf(value)) {
+    return {
+      message: 'O Portal exige o endereço completo desta pessoa física. Atualize CEP, logradouro, número, bairro, cidade, UF e código IBGE no cadastro do cliente antes de reenviar.',
+      needsSupport: false,
+      reasonType: 'ENDERECO_TOMADOR_PF',
+    };
+  }
+
   if (isErroNbsExportacao(value)) {
     return {
       message: NBS_EXPORTACAO_SUPPORT_MESSAGE,

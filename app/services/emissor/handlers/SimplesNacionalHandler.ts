@@ -5,11 +5,12 @@ import { TaxCodeResolver } from "../resolvers/TaxCodeResolver";
 export class SimplesNacionalHandler implements IRegimeHandler {
     async getDadosTributarios(venda: any, empresa: any): Promise<Partial<ICanonicalRps['servico']>> {
         
-        // 1. Resolve particularidades municipais (Recife vs Rio)
+        // 1. Resolve particularidades municipais vigentes e pilotadas no banco.
         const codigosLocais = await TaxCodeResolver.resolve(
             empresa.codigoIbge, 
             venda.cnae || empresa.cnaePrincipal,
-            empresa.id 
+            empresa.id,
+            venda.dataCompetencia,
         );
 
         // 2. Prepara Valores

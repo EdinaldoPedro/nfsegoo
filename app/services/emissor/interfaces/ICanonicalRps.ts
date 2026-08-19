@@ -52,6 +52,10 @@ export interface ICanonicalRps {
         // === CAMPOS NOVOS (Correção do erro de Build) ===
         codigoNbs?: string;                // Necessário para o Resolver de Recife
         codigoTributacaoMunicipal?: string; // Necessário para o Resolver de Recife
+        aliquotaMunicipio?: number;
+        aliquotaTotTribSN?: number;
+        aliquotaTotTribFederal?: number;
+        cstPisCofins?: string;
         
         // ISS
         aliquotaAplicada?: number;
@@ -67,6 +71,26 @@ export interface ICanonicalRps {
             inss: { valor: number; aliquota?: number; retido: boolean };
             ir: { valor: number; aliquota?: number; retido: boolean };
         };
+
+        // PIS/COFINS de apuracao propria. Nao confundir com valores retidos.
+        tributosFederaisDevidos?: {
+            cst: string;
+            baseCalculo: number;
+            pis?: { valor: number; aliquota: number };
+            cofins?: { valor: number; aliquota: number };
+        };
+
+        ibscbs?: {
+            enabled: boolean;
+            mandatory: boolean;
+            mandatoryFrom?: string;
+            finNFSe?: string;
+            indFinal?: string;
+            cIndOp?: string;
+            indDest?: string;
+            cst?: string;
+            cClassTrib?: string;
+        };
     };
     meta: {
         ambiente: 'HOMOLOGACAO' | 'PRODUCAO';
@@ -74,5 +98,7 @@ export interface ICanonicalRps {
         numero: number;
         dataEmissao: Date;
         dataCompetencia?: string;
+        layoutVersion?: string;
+        fiscalSnapshot?: unknown;
     };
 }

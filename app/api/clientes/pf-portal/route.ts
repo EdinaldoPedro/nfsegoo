@@ -82,7 +82,7 @@ export async function POST(request: Request) {
 
     if (!info) {
       return NextResponse.json({
-        error: 'Portal Nacional instavel: nao foi possivel consultar este CPF apos algumas tentativas. Voce pode tentar novamente em instantes ou salvar o cliente marcando a opcao de emitir sem informar endereco.',
+        error: 'Portal Nacional instavel: nao foi possivel consultar este CPF apos algumas tentativas. Tente novamente em instantes. Se necessario, informe o nome manualmente; o endereco completo continuara obrigatorio para emitir.',
         details: ultimoErro?.message,
       }, { status: 504 });
     }

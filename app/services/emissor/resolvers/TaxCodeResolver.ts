@@ -2,43 +2,33 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-// Configuração por Município
-const REGRAS_MUNICIPAIS: Record<string, { exigeNbs: boolean, exigeCodMunicipal: boolean }> = {
-    "2611606": { exigeNbs: true, exigeCodMunicipal: true }, // Recife-PE
-    "3304557": { exigeNbs: false, exigeCodMunicipal: false }, // Rio de Janeiro
-};
-
 export class TaxCodeResolver {
     
     // Adicionamos empresaId opcional para buscar na tabela Cnae correta
-    static async resolve(ibgeMunicipio: string, cnae: string, empresaId?: string): Promise<{ codigoNbs?: string, codigoMunicipal?: string }> {
-        const regra = REGRAS_MUNICIPAIS[ibgeMunicipio];
-
-        // Se não tem regra, retorna vazio
-        if (!regra) {
-            return { codigoNbs: undefined, codigoMunicipal: undefined };
-        }
-
+    static async resolve(ibgeMunicipio: string, cnae: string, empresaId?: string, dataCompetencia?: string): Promise<{ codigoNbs?: string, codigoMunicipal?: string }> {
         let resultado = { codigoNbs: undefined as string | undefined, codigoMunicipal: undefined as string | undefined };
+        const competencia = new Date(`${String(dataCompetencia || new Date().toISOString().slice(0, 10)).slice(0, 10)}T12:00:00.000Z`);
 
-        // 1. Busca Código Municipal (Tabela TributacaoMunicipal)
-        if (regra.exigeCodMunicipal) {
-            const tributacao = await prisma.tributacaoMunicipal.findFirst({
-                where: {
-                    codigoIbge: ibgeMunicipio,
-                    cnae: cnae
-                }
-            });
-            if (tributacao) {
-                // Aqui pegamos o campo correto que já existe no seu banco
-                resultado.codigoMunicipal = tributacao.codigoTributacaoMunicipal;
-            }
+        const regras = await prisma.tributacaoMunicipal.findMany({
+            where: {
+                codigoIbge: ibgeMunicipio,
+                ativo: true,
+                AND: [
+                    { OR: [{ inicioVigencia: null }, { inicioVigencia: { lte: competencia } }] },
+                    { OR: [{ fimVigencia: null }, { fimVigencia: { gte: competencia } }] },
+                ],
+            },
+            orderBy: [{ prioridade: 'desc' }, { updatedAt: 'desc' }],
+        });
+        const tributacao = regras.find((item) => String(item.cnae).replace(/\D/g, '') === String(cnae).replace(/\D/g, ''));
+        if (tributacao?.codigoTributacaoMunicipal) {
+            resultado.codigoMunicipal = tributacao.codigoTributacaoMunicipal;
         }
 
-        // 2. Busca NBS (Tabela Cnae ou GlobalCnae) - AQUI ESTAVA O ERRO
-        if (regra.exigeNbs) {
+        if (tributacao?.exigeNbs) {
+            if (tributacao.nbsPadrao) resultado.codigoNbs = tributacao.nbsPadrao;
             // Tenta buscar na tabela Cnae da empresa primeiro (se tiver ID)
-            if (empresaId) {
+            if (!resultado.codigoNbs && empresaId) {
                 const cnaeEmpresa = await prisma.cnae.findFirst({
                     where: { codigo: cnae, empresaId: empresaId }
                 });
@@ -49,9 +39,15 @@ export class TaxCodeResolver {
             }
 
             // Fallback: Busca na tabela GlobalCnae se não achou na empresa
-            const cnaeGlobal = await prisma.globalCnae.findUnique({
-                where: { codigo: cnae }
-            });
+            const cnaeGlobal = !resultado.codigoNbs ? await prisma.globalCnae.findFirst({
+                where: {
+                    codigo: cnae,
+                    AND: [
+                        { OR: [{ inicioVigencia: null }, { inicioVigencia: { lte: competencia } }] },
+                        { OR: [{ fimVigencia: null }, { fimVigencia: { gte: competencia } }] },
+                    ],
+                },
+            }) : null;
             if (cnaeGlobal?.codigoNbs) {
                 resultado.codigoNbs = cnaeGlobal.codigoNbs;
             }

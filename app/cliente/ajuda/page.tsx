@@ -222,7 +222,7 @@ const artigos: HelpArticle[] = [
       'Preencha documento, nome e dados fiscais exigidos.',
       'Salve o cadastro e use esse tomador na tela de emissão.',
     ],
-    warning: 'Se informar endereço, preencha os campos mínimos para evitar quebra no XML.',
+    warning: 'Para PF e PJ nacionais, o endereço completo deve estar salvo antes da emissão.',
     related: [{ label: 'Cadastrar cliente', href: '/cliente' }],
     tags: ['cliente', 'tomador', 'pf', 'pj', 'cpf', 'cnpj', 'endereco'],
   },
@@ -237,30 +237,30 @@ const artigos: HelpArticle[] = [
       'No cadastro de cliente PF, informe o CPF.',
       'O SaaS tenta consultar o Portal Nacional para trazer o nome oficial.',
       'Se o portal estiver instável, a tela informa que a consulta não foi concluída.',
-      'Você pode tentar novamente depois ou seguir conforme as regras internas do cadastro.',
+      'Você pode tentar novamente depois ou informar o nome manualmente.',
       'Quando o nome oficial retornar, revise antes de salvar.',
     ],
-    warning: 'Falha na consulta oficial geralmente indica instabilidade externa, não erro definitivo do cliente.',
+    warning: 'Falha na consulta oficial geralmente indica instabilidade externa, não erro definitivo do cliente. O endereço completo continua obrigatório.',
     related: [{ label: 'Clientes', href: '/cliente' }],
     tags: ['cpf', 'consulta', 'portal nacional', 'pf', 'nome oficial'],
   },
   {
     id: 'pf-sem-endereco',
-    title: 'Emitir contra PF sem endereço',
+    title: 'Cadastrar endereço da pessoa física',
     category: 'Clientes',
-    path: 'Menu > Clientes > Novo cliente > PF > Emitir sem informar endereço',
-    summary: 'Quando a pessoa física pode ir no XML sem endereço.',
+    path: 'Menu > Clientes > Novo cliente > PF > Endereço',
+    summary: 'Como preparar a PF para gerar o bloco de endereço da DPS.',
     icon: FileText,
     steps: [
       'Cadastre ou edite um cliente PF.',
-      'Marque a opção Emitir sem informar endereço.',
-      'O SaaS oculta os campos de endereço e envia apenas os dados essenciais do tomador.',
+      'Informe o CEP e aguarde o preenchimento automático da localidade.',
+      'Confira logradouro, número, bairro, cidade, UF e código IBGE.',
+      'Salve o cliente antes de voltar para a emissão.',
       'Na revisão da nota, confira CPF, nome, serviço e valor.',
-      'Se desmarcar a opção, preencha todos os dados mínimos de endereço.',
     ],
-    warning: 'Não deixe endereço parcial. Use sem endereço ou endereço completo o suficiente para emissão.',
+    warning: 'Cadastros antigos sem endereço ficam visíveis, mas não podem ser usados até serem atualizados.',
     related: [{ label: 'Clientes', href: '/cliente' }],
-    tags: ['pf', 'sem endereco', 'cpf', 'tomador', 'xml'],
+    tags: ['pf', 'endereco obrigatorio', 'cpf', 'tomador', 'xml'],
   },
   {
     id: 'cliente-exterior',
@@ -583,7 +583,7 @@ const guiasVisuais: VisualGuide[] = [
   },
   {
     id: 'book-clientes',
-    title: 'Clientes, PF sem endereço e exterior',
+    title: 'Clientes nacionais e exterior',
     subtitle: 'Como cadastrar tomadores sem travar a emissão depois.',
     time: '6 min',
     icon: UserPlus,
@@ -603,9 +603,9 @@ const guiasVisuais: VisualGuide[] = [
         mockup: 'clientes',
       },
       {
-        title: 'Decida sobre endereço da PF',
-        path: 'Clientes > Novo PF > Emitir sem informar endereço',
-        text: 'Para PF, marque sem endereço quando permitido. Se informar endereço, preencha os mínimos para emissão.',
+        title: 'Complete o endereço da PF',
+        path: 'Clientes > Novo PF > Endereço',
+        text: 'Para PF nacional, CEP, logradouro, número, bairro, cidade, UF e código IBGE são obrigatórios antes de emitir.',
         mockup: 'clientes',
       },
     ],
@@ -1179,9 +1179,9 @@ function ClientesMockup() {
           ))}
         </div>
         <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-          <p className="text-xs font-black text-slate-700">PF sem endereço</p>
+          <p className="text-xs font-black text-slate-700">Endereço da PF</p>
           <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
-            <span className="h-4 w-4 rounded border border-blue-300 bg-white" /> Emitir sem informar endereço
+            <span className="h-4 w-4 rounded border border-emerald-300 bg-emerald-100" /> Completo e pronto para emissão
           </div>
         </div>
       </div>

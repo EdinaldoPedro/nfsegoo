@@ -475,7 +475,7 @@ export default function DetalheVendaCompleto() {
             tomadorNif: toFormText(payload.tomadorNif || data.cliente?.nif),
             tomadorPais: toFormText(payload.tomadorPais || data.cliente?.pais),
             tomadorMoeda: toFormText(payload.tomadorMoeda || data.cliente?.moeda),
-            tomadorSemEndereco: toBoolText(payload.tomadorSemEndereco || data.cliente?.semEndereco),
+            tomadorSemEndereco: 'false',
             tomadorCep: toFormText(payload.tomadorCep || data.cliente?.cep),
             tomadorLogradouro: toFormText(payload.tomadorLogradouro || data.cliente?.logradouro),
             tomadorNumero: toFormText(payload.tomadorNumero || data.cliente?.numero),
@@ -521,7 +521,7 @@ export default function DetalheVendaCompleto() {
     aliquota: formData.aliquota ? parseValor(formData.aliquota) : undefined,
     aliquotaMunicipio: formData.aliquotaMunicipio ? parseValor(formData.aliquotaMunicipio) : undefined,
     issRetido: formData.issRetido === 'true',
-    tomadorSemEndereco: formData.tomadorSemEndereco === 'true',
+    tomadorSemEndereco: false,
   });
 
   const updateFormField = (field: keyof typeof formData, value: string) => {
@@ -743,6 +743,9 @@ export default function DetalheVendaCompleto() {
   }
 
   if (!venda) return <div className="p-8">Venda não encontrada.</div>;
+
+  const enderecoVemDoCadastroPf = venda.cliente?.tipo === 'PF';
+  const prestadorMei = String(venda.empresa?.regimeTributario || '').toUpperCase() === 'MEI';
 
   const notasOrdenadas = venda.notas || [];
   const notaAtual =
@@ -997,11 +1000,11 @@ export default function DetalheVendaCompleto() {
                 </div>
               </SectionShell>
 
-              <SectionShell title="Serviço e XML" subtitle="CNAE é referência visual; cTribNac, cTribMun, NBS e descrição são os campos efetivos enviados." icon={Layers}>
+              <SectionShell title="Serviço e XML" subtitle="CNAE é referência visual; cTribNac, NBS e descrição são efetivos. cTribMun é sempre omitido no MEI." icon={Layers}>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <TextInput label="CNAE visual / de-para" value={formData.cnae} onChange={(value) => setFormData({ ...formData, cnae: value, codigoCnae: value })} mono disabled={!isEditing} />
                   <TextInput label="cTribNac" value={formData.codigoTributacaoNacional} onChange={(value) => setFormData({ ...formData, codigoTributacaoNacional: value, codigoTribNacional: value })} mono disabled={!isEditing} />
-                  <TextInput label="cTribMun" value={formData.codigoTributacaoMunicipal} onChange={(value) => updateFormField('codigoTributacaoMunicipal', value)} mono disabled={!isEditing} />
+                  <TextInput label={prestadorMei ? 'cTribMun (omitido no MEI)' : 'cTribMun'} value={formData.codigoTributacaoMunicipal} onChange={(value) => updateFormField('codigoTributacaoMunicipal', value)} mono disabled={!isEditing || prestadorMei} />
                 </div>
                 <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-4">
                   <TextInput label="item LC" value={formData.itemLc} onChange={(value) => updateFormField('itemLc', value)} mono disabled={!isEditing} />
@@ -1043,7 +1046,7 @@ export default function DetalheVendaCompleto() {
               </SectionShell>
 
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                <SectionShell title="Tomador" subtitle="Dados enviados em toma: documento, nome, contato, exterior e sem endereço para PF." icon={User}>
+                <SectionShell title="Tomador" subtitle="Dados enviados em toma. Para PF, tipo e endereço vêm obrigatoriamente do cadastro do cliente." icon={User}>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <TextInput label="CPF/CNPJ/NIF" value={formData.tomadorDocumento} onChange={(value) => updateFormField('tomadorDocumento', value)} mono disabled={!isEditing} />
                     <TextInput label="xNome" value={formData.tomadorNome} onChange={(value) => updateFormField('tomadorNome', value)} disabled={!isEditing} />
@@ -1054,7 +1057,7 @@ export default function DetalheVendaCompleto() {
                       <span className="block text-xs font-black uppercase tracking-wide text-slate-500 mb-1.5">tipo tomador</span>
                       <select
                         value={formData.tomadorTipo}
-                        disabled={!isEditing}
+                        disabled={!isEditing || enderecoVemDoCadastroPf}
                         onChange={(event) => updateFormField('tomadorTipo', event.target.value)}
                         className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-bold text-slate-900 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-50 disabled:bg-slate-100"
                       >
@@ -1067,31 +1070,24 @@ export default function DetalheVendaCompleto() {
                     <TextInput label="país" value={formData.tomadorPais} onChange={(value) => updateFormField('tomadorPais', value)} disabled={!isEditing} />
                     <TextInput label="moeda" value={formData.tomadorMoeda} onChange={(value) => updateFormField('tomadorMoeda', value)} mono disabled={!isEditing} />
                     <TextInput label="NIF exterior" value={formData.tomadorNif} onChange={(value) => updateFormField('tomadorNif', value)} mono disabled={!isEditing} />
-                    <label className="block">
-                      <span className="block text-xs font-black uppercase tracking-wide text-slate-500 mb-1.5">PF sem endereço?</span>
-                      <select
-                        value={formData.tomadorSemEndereco}
-                        disabled={!isEditing}
-                        onChange={(event) => updateFormField('tomadorSemEndereco', event.target.value)}
-                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-bold text-slate-900 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-50 disabled:bg-slate-100"
-                      >
-                        <option value="false">Não, informar endereço</option>
-                        <option value="true">Sim, omitir toma/end</option>
-                      </select>
-                    </label>
+                    {enderecoVemDoCadastroPf && (
+                      <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-900 md:col-span-2">
+                        Para corrigir estes dados, atualize a PF em Clientes. A bancada não pode contornar o cadastro oficial.
+                      </div>
+                    )}
                   </div>
                 </SectionShell>
 
-                <SectionShell title="Endereço do tomador" subtitle="Quando PF sem endereço estiver marcado, estes campos não entram no XML." icon={MapPin}>
+                <SectionShell title="Endereço do tomador" subtitle={enderecoVemDoCadastroPf ? 'Leitura do cadastro da PF; o bloco toma/end será sempre gerado.' : 'Dados efetivos usados na montagem do XML.'} icon={MapPin}>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <TextInput label="CEP" value={formData.tomadorCep} onChange={(value) => updateFormField('tomadorCep', value)} mono disabled={!isEditing || formData.tomadorSemEndereco === 'true'} />
-                    <TextInput label="cMun" value={formData.tomadorCodigoIbge} onChange={(value) => updateFormField('tomadorCodigoIbge', value)} mono disabled={!isEditing || formData.tomadorSemEndereco === 'true'} />
-                    <TextInput label="xLgr" value={formData.tomadorLogradouro} onChange={(value) => updateFormField('tomadorLogradouro', value)} disabled={!isEditing || formData.tomadorSemEndereco === 'true'} />
-                    <TextInput label="nro" value={formData.tomadorNumero} onChange={(value) => updateFormField('tomadorNumero', value)} disabled={!isEditing || formData.tomadorSemEndereco === 'true'} />
-                    <TextInput label="xCpl" value={formData.tomadorComplemento} onChange={(value) => updateFormField('tomadorComplemento', value)} disabled={!isEditing || formData.tomadorSemEndereco === 'true'} />
-                    <TextInput label="xBairro" value={formData.tomadorBairro} onChange={(value) => updateFormField('tomadorBairro', value)} disabled={!isEditing || formData.tomadorSemEndereco === 'true'} />
-                    <TextInput label="xCidade" value={formData.tomadorCidade} onChange={(value) => updateFormField('tomadorCidade', value)} disabled={!isEditing || formData.tomadorSemEndereco === 'true'} />
-                    <TextInput label="UF" value={formData.tomadorUf} onChange={(value) => updateFormField('tomadorUf', value)} mono disabled={!isEditing || formData.tomadorSemEndereco === 'true'} />
+                    <TextInput label="CEP" value={formData.tomadorCep} onChange={(value) => updateFormField('tomadorCep', value)} mono disabled={!isEditing || enderecoVemDoCadastroPf} />
+                    <TextInput label="cMun" value={formData.tomadorCodigoIbge} onChange={(value) => updateFormField('tomadorCodigoIbge', value)} mono disabled={!isEditing || enderecoVemDoCadastroPf} />
+                    <TextInput label="xLgr" value={formData.tomadorLogradouro} onChange={(value) => updateFormField('tomadorLogradouro', value)} disabled={!isEditing || enderecoVemDoCadastroPf} />
+                    <TextInput label="nro" value={formData.tomadorNumero} onChange={(value) => updateFormField('tomadorNumero', value)} disabled={!isEditing || enderecoVemDoCadastroPf} />
+                    <TextInput label="xCpl" value={formData.tomadorComplemento} onChange={(value) => updateFormField('tomadorComplemento', value)} disabled={!isEditing || enderecoVemDoCadastroPf} />
+                    <TextInput label="xBairro" value={formData.tomadorBairro} onChange={(value) => updateFormField('tomadorBairro', value)} disabled={!isEditing || enderecoVemDoCadastroPf} />
+                    <TextInput label="xCidade" value={formData.tomadorCidade} onChange={(value) => updateFormField('tomadorCidade', value)} disabled={!isEditing || enderecoVemDoCadastroPf} />
+                    <TextInput label="UF" value={formData.tomadorUf} onChange={(value) => updateFormField('tomadorUf', value)} mono disabled={!isEditing || enderecoVemDoCadastroPf} />
                   </div>
                 </SectionShell>
               </div>
@@ -1100,7 +1096,7 @@ export default function DetalheVendaCompleto() {
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   <InfoItem label="CNAE usado no de-para" value={formData.codigoCnae || formData.cnae} mono />
                   <InfoItem label="cTribNac enviado" value={formData.codigoTributacaoNacional} mono />
-                  <InfoItem label="cTribMun enviado" value={formData.codigoTributacaoMunicipal || 'Omitido'} mono />
+                  <InfoItem label="cTribMun enviado" value={prestadorMei ? 'Omitido (MEI)' : formData.codigoTributacaoMunicipal || 'Omitido'} mono />
                   <InfoItem label="Valor estrangeiro" value={formData.valorMoedaEstrangeira || 'Não usado'} mono />
                 </div>
               </SectionShell>

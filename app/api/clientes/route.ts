@@ -5,8 +5,10 @@ import { checkPlanLimits, resolveBillingUserId } from '@/app/services/planServic
 import { validateRequest } from "@/app/utils/api-security";
 import { validarCPF } from '@/app/utils/cpf';
 import { resolveEmpresaContexto } from '@/app/utils/access-control';
+import { validateNationalAddress } from '@/app/utils/customer-address';
 
 const prisma = new PrismaClient();
+const MOEDAS_EXTERIOR_SUPORTADAS = new Set(['BRL', 'USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY', 'CHF', 'CNY', 'MXN', 'ARS', 'CLP', 'COP', 'PYG', 'UYU']);
 
 // === NOVA INTELIGÊNCIA: AUTO-BUSCA DE IBGE ===
 async function buscarIbgePorCep(cep: string): Promise<string | null> {
@@ -23,32 +25,18 @@ async function buscarIbgePorCep(cep: string): Promise<string | null> {
 }
 
 function validarEnderecoMinimoParaEmissao(body: any, codigoIbgeFinal: string | null | undefined) {
-    const campos = [
-        { label: 'CEP', value: body.cep },
-        { label: 'logradouro', value: body.logradouro },
-        { label: 'numero', value: body.numero },
-        { label: 'bairro', value: body.bairro },
-        { label: 'cidade', value: body.cidade },
-        { label: 'UF', value: body.uf },
-        { label: 'codigo IBGE', value: codigoIbgeFinal },
-    ];
+    const validation = validateNationalAddress({ ...body, codigoIbge: codigoIbgeFinal });
+    return validation.valid ? null : validation.message || 'Endereço incompleto para emissão.';
+}
 
-    const faltantes = campos
-        .filter((campo) => !String(campo.value || '').trim())
-        .map((campo) => campo.label);
-
-    if (faltantes.length > 0) {
-        return `Informe todos os dados minimos de endereco para emitir: ${faltantes.join(', ')}. Ou marque a opcao de emitir sem informar endereco.`;
-    }
-
-    const cepLimpo = String(body.cep || '').replace(/\D/g, '');
-    const ibgeLimpo = String(codigoIbgeFinal || '').replace(/\D/g, '');
-    const ufLimpa = String(body.uf || '').trim();
-
-    if (cepLimpo.length !== 8) return 'CEP invalido. Informe um CEP com 8 digitos ou marque a opcao de emitir sem informar endereco.';
-    if (ibgeLimpo.length < 7) return 'Codigo IBGE invalido. Consulte o CEP novamente ou marque a opcao de emitir sem informar endereco.';
-    if (ufLimpa.length !== 2) return 'UF invalida. Informe a sigla com 2 letras ou marque a opcao de emitir sem informar endereco.';
-
+function validarTomadorExterior(body: any) {
+    const faltantes = [
+        ['país', body.pais], ['moeda', body.moeda], ['código postal', body.cep], ['logradouro', body.logradouro],
+        ['número', body.numero], ['bairro', body.bairro], ['cidade', body.cidade], ['estado/província/região', body.uf],
+    ].filter(([, value]) => !String(value || '').trim()).map(([label]) => label);
+    if (faltantes.length) return `Informe os dados do tomador exterior: ${faltantes.join(', ')}.`;
+    if (!MOEDAS_EXTERIOR_SUPORTADAS.has(String(body.moeda).toUpperCase())) return 'Moeda exterior não suportada pelo leiaute atual.';
+    if (String(body.cep).trim().length > 11) return 'Código postal exterior deve possuir no máximo 11 caracteres.';
     return null;
 }
 
@@ -165,20 +153,29 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: 'CPF invalido.' }, { status: 400 });
         }
 
-        const semEndereco = tipoFinal === 'PF' && body.semEndereco === true;
-        const cepLimpo = !semEndereco && body.cep ? body.cep.replace(/\D/g, '') : null;
+        // Campo mantido no banco apenas por compatibilidade com cadastros antigos.
+        // Novos cadastros e edições nacionais sempre persistem endereço completo.
+        const semEndereco = false;
+        const cepLimpo = body.cep
+            ? (tipoFinal === 'EXT' ? String(body.cep).trim() : body.cep.replace(/\D/g, ''))
+            : null;
 
         // === 2. RECUPERA IBGE FALTANTE ===
-        let codigoIbgeFinal = semEndereco ? null : body.codigoIbge;
-        if (!semEndereco && cepLimpo && (!codigoIbgeFinal || codigoIbgeFinal.length < 7)) {
+        let codigoIbgeFinal = body.codigoIbge;
+        if (tipoFinal !== 'EXT' && cepLimpo && (!codigoIbgeFinal || codigoIbgeFinal.length < 7)) {
             const ibgeEncontrado = await buscarIbgePorCep(cepLimpo);
             if (ibgeEncontrado) codigoIbgeFinal = ibgeEncontrado;
         }
 
         // 3. BUSCA O CLIENTE GLOBALMENTE NO BANCO (APENAS SE TIVER DOCUMENTO VÁLIDO)
-        if (tipoFinal === 'PF' && !semEndereco) {
+        if (tipoFinal !== 'EXT') {
             const erroEndereco = validarEnderecoMinimoParaEmissao(body, codigoIbgeFinal);
             if (erroEndereco) return NextResponse.json({ error: erroEndereco }, { status: 400 });
+        }
+        if (tipoFinal === 'EXT') {
+            const erroExterior = validarTomadorExterior({ ...body, cep: cepLimpo });
+            if (erroExterior) return NextResponse.json({ error: erroExterior }, { status: 400 });
+            codigoIbgeFinal = null;
         }
 
         let clienteGlobal = null;
@@ -200,11 +197,21 @@ export async function POST(request: Request) {
                 where: { id: clienteGlobal.id },
                 data: {
                     tipo: tipoFinal,
-                    ...(semEndereco ? { semEndereco: true } : {}),
+                    nome: body.nome || clienteGlobal.nome,
+                    email: body.email || clienteGlobal.email,
+                    telefone: body.telefone ? String(body.telefone).replace(/\D/g, '') : clienteGlobal.telefone,
+                    semEndereco: false,
+                    cep: cepLimpo,
+                    logradouro: body.logradouro || null,
+                    numero: body.numero || null,
+                    complemento: body.complemento || null,
+                    bairro: body.bairro || null,
+                    cidade: body.cidade || null,
+                    uf: body.uf || null,
+                    codigoIbge: codigoIbgeFinal,
                     arquivadoEm: null,
                     arquivadoPor: null,
                     motivoArquivamento: null,
-                    ...(codigoIbgeFinal && (!clienteGlobal.codigoIbge || clienteGlobal.codigoIbge.length < 7) ? { codigoIbge: codigoIbgeFinal } : {}),
                     vinculos: vinculoExistente
                         ? { update: { where: { id: vinculoExistente.id }, data: { arquivadoEm: null, arquivadoPor: null, motivoArquivamento: null } as any } }
                         : { create: { empresaId: empresaIdAlvo } }
@@ -225,18 +232,18 @@ export async function POST(request: Request) {
                 telefone: body.telefone ? body.telefone.replace(/\D/g, '') : null,
                 semEndereco,
                 cep: cepLimpo,
-                logradouro: semEndereco ? null : body.logradouro || null,
-                numero: semEndereco ? null : body.numero || null,
-                complemento: semEndereco ? null : body.complemento || null,
-                bairro: semEndereco ? null : body.bairro || null,
-                cidade: semEndereco ? null : body.cidade || null,
-                uf: semEndereco ? null : body.uf || null,
+                logradouro: body.logradouro || null,
+                numero: body.numero || null,
+                complemento: body.complemento || null,
+                bairro: body.bairro || null,
+                cidade: body.cidade || null,
+                uf: body.uf || null,
                 codigoIbge: codigoIbgeFinal,
                 inscricaoMunicipal: body.inscricaoMunicipal || null,
                 inscricaoEstadual: body.inscricaoEstadual || null,
                 nif: body.nif || null,
-                pais: body.pais || 'Brasil',
-                moeda: body.moeda || 'BRL',
+                pais: tipoFinal === 'EXT' ? body.pais : (body.pais || 'Brasil'),
+                moeda: tipoFinal === 'EXT' ? String(body.moeda).toUpperCase() : (body.moeda || 'BRL'),
                 vinculos: { create: { empresaId: empresaIdAlvo } }
             }
         });
@@ -290,32 +297,28 @@ export async function PUT(request: Request) {
         if (dadosAtualizacao.telefone) dadosAtualizacao.telefone = dadosAtualizacao.telefone.replace(/\D/g, '');
         
         const tipoAtualizado = dadosAtualizacao.tipo || clienteAtual.tipo;
-        const semEndereco = tipoAtualizado === 'PF' && dadosAtualizacao.semEndereco === true;
+        dadosAtualizacao.semEndereco = false;
 
-        if (semEndereco) {
-            dadosAtualizacao.cep = null;
-            dadosAtualizacao.logradouro = null;
-            dadosAtualizacao.numero = null;
-            dadosAtualizacao.complemento = null;
-            dadosAtualizacao.bairro = null;
-            dadosAtualizacao.cidade = null;
-            dadosAtualizacao.uf = null;
-            dadosAtualizacao.codigoIbge = null;
-        } else if (dadosAtualizacao.cep) {
-            dadosAtualizacao.cep = dadosAtualizacao.cep.replace(/\D/g, '');
+        if (dadosAtualizacao.cep) {
+            dadosAtualizacao.cep = tipoAtualizado === 'EXT' ? String(dadosAtualizacao.cep).trim() : dadosAtualizacao.cep.replace(/\D/g, '');
             // Auto-recupera IBGE no PUT se tiver vindo vazio
-            if (!dadosAtualizacao.codigoIbge || dadosAtualizacao.codigoIbge.length < 7) {
+            if (tipoAtualizado !== 'EXT' && (!dadosAtualizacao.codigoIbge || dadosAtualizacao.codigoIbge.length < 7)) {
                 const ibgeEncontrado = await buscarIbgePorCep(dadosAtualizacao.cep);
                 if (ibgeEncontrado) dadosAtualizacao.codigoIbge = ibgeEncontrado;
             }
-        } else if ('semEndereco' in dadosAtualizacao && tipoAtualizado !== 'PF') {
-            dadosAtualizacao.semEndereco = false;
         }
         
         // === LIMPEZA DE CAMPOS INVÁLIDOS PARA O BANCO ===
-        if (tipoAtualizado === 'PF' && !semEndereco) {
-            const erroEndereco = validarEnderecoMinimoParaEmissao(dadosAtualizacao, dadosAtualizacao.codigoIbge);
+        const dadosEfetivos = { ...clienteAtual, ...dadosAtualizacao };
+        if (tipoAtualizado !== 'EXT') {
+            const erroEndereco = validarEnderecoMinimoParaEmissao(dadosEfetivos, dadosEfetivos.codigoIbge);
             if (erroEndereco) return NextResponse.json({ error: erroEndereco }, { status: 400 });
+        }
+        if (tipoAtualizado === 'EXT') {
+            const erroExterior = validarTomadorExterior(dadosEfetivos);
+            if (erroExterior) return NextResponse.json({ error: erroExterior }, { status: 400 });
+            dadosAtualizacao.codigoIbge = null;
+            dadosAtualizacao.moeda = String(dadosEfetivos.moeda).toUpperCase();
         }
 
         if ('exterior' in dadosAtualizacao) delete dadosAtualizacao.exterior;

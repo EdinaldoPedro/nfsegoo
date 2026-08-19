@@ -112,7 +112,7 @@ export async function POST(request: Request) {
         tomadorNif: firstDefined(dadosAtualizados.tomadorNif, payloadOrigem.tomadorNif),
         tomadorPais: firstDefined(dadosAtualizados.tomadorPais, payloadOrigem.tomadorPais),
         tomadorMoeda: firstDefined(dadosAtualizados.tomadorMoeda, payloadOrigem.tomadorMoeda),
-        tomadorSemEndereco: firstDefined(dadosAtualizados.tomadorSemEndereco, payloadOrigem.tomadorSemEndereco),
+        tomadorSemEndereco: false,
         tomadorCep: firstDefined(dadosAtualizados.tomadorCep, payloadOrigem.tomadorCep),
         tomadorLogradouro: firstDefined(dadosAtualizados.tomadorLogradouro, payloadOrigem.tomadorLogradouro),
         tomadorNumero: firstDefined(dadosAtualizados.tomadorNumero, payloadOrigem.tomadorNumero),

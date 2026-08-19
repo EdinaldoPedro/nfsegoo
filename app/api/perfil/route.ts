@@ -173,8 +173,17 @@ export async function GET(request: Request) {
       if (atividadesEnriquecidas.length > 0) {
           // CORREÇÃO CRÍTICA DO CNAE: Traz todos para fazer o match na memória ignorando pontos e traços
           const globais = await prisma.globalCnae.findMany();
+          const agora = new Date();
           const regrasMunicipais = await prisma.tributacaoMunicipal.findMany({ 
-              where: { codigoIbge: dadosEmpresa.codigoIbge || '' } 
+              where: {
+                codigoIbge: dadosEmpresa.codigoIbge || '',
+                ativo: true,
+                AND: [
+                  { OR: [{ inicioVigencia: null }, { inicioVigencia: { lte: agora } }] },
+                  { OR: [{ fimVigencia: null }, { fimVigencia: { gte: agora } }] },
+                ],
+              },
+              orderBy: [{ prioridade: 'desc' }, { updatedAt: 'desc' }],
           });
 
           atividadesEnriquecidas = atividadesEnriquecidas.map((local: any) => {
@@ -187,13 +196,25 @@ export async function GET(request: Request) {
 
               return {
                   ...local,
-                  temRetencaoInss: global?.temRetencaoInss || local.temRetencaoInss,
-                  retemCrsf: global?.retemCrsf || false,
+                  temRetencaoInss: regraMun?.retemInss ?? global?.temRetencaoInss ?? local.temRetencaoInss,
+                  retemCrsf: regraMun?.retemCrsf ?? global?.retemCrsf ?? false,
                   aliquotaCrsf: global?.aliquotaCrsf ? Number(global.aliquotaCrsf) : 4.65,
-                  retemIr: global?.retemIr || false,
-                  aliquotaIr: global?.aliquotaIr ? Number(global.aliquotaIr) : 1.50,
-                  codigoNbs: global?.codigoNbs || local.codigoNbs,
-                  aliquotaIss: regraMun?.aliquotaIss ? Number(regraMun.aliquotaIss) : null
+                  aliquotaPisRetencao: regraMun?.aliquotaPisRetencao != null ? Number(regraMun.aliquotaPisRetencao) : (global?.aliquotaPisRetencao != null ? Number(global.aliquotaPisRetencao) : 0.65),
+                  aliquotaCofinsRetencao: regraMun?.aliquotaCofinsRetencao != null ? Number(regraMun.aliquotaCofinsRetencao) : (global?.aliquotaCofinsRetencao != null ? Number(global.aliquotaCofinsRetencao) : 3.00),
+                  aliquotaCsllRetencao: regraMun?.aliquotaCsllRetencao != null ? Number(regraMun.aliquotaCsllRetencao) : (global?.aliquotaCsllRetencao != null ? Number(global.aliquotaCsllRetencao) : 1.00),
+                  valorMinimoRetencaoCrsf: regraMun?.valorMinimoRetencaoCrsf != null ? Number(regraMun.valorMinimoRetencaoCrsf) : (global?.valorMinimoRetencaoCrsf != null ? Number(global.valorMinimoRetencaoCrsf) : 10.01),
+                  valorMinimoRetencaoIr: regraMun?.valorMinimoRetencaoIr != null ? Number(regraMun.valorMinimoRetencaoIr) : (global?.valorMinimoRetencaoIr != null ? Number(global.valorMinimoRetencaoIr) : 10.01),
+                  retemIr: regraMun?.retemIr ?? global?.retemIr ?? false,
+                  aliquotaIr: regraMun?.aliquotaIr != null ? Number(regraMun.aliquotaIr) : (global?.aliquotaIr != null ? Number(global.aliquotaIr) : 1.50),
+                  aliquotaInss: regraMun?.aliquotaInss != null ? Number(regraMun.aliquotaInss) : (global?.aliquotaInss != null ? Number(global.aliquotaInss) : 11),
+                  codigoNbs: regraMun?.nbsPadrao || global?.codigoNbs || local.codigoNbs,
+                  exigeNbs: regraMun?.exigeNbs || false,
+                  aliquotaIss: regraMun?.aliquotaIss ? Number(regraMun.aliquotaIss) : null,
+                  modoRetencoes: regraMun?.modoRetencoes && regraMun.modoRetencoes !== 'HERDAR'
+                    ? regraMun.modoRetencoes
+                    : global?.modoRetencoes || 'SUGERIR',
+                  fiscalRuleConfigured: !!regraMun,
+                  ibscbsConfigured: !!(regraMun?.habilitaIbsCbs || global?.habilitaIbsCbs),
               };
           });
       }

@@ -58,6 +58,18 @@ export async function PUT(request: Request) {
         emailRemetente: body.emailRemetente
     };
 
+    const fiscalBooleanFields = [
+      'ibsCbsPilotoAtivo',
+      'ibsCbsMeiAtivo',
+      'ibsCbsSimplesAtivo',
+      'ibsCbsLucroPresumidoAtivo',
+      'ibsCbsLucroRealAtivo',
+    ] as const;
+
+    for (const field of fiscalBooleanFields) {
+      if (typeof body[field] === 'boolean') dataToUpdate[field] = body[field];
+    }
+
     // === SEGURANÇA: Criptografar a senha antes de salvar ===
     // Só atualiza se vier uma senha nova e que NÃO seja a máscara '********'
     if (body.smtpPass && body.smtpPass.trim() !== '' && body.smtpPass !== '********') {
@@ -68,9 +80,13 @@ export async function PUT(request: Request) {
         dataToUpdate.modeloDpsJson = body.modeloDpsJson;
     }
     
-    const updated = await prisma.configuracaoSistema.update({
+    const updated = await prisma.configuracaoSistema.upsert({
       where: { id: 'config' },
-      data: dataToUpdate
+      update: dataToUpdate,
+      create: {
+        id: 'config',
+        ...dataToUpdate,
+      },
     });
 
     // Mascara novamente a resposta do PUT

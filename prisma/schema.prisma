@@ -8,53 +8,53 @@ datasource db {
 }
 
 model User {
-  id                  String            @id @default(uuid())
-  email               String            @unique
-  senha               String
-  nome                String
-  role                Role              @default(COMUM)
-  cpf                 String?           @unique
-  telefone            String?
-  plano               String?           @default("GRATUITO")
-  planoCiclo          String            @default("MENSAL")
-  planoStatus         String            @default("active")
-  planoExpiresAt      DateTime?
-  cargo               String?
-  avatarUrl           String?
-  resetToken          String?           @unique
-  resetExpires        DateTime?
-  darkMode            Boolean           @default(false)
-  idioma              String            @default("pt-BR")
-  notificacoesEmail   Boolean           @default(true)
-  ipOrigem            String?
-  lastLoginAt         DateTime?
-  empresaId           String?           @unique
-  createdAt           DateTime          @default(now())
-  updatedAt           DateTime          @updatedAt
-  tempEmail           String?
-  verificationCode    String?
-  verificationExpires DateTime?
-  limiteEmpresas      Int               @default(5)
-  tutorialStep        Int               @default(0)
-  creditosPlano       Int               @default(0)
-  creditosExtras      Int               @default(0)
-  dataRenovacaoCiclo  DateTime?
-  empresasContabeis   ContadorVinculo[] @relation("ContadorUser")
-  pedidos             Pedido[]
-  historicoPlanos     PlanHistory[]
-  ticketsAtendidos    Ticket[]          @relation("AtendenteTicket")
-  ticketsCriados      Ticket[]          @relation("SolicitanteTicket")
-  mensagensTicket     TicketMensagem[]
-  empresa             Empresa?          @relation("DonoEmpresa", fields: [empresaId], references: [id])
-  clientes            UserCliente[]
-  empresasAdicionais  Int       @default(0) 
-  empresasFaturadas   Empresa[] @relation("FaturamentoEmpresa") 
-  empresasCustodiadas  Empresa[] @relation("CustodiaEmpresa")
-  empresasProprietarias Empresa[] @relation("ProprietarioEmpresa")
-  eventosCrm          UserEvent[] 
-  faturas         Fatura[]
-  cuponsUsados    CupomLog[]
-  pedidoAnexos    PedidoAnexo[]
+  id                    String            @id @default(uuid())
+  email                 String            @unique
+  senha                 String
+  nome                  String
+  role                  Role              @default(COMUM)
+  cpf                   String?           @unique
+  telefone              String?
+  plano                 String?           @default("GRATUITO")
+  planoCiclo            String            @default("MENSAL")
+  planoStatus           String            @default("active")
+  planoExpiresAt        DateTime?
+  cargo                 String?
+  avatarUrl             String?
+  resetToken            String?           @unique
+  resetExpires          DateTime?
+  darkMode              Boolean           @default(false)
+  idioma                String            @default("pt-BR")
+  notificacoesEmail     Boolean           @default(true)
+  ipOrigem              String?
+  lastLoginAt           DateTime?
+  empresaId             String?           @unique
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+  tempEmail             String?
+  verificationCode      String?
+  verificationExpires   DateTime?
+  limiteEmpresas        Int               @default(5)
+  tutorialStep          Int               @default(0)
+  creditosPlano         Int               @default(0)
+  creditosExtras        Int               @default(0)
+  dataRenovacaoCiclo    DateTime?
+  empresasContabeis     ContadorVinculo[] @relation("ContadorUser")
+  pedidos               Pedido[]
+  historicoPlanos       PlanHistory[]
+  ticketsAtendidos      Ticket[]          @relation("AtendenteTicket")
+  ticketsCriados        Ticket[]          @relation("SolicitanteTicket")
+  mensagensTicket       TicketMensagem[]
+  empresa               Empresa?          @relation("DonoEmpresa", fields: [empresaId], references: [id])
+  clientes              UserCliente[]
+  empresasAdicionais    Int               @default(0)
+  empresasFaturadas     Empresa[]         @relation("FaturamentoEmpresa")
+  empresasCustodiadas   Empresa[]         @relation("CustodiaEmpresa")
+  empresasProprietarias Empresa[]         @relation("ProprietarioEmpresa")
+  eventosCrm            UserEvent[]
+  faturas               Fatura[]
+  cuponsUsados          CupomLog[]
+  pedidoAnexos          PedidoAnexo[]
 }
 
 model PendingRegistration {
@@ -111,14 +111,14 @@ model Empresa {
   vinculadoA               UserCliente[]
   vendasRealizadas         Venda[]           @relation("VendaPrestador")
   minhaCarteira            VinculoCarteira[]
-  donoFaturamentoId         String?
-  donoFaturamento           User?             @relation("FaturamentoEmpresa", fields: [donoFaturamentoId], references: [id])
-  contadorCustodianteId     String?
-  contadorCustodiante       User?             @relation("CustodiaEmpresa", fields: [contadorCustodianteId], references: [id])
-  proprietarioUserId        String?
-  proprietarioUser          User?             @relation("ProprietarioEmpresa", fields: [proprietarioUserId], references: [id])
-  modoCobranca              String            @default("RESPONSAVEL_UNICO")
-  statusPropriedade         String            @default("ORFA")
+  donoFaturamentoId        String?
+  donoFaturamento          User?             @relation("FaturamentoEmpresa", fields: [donoFaturamentoId], references: [id])
+  contadorCustodianteId    String?
+  contadorCustodiante      User?             @relation("CustodiaEmpresa", fields: [contadorCustodianteId], references: [id])
+  proprietarioUserId       String?
+  proprietarioUser         User?             @relation("ProprietarioEmpresa", fields: [proprietarioUserId], references: [id])
+  modoCobranca             String            @default("RESPONSAVEL_UNICO")
+  statusPropriedade        String            @default("ORFA")
 
   @@index([donoFaturamentoId])
   @@index([contadorCustodianteId])
@@ -159,40 +159,40 @@ model Cliente {
 }
 
 model VinculoCarteira {
-  id              String   @id @default(uuid())
-  empresaId       String
-  clienteId       String
-  apelido         String?
-  tags            String?
-  observacoes     String?
-  emailFinanceiro String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  arquivadoEm     DateTime?
-  arquivadoPor    String?
+  id                 String    @id @default(uuid())
+  empresaId          String
+  clienteId          String
+  apelido            String?
+  tags               String?
+  observacoes        String?
+  emailFinanceiro    String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  arquivadoEm        DateTime?
+  arquivadoPor       String?
   motivoArquivamento String?
-  cliente         Cliente  @relation(fields: [clienteId], references: [id], onDelete: Cascade)
-  empresa         Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  cliente            Cliente   @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  empresa            Empresa   @relation(fields: [empresaId], references: [id], onDelete: Cascade)
 
   @@unique([empresaId, clienteId])
 }
 
 model Venda {
-  id        String       @id @default(uuid())
-  empresaId String
-  clienteId String
-  valor     Decimal      @db.Decimal(10, 2)
-  descricao String
-  status    String       @default("PENDENTE")
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
-  arquivadoEm DateTime?
-  arquivadoPor String?
+  id                 String       @id @default(uuid())
+  empresaId          String
+  clienteId          String
+  valor              Decimal      @db.Decimal(10, 2)
+  descricao          String
+  status             String       @default("PENDENTE")
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  arquivadoEm        DateTime?
+  arquivadoPor       String?
   motivoArquivamento String?
-  notas     NotaFiscal[]
-  logs      SystemLog[]
-  cliente   Cliente      @relation(fields: [clienteId], references: [id])
-  empresa   Empresa      @relation("VendaPrestador", fields: [empresaId], references: [id])
+  notas              NotaFiscal[]
+  logs               SystemLog[]
+  cliente            Cliente      @relation(fields: [clienteId], references: [id])
+  empresa            Empresa      @relation("VendaPrestador", fields: [empresaId], references: [id])
 }
 
 model NotaRascunho {
@@ -217,6 +217,7 @@ model EmissaoJob {
   actorUserId           String
   billingUserId         String?
   payloadJson           String    @db.Text
+  fiscalSnapshotJson    String?   @db.Text
   status                String    @default("PENDENTE")
   statusMessage         String?
   attempts              Int       @default(0)
@@ -267,66 +268,72 @@ model Cnae {
 }
 
 model NotaFiscal {
-  id            String     @id @default(uuid())
-  vendaId       String?
-  numero        Int?
-  valor         Decimal    @db.Decimal(10, 2)
-  descricao     String
-  prestadorCnpj String
-  tomadorCnpj   String
-  status        StatusNota @default(RASCUNHO)
-  xmlBase64     String?
-  xmlAutorizadoBase64 String?
+  id                          String     @id @default(uuid())
+  vendaId                     String?
+  numero                      Int?
+  valor                       Decimal    @db.Decimal(10, 2)
+  descricao                   String
+  prestadorCnpj               String
+  tomadorCnpj                 String
+  status                      StatusNota @default(RASCUNHO)
+  xmlBase64                   String?
+  xmlAutorizadoBase64         String?
   xmlCancelamentoEventoBase64 String?
-  pdfBase64     String?
-  chaveAcesso   String?
-  protocolo     String?
-  empresaId     String
-  clienteId     String
-  cnae          String?
-  codigoServico String?
-  dataEmissao   DateTime?
-  createdAt     DateTime   @default(now())
-  arquivadoEm   DateTime?
-  arquivadoPor  String?
-  motivoArquivamento String?
-  cliente       Cliente    @relation(fields: [clienteId], references: [id])
-  empresa       Empresa    @relation("PrestadorNota", fields: [empresaId], references: [id])
-  venda         Venda?     @relation(fields: [vendaId], references: [id])
+  fiscalSnapshotJson          String?    @db.Text
+  pdfBase64                   String?
+  chaveAcesso                 String?
+  protocolo                   String?
+  empresaId                   String
+  clienteId                   String
+  cnae                        String?
+  codigoServico               String?
+  dataEmissao                 DateTime?
+  createdAt                   DateTime   @default(now())
+  arquivadoEm                 DateTime?
+  arquivadoPor                String?
+  motivoArquivamento          String?
+  cliente                     Cliente    @relation(fields: [clienteId], references: [id])
+  empresa                     Empresa    @relation("PrestadorNota", fields: [empresaId], references: [id])
+  venda                       Venda?     @relation(fields: [vendaId], references: [id])
 }
 
 model ConfiguracaoSistema {
-  id             String  @id @default("config")
-  modeloDpsJson  String?
-  versaoApi      String  @default("1.00")
-  ambiente       String  @default("PRODUCAO")
-  smtpHost       String?
-  smtpPort       Int?    @default(587)
-  smtpUser       String?
-  smtpPass       String?
-  smtpSecure     Boolean @default(false)
-  emailRemetente String?
+  id                        String  @id @default("config")
+  modeloDpsJson             String?
+  versaoApi                 String  @default("1.00")
+  ambiente                  String  @default("PRODUCAO")
+  smtpHost                  String?
+  smtpPort                  Int?    @default(587)
+  smtpUser                  String?
+  smtpPass                  String?
+  smtpSecure                Boolean @default(false)
+  emailRemetente            String?
+  ibsCbsPilotoAtivo         Boolean @default(true)
+  ibsCbsMeiAtivo            Boolean @default(false)
+  ibsCbsSimplesAtivo        Boolean @default(false)
+  ibsCbsLucroPresumidoAtivo Boolean @default(true)
+  ibsCbsLucroRealAtivo      Boolean @default(true)
 }
 
 model GlobalNotice {
-  id               String    @id @default(uuid())
-  titulo           String
-  mensagem         String    @db.Text
-  tipo             String    @default("INFO")
-  status           String    @default("RASCUNHO")
-  publico          String    @default("TODOS")
-  iniciaEm         DateTime?
-  terminaEm        DateTime?
-  linkLabel        String?
-  linkHref         String?
-  anexoNome        String?
-  anexoBase64      String?   @db.Text
-  notificarApp     Boolean   @default(false)
-  criadoPorId      String?
-  publicadoEm      DateTime?
-  arquivadoEm      DateTime?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  id           String    @id @default(uuid())
+  titulo       String
+  mensagem     String    @db.Text
+  tipo         String    @default("INFO")
+  status       String    @default("RASCUNHO")
+  publico      String    @default("TODOS")
+  iniciaEm     DateTime?
+  terminaEm    DateTime?
+  linkLabel    String?
+  linkHref     String?
+  anexoNome    String?
+  anexoBase64  String?   @db.Text
+  notificarApp Boolean   @default(false)
+  criadoPorId  String?
+  publicadoEm  DateTime?
+  arquivadoEm  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   @@index([status, iniciaEm, terminaEm])
   @@index([publico])
@@ -360,34 +367,87 @@ model AppNotification {
 }
 
 model GlobalCnae {
-  id                       String   @id @default(uuid())
-  codigo                   String   @unique
-  descricao                String
-  itemLc                   String?
-  codigoTributacaoNacional String?
-  aliquotaPadrao           Decimal? @db.Decimal(5, 2)
-  codigoNbs                String?
-  temRetencaoInss          Boolean  @default(false)
-  createdAt                DateTime @default(now())
-  updatedAt                DateTime @updatedAt
-  aliquotaCrsf             Decimal? @db.Decimal(5, 2)
-  aliquotaIr               Decimal? @db.Decimal(5, 2)
-  retemCrsf                Boolean  @default(false)
-  retemIr                  Boolean  @default(false)
+  id                          String    @id @default(uuid())
+  codigo                      String    @unique
+  descricao                   String
+  itemLc                      String?
+  codigoTributacaoNacional    String?
+  aliquotaPadrao              Decimal?  @db.Decimal(5, 2)
+  codigoNbs                   String?
+  temRetencaoInss             Boolean   @default(false)
+  createdAt                   DateTime  @default(now())
+  updatedAt                   DateTime  @updatedAt
+  aliquotaCrsf                Decimal?  @db.Decimal(5, 2)
+  aliquotaIr                  Decimal?  @db.Decimal(5, 2)
+  retemCrsf                   Boolean   @default(false)
+  retemIr                     Boolean   @default(false)
+  modoRetencoes               String    @default("SUGERIR")
+  aliquotaPisRetencao         Decimal?  @db.Decimal(5, 2)
+  aliquotaCofinsRetencao      Decimal?  @db.Decimal(5, 2)
+  aliquotaCsllRetencao        Decimal?  @db.Decimal(5, 2)
+  valorMinimoRetencaoCrsf     Decimal?  @default(10.01) @db.Decimal(10, 2)
+  valorMinimoRetencaoIr       Decimal?  @default(10.01) @db.Decimal(10, 2)
+  aliquotaInss                Decimal?  @db.Decimal(5, 2)
+  calculaPisCofinsDevido      Boolean?
+  aliquotaPisDevido           Decimal?  @db.Decimal(5, 2)
+  aliquotaCofinsDevido        Decimal?  @db.Decimal(5, 2)
+  cstPisCofins                String?   @default("01")
+  aliquotaTotTribSN           Decimal?  @default(6.00) @db.Decimal(5, 2)
+  aliquotaTotTribFederal      Decimal?  @db.Decimal(5, 2)
+  habilitaIbsCbs              Boolean?
+  inicioObrigatoriedadeIbsCbs DateTime?
+  codigoIndicadorOperacao     String?
+  cstIbsCbs                   String?
+  classeTribIbsCbs            String?
+  fonteNormativa              String?
+  inicioVigencia              DateTime?
+  fimVigencia                 DateTime?
 }
 
 model TributacaoMunicipal {
-  id                        String   @id @default(uuid())
-  cnae                      String
-  codigoIbge                String
-  codigoTributacaoMunicipal String
-  descricaoServicoMunicipal String?
-  createdAt                 DateTime @default(now())
-  updatedAt                 DateTime @updatedAt
-  aliquotaIss               Decimal? @db.Decimal(5, 2)
-  exigeNbs                  Boolean  @default(false)
+  id                             String    @id @default(uuid())
+  cnae                           String
+  codigoIbge                     String
+  codigoTributacaoMunicipal      String
+  descricaoServicoMunicipal      String?
+  createdAt                      DateTime  @default(now())
+  updatedAt                      DateTime  @updatedAt
+  aliquotaIss                    Decimal?  @db.Decimal(5, 2)
+  exigeNbs                       Boolean   @default(false)
+  exigeCodigoTributacaoMunicipal Boolean   @default(true)
+  nbsPadrao                      String?
+  ativo                          Boolean   @default(true)
+  prioridade                     Int       @default(0)
+  inicioVigencia                 DateTime?
+  fimVigencia                    DateTime?
+  modoRetencoes                  String    @default("HERDAR")
+  retemCrsf                      Boolean?
+  aliquotaPisRetencao            Decimal?  @db.Decimal(5, 2)
+  aliquotaCofinsRetencao         Decimal?  @db.Decimal(5, 2)
+  aliquotaCsllRetencao           Decimal?  @db.Decimal(5, 2)
+  valorMinimoRetencaoCrsf        Decimal?  @db.Decimal(10, 2)
+  valorMinimoRetencaoIr          Decimal?  @db.Decimal(10, 2)
+  retemIr                        Boolean?
+  aliquotaIr                     Decimal?  @db.Decimal(5, 2)
+  retemInss                      Boolean?
+  aliquotaInss                   Decimal?  @db.Decimal(5, 2)
+  calculaPisCofinsDevido         Boolean?
+  aliquotaPisDevido              Decimal?  @db.Decimal(5, 2)
+  aliquotaCofinsDevido           Decimal?  @db.Decimal(5, 2)
+  habilitaIbsCbs                 Boolean?
+  inicioObrigatoriedadeIbsCbs    DateTime?
+  codigoIndicadorOperacao        String?
+  cstIbsCbs                      String?
+  classeTribIbsCbs               String?
+  finNfsePadrao                  String?
+  indFinalPadrao                 String?
+  indDestPadrao                  String?
+  versaoLayout                   String    @default("1.01")
+  fonteNormativa                 String?
+  observacoesFiscal              String?   @db.Text
 
   @@unique([cnae, codigoIbge, codigoTributacaoMunicipal])
+  @@index([codigoIbge, cnae, ativo, inicioVigencia, fimVigencia])
 }
 
 model Plan {
@@ -408,24 +468,24 @@ model Plan {
   maxClientes    Int           @default(0)
   tipo           String        @default("PLANO")
   historico      PlanHistory[]
-  
-  faturas        Fatura[]      // <--- ADICIONE ESTA LINHA AQUI!
+
+  faturas Fatura[] // <--- ADICIONE ESTA LINHA AQUI!
 }
 
 model PlanHistory {
-  id            String    @id @default(uuid())
-  userId        String
-  planId        String
-  dataInicio    DateTime  @default(now())
-  dataFim       DateTime?
-  status        String    @default("ATIVO")
-  notasEmitidas Int       @default(0)
-  createdAt     DateTime  @default(now())
-  arquivadoEm   DateTime?
-  arquivadoPor  String?
+  id                 String    @id @default(uuid())
+  userId             String
+  planId             String
+  dataInicio         DateTime  @default(now())
+  dataFim            DateTime?
+  status             String    @default("ATIVO")
+  notasEmitidas      Int       @default(0)
+  createdAt          DateTime  @default(now())
+  arquivadoEm        DateTime?
+  arquivadoPor       String?
   motivoArquivamento String?
-  plan          Plan      @relation(fields: [planId], references: [id])
-  user          User      @relation(fields: [userId], references: [id])
+  plan               Plan      @relation(fields: [planId], references: [id])
+  user               User      @relation(fields: [userId], references: [id])
 }
 
 model SystemLog {
@@ -456,28 +516,28 @@ model SystemLog {
 }
 
 model Ticket {
-  id            String           @id @default(uuid())
-  protocolo     Int              @default(autoincrement())
-  assunto       String
-  categoria     String?
-  prioridade    String           @default("MEDIA")
-  descricao     String
-  status        String           @default("ABERTO")
-  clientUnread  Boolean          @default(false)
-  anexoBase64   String?
-  anexoNome     String?
-  catalogId     String?
-  solicitanteId String
-  atendenteId   String?
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
-  arquivadoEm   DateTime?
-  arquivadoPor  String?
+  id                 String           @id @default(uuid())
+  protocolo          Int              @default(autoincrement())
+  assunto            String
+  categoria          String?
+  prioridade         String           @default("MEDIA")
+  descricao          String
+  status             String           @default("ABERTO")
+  clientUnread       Boolean          @default(false)
+  anexoBase64        String?
+  anexoNome          String?
+  catalogId          String?
+  solicitanteId      String
+  atendenteId        String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  arquivadoEm        DateTime?
+  arquivadoPor       String?
   motivoArquivamento String?
-  atendente     User?            @relation("AtendenteTicket", fields: [atendenteId], references: [id])
-  catalogItem   TicketCatalog?   @relation(fields: [catalogId], references: [id])
-  solicitante   User             @relation("SolicitanteTicket", fields: [solicitanteId], references: [id])
-  mensagens     TicketMensagem[]
+  atendente          User?            @relation("AtendenteTicket", fields: [atendenteId], references: [id])
+  catalogItem        TicketCatalog?   @relation(fields: [catalogId], references: [id])
+  solicitante        User             @relation("SolicitanteTicket", fields: [solicitanteId], references: [id])
+  mensagens          TicketMensagem[]
 }
 
 model TicketMensagem {
@@ -495,19 +555,19 @@ model TicketMensagem {
 }
 
 model ContadorVinculo {
-  id         String   @id @default(uuid())
-  status     String   @default("PENDENTE")
-  contadorId String
-  empresaId  String
-  clientePodeAcessarPortal Boolean @default(false)
-  nivelPortal String @default("NENHUM")
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  arquivadoEm DateTime?
-  arquivadoPor String?
-  motivoArquivamento String?
-  contador   User     @relation("ContadorUser", fields: [contadorId], references: [id])
-  empresa    Empresa  @relation("EmpresaContabil", fields: [empresaId], references: [id])
+  id                       String    @id @default(uuid())
+  status                   String    @default("PENDENTE")
+  contadorId               String
+  empresaId                String
+  clientePodeAcessarPortal Boolean   @default(false)
+  nivelPortal              String    @default("NENHUM")
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+  arquivadoEm              DateTime?
+  arquivadoPor             String?
+  motivoArquivamento       String?
+  contador                 User      @relation("ContadorUser", fields: [contadorId], references: [id])
+  empresa                  Empresa   @relation("EmpresaContabil", fields: [empresaId], references: [id])
 
   @@unique([contadorId, empresaId])
 }
@@ -533,24 +593,24 @@ model MunicipioHomologado {
 }
 
 model Pedido {
-  id              String   @id @default(uuid())
-  userId          String
-  planoSlug       String
-  ciclo           String
-  notasAdicionais Int      @default(0)
-  valorPlano      Decimal  @db.Decimal(10, 2)
-  valorAdicionais Decimal  @db.Decimal(10, 2)
-  valorTotal      Decimal  @db.Decimal(10, 2)
-  status          String   @default("PENDENTE")
-  formaPagamento  String?
-  gatewayId       String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  arquivadoEm     DateTime?
-  arquivadoPor    String?
+  id                 String        @id @default(uuid())
+  userId             String
+  planoSlug          String
+  ciclo              String
+  notasAdicionais    Int           @default(0)
+  valorPlano         Decimal       @db.Decimal(10, 2)
+  valorAdicionais    Decimal       @db.Decimal(10, 2)
+  valorTotal         Decimal       @db.Decimal(10, 2)
+  status             String        @default("PENDENTE")
+  formaPagamento     String?
+  gatewayId          String?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  arquivadoEm        DateTime?
+  arquivadoPor       String?
   motivoArquivamento String?
-  user            User     @relation(fields: [userId], references: [id])
-  anexos          PedidoAnexo[]
+  user               User          @relation(fields: [userId], references: [id])
+  anexos             PedidoAnexo[]
 }
 
 model PedidoAnexo {
@@ -588,14 +648,14 @@ enum StatusNota {
 
 // === CRM: Linha do Tempo e Logs de Relacionamento ===
 model UserEvent {
-  id          String   @id @default(uuid())
-  userId      String
-  tipo        String   // Ex: "SISTEMA", "FINANCEIRO", "MANUAL", "EMAIL_ENVIADO"
-  titulo      String   // Ex: "Pagamento Recusado", "Anotação de Venda"
-  descricao   String?  // Ex: "O cliente informou que vai pagar amanhã."
-  createdAt   DateTime @default(now())
-  
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String   @id @default(uuid())
+  userId    String
+  tipo      String // Ex: "SISTEMA", "FINANCEIRO", "MANUAL", "EMAIL_ENVIADO"
+  titulo    String // Ex: "Pagamento Recusado", "Anotação de Venda"
+  descricao String? // Ex: "O cliente informou que vai pagar amanhã."
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 // ==========================================
@@ -603,32 +663,32 @@ model UserEvent {
 // ==========================================
 
 model Fatura {
-  id              String   @id @default(uuid())
-  
-  userId          String
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+  id String @id @default(uuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   // Opcional: Se a fatura for referente à assinatura de um plano principal
-  planoId         String?
-  plan            Plan?    @relation(fields: [planoId], references: [id])
-  
-  descricao       String   // Resumo do que foi comprado (Ex: "Basic (1x) + 5 Notas Extras")
-  valorTotal      Decimal  @db.Decimal(10, 2) // Valor final pago (já com descontos)
-  
+  planoId String?
+  plan    Plan?   @relation(fields: [planoId], references: [id])
+
+  descricao  String // Resumo do que foi comprado (Ex: "Basic (1x) + 5 Notas Extras")
+  valorTotal Decimal @db.Decimal(10, 2) // Valor final pago (já com descontos)
+
   // Controle Financeiro
-  status          String   @default("PENDENTE") // PENDENTE, PAGO, CANCELADO, VENCIDO
-  metodo          String   @default("PIX")      
-  
+  status String @default("PENDENTE") // PENDENTE, PAGO, CANCELADO, VENCIDO
+  metodo String @default("PIX")
+
   // Retorno do Gateway (Banco Inter / Asaas / Stripe)
-  txid            String?  // ID da transação no banco
-  qrCodePix       String?  @db.Text 
-  
-  pagoEm          DateTime? 
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  txid      String? // ID da transação no banco
+  qrCodePix String? @db.Text
+
+  pagoEm    DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
   // Relação 1 para N (Uma fatura pode ter registado o uso de um cupom)
-  cupomLogs       CupomLog[]
+  cupomLogs CupomLog[]
 
   @@index([userId])
   @@index([status])
@@ -640,58 +700,58 @@ model Fatura {
 // ==========================================
 
 model Cupom {
-  id              String   @id @default(uuid())
-  codigo          String   @unique // Ex: VIMDA_A, BEMVINDO50
-  
+  id     String @id @default(uuid())
+  codigo String @unique // Ex: VIMDA_A, BEMVINDO50
+
   // Regras de Desconto
-  tipoDesconto    String   // 'PORCENTAGEM' ou 'VALOR_FIXO'
-  valorDesconto   Decimal  @db.Decimal(10, 2) // Ex: 50.00 (50%) ou 100.00 (R$ 100)
-  
+  tipoDesconto  String // 'PORCENTAGEM' ou 'VALOR_FIXO'
+  valorDesconto Decimal @db.Decimal(10, 2) // Ex: 50.00 (50%) ou 100.00 (R$ 100)
+
   // Regras de Escassez
-  validade        DateTime? // Expira em (Nulo = Nunca expira)
-  limiteUsos      Int?      // Quantos podem usar no total (Nulo = Infinito)
-  vezesUsado      Int       @default(0) // Contador automático
-  
+  validade   DateTime? // Expira em (Nulo = Nunca expira)
+  limiteUsos Int? // Quantos podem usar no total (Nulo = Infinito)
+  vezesUsado Int       @default(0) // Contador automático
+
   // Regras de Carrinho (As nossas travas inteligentes)
-  aplicarEm       String    @default("CARRINHO_TOTAL") // 'CARRINHO_TOTAL', 'SO_ASSINATURA', 'SO_PACOTES'
-  maxCiclos       Int?      // Trava de meses (Ex: Dá desconto só em até 2 meses de plano)
-  
+  aplicarEm String @default("CARRINHO_TOTAL") // 'CARRINHO_TOTAL', 'SO_ASSINATURA', 'SO_PACOTES'
+  maxCiclos Int? // Trava de meses (Ex: Dá desconto só em até 2 meses de plano)
+
   // Gestão de Parceiros (Para você pagar comissões)
-  parceiroNome    String?   // Ex: "Escritório Contábil XPTO"
-  
-  ativo           Boolean   @default(true)
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  parceiroNome String? // Ex: "Escritório Contábil XPTO"
+
+  ativo     Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relação (Quem usou este cupom)
-  logs            CupomLog[]
+  logs CupomLog[]
+
+  // Novas regras avançadas
+  planosValidos        String? // Guarda os IDs dos planos selecionados no container
+  apenasPrimeiraCompra Boolean @default(false) // Trava para novos clientes
 
   @@index([codigo])
   @@index([ativo])
-
-  // Novas regras avançadas
-  planosValidos        String?   // Guarda os IDs dos planos selecionados no container
-  apenasPrimeiraCompra Boolean   @default(false) // Trava para novos clientes
 }
 
 // O "Histórico" de usos (A Ponte entre Fatura, Cliente e Cupom)
 // É aqui que tiramos o relatório para pagar os parceiros no fim do mês!
 model CupomLog {
-  id              String   @id @default(uuid())
-  
-  cupomId         String
-  cupom           Cupom    @relation(fields: [cupomId], references: [id], onDelete: Cascade)
-  
-  userId          String
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  faturaId        String
-  fatura          Fatura   @relation(fields: [faturaId], references: [id], onDelete: Cascade)
-  
+  id String @id @default(uuid())
+
+  cupomId String
+  cupom   Cupom  @relation(fields: [cupomId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  faturaId String
+  fatura   Fatura @relation(fields: [faturaId], references: [id], onDelete: Cascade)
+
   // Fotografia do momento da compra
   descontoAplicado Decimal @db.Decimal(10, 2) // Quantos R$ o cliente economizou nesta fatura
-  
-  createdAt       DateTime  @default(now())
+
+  createdAt DateTime @default(now())
 
   @@index([cupomId])
   @@index([userId])
