@@ -293,9 +293,24 @@ export function parseDanfseXml(input: string | Buffer, options: DanfseGeneratorO
   const totalTrib = first(valoresDps, 'totTrib');
   const chave = String(info?.getAttribute('Id') || '').replace(/^NFS/, '') || text(info, ['chNFSe']);
   const prestadorData = participante(prest, 'PRESTADOR / FORNECEDOR', emit);
+  const enderecoEmitente = first(emit, 'enderNac') || first(emit, 'endNac') || first(emit, 'end');
+  const codigoMunicipioEmitente = text(enderecoEmitente, ['cMun']);
+  const cepEmitente = text(enderecoEmitente, ['CEP']);
   prestadorData.nome ||= text(emit, ['xNome']);
   prestadorData.endereco ||= endereco(emit);
   prestadorData.municipioUf ||= municipioUf(first(emit, 'enderNac'));
+  if (codigoMunicipioEmitente || cepEmitente) {
+    prestadorData.codigoIbgeCep = [formatCodigoMunicipio(codigoMunicipioEmitente), formatCep(cepEmitente)].filter(Boolean).join(' / ');
+  }
+  // Para o prestador, somente o contato cadastral devolvido no bloco oficial
+  // <emit> pode aparecer. Retornos antigos podem apenas repetir o e-mail que o
+  // SaaS enviou em <prest>; nesse caso a origem nao e cadastral e deve ficar vazia.
+  const emailEmitente = text(emit, ['email']);
+  const emailEnviadoNaDps = text(prest, ['email']);
+  prestadorData.email = emailEmitente
+    && emailEmitente.toLocaleLowerCase('pt-BR') !== emailEnviadoNaDps.toLocaleLowerCase('pt-BR')
+    ? emailEmitente
+    : '';
   prestadorData.simplesNacional = simplesNacional(text(first(prest, 'regTrib'), ['opSimpNac']));
   prestadorData.regimeApuracao = regimeApuracao(text(first(prest, 'regTrib'), ['regApTribSN']));
 

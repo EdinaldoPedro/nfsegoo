@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Mail, KeyRound, CheckCircle, ArrowRight, LogOut, Loader2 } from 'lucide-react';
+import { logoutAndRedirect } from '@/app/utils/client-session';
 
 export default function VerificarEmailPage() {
     const router = useRouter();
@@ -63,10 +64,7 @@ export default function VerificarEmailPage() {
     };
 
     const handleLogout = () => {
-        localStorage.clear();
-        fetch('/api/auth/logout', { method: 'POST' }).finally(() => {
-            router.push('/login');
-        });
+        void logoutAndRedirect();
     };
 
     return (

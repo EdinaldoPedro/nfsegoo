@@ -82,6 +82,7 @@ test('gera o caso LP para PJ com ISS nao retido e retencoes federais', () => {
   const xml = new NacionalAdapter().toXml({
     prestador: {
       id: 'empresa', documento: '62172136000136', inscricaoMunicipal: '683343001', regimeTributario: 'LUCRO_PRESUMIDO',
+      email: 'usuario-do-saas@example.com',
       endereco: { codigoIbge: '1302603', uf: 'AM' }, configuracoes: { regimeEspecial: '0' },
     },
     tomador: {
@@ -105,6 +106,7 @@ test('gera o caso LP para PJ com ISS nao retido e retencoes federais', () => {
   });
 
   assert.match(xml, /<tpRetISSQN>1<\/tpRetISSQN>/);
+  assert.doesNotMatch(xml, /<prest>[\s\S]*?<email>/);
   assert.doesNotMatch(xml, /<tribMun>.*?<pAliq>/s);
   assert.match(xml, /<tpRetPisCofins>3<\/tpRetPisCofins>/);
   assert.match(xml, /<vPis>59\.92<\/vPis><vCofins>276\.57<\/vCofins>/);

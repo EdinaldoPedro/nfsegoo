@@ -27,6 +27,7 @@ import {
   X,
 } from 'lucide-react';
 import { useDialog } from '@/app/contexts/DialogContext';
+import { logoutAndRedirect } from '@/app/utils/client-session';
 
 const PAGE_SIZE = 12;
 const STATUS_PENDENTES = ['PENDENTE', 'PENDENTE_DONO', 'PENDENTE_CUSTODIANTE'];
@@ -64,10 +65,7 @@ export default function ContadorDashboard() {
 
   const handleLogout = async () => {
     try {
-      await fetch('/api/auth/logout', { method: 'POST' });
-      localStorage.clear();
-      sessionStorage.clear();
-      router.push('/login');
+      await logoutAndRedirect();
     } catch (error) {
       console.error('Erro ao terminar sessão', error);
     }

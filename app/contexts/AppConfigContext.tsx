@@ -1,6 +1,7 @@
 'use client';
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { usePathname } from 'next/navigation'; // <--- Importante para detectar navegação
+import { redirectToLogin } from '@/app/utils/client-session';
 
 const dictionary: any = {
   'pt-BR': {
@@ -59,7 +60,13 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
     // 2. SE tiver usuário logado, busca a verdade no banco e SOBRESCREVE o local
     if(userId) {
         fetch('/api/perfil', { headers: { 'x-user-id': userId } })
-            .then(r => r.json())
+            .then(r => {
+                if (r.status === 401) {
+                    redirectToLogin('expired');
+                    throw new Error('Sessao expirada');
+                }
+                return r.json();
+            })
             .then(data => {
                 if (data.configuracoes) {
                     // Força o tema do usuário (seja true ou false)

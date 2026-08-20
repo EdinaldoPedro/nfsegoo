@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { AppConfigProvider } from "@/app/contexts/AppConfigContext";
 import { DialogProvider } from "@/app/contexts/DialogContext"; // <--- 1. IMPORTAR
+import RuntimeGuard from "@/app/RuntimeGuard";
 
 // app/layout.tsx
 
@@ -25,12 +26,14 @@ export default function RootLayout({
   return (
     <html lang="pt-BR">
       <body>
-        <AppConfigProvider>
-          {/* 2. ENVOLVER A APLICAÇÃO */}
-          <DialogProvider>
-            {children}
-          </DialogProvider>
-        </AppConfigProvider>
+        <RuntimeGuard>
+          <AppConfigProvider>
+            {/* 2. ENVOLVER A APLICAÇÃO */}
+            <DialogProvider>
+              {children}
+            </DialogProvider>
+          </AppConfigProvider>
+        </RuntimeGuard>
       </body>
     </html>
   );

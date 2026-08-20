@@ -49,14 +49,6 @@ export async function POST(request: Request, { params }: { params: { id: string 
       return NextResponse.json({ error: 'XML oficial ausente. Reprocesse o XML antes de atualizar o PDF.' }, { status: 400 });
     }
 
-    if (nota.pdfBase64) {
-      return NextResponse.json({
-        success: true,
-        skipped: true,
-        message: 'PDF ja esta salvo no banco.',
-      });
-    }
-
     await createLog({
       level: 'INFO',
       action: 'REPROCESSAMENTO_PDF_INICIADO',
@@ -65,6 +57,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
         notaId: nota.id,
         numeroNota: nota.numero,
         chaveAcesso: nota.chaveAcesso,
+        substituiPdfExistente: Boolean(nota.pdfBase64),
       },
       empresaId: venda.empresaId,
       vendaId: venda.id,
@@ -97,7 +90,9 @@ export async function POST(request: Request, { params }: { params: { id: string 
 
     return NextResponse.json({
       success: true,
-      message: 'PDF reprocessado e salvo com sucesso.',
+      message: nota.pdfBase64
+        ? 'PDF anterior substituido com sucesso a partir do XML oficial.'
+        : 'PDF reprocessado e salvo com sucesso.',
       notaId: nota.id,
       tamanhoBytes: pdfBuffer.length,
     });

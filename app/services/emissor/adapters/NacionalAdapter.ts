@@ -156,9 +156,10 @@ export class NacionalAdapter {
             `<CNPJ>${documentoPrestador}</CNPJ>` +
             (p.inscricaoMunicipal ? `<IM>${this.clean(p.inscricaoMunicipal)}</IM>` : '');
         
-        // Dados de contato do Prestador (Requisito Sefin)
+        // O cadastro oficial devolvido pelo Portal Nacional e a fonte do contato
+        // exibido na DANFSe. Nao envie o e-mail do usuario/empresa na DPS, pois o
+        // Portal pode apenas replica-lo no XML autorizado como se fosse cadastral.
         if (p.telefone) prestXml += `<fone>${this.clean(p.telefone)}</fone>`;
-        if (p.email) prestXml += `<email>${this.escapeXml(p.email)}</email>`;
         
         prestXml += `<regTrib><opSimpNac>${opSimpNac}</opSimpNac>`;
         if (opSimpNac === '3') prestXml += `<regApTribSN>1</regApTribSN>`;

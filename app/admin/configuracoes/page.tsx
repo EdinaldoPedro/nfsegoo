@@ -12,6 +12,7 @@ import {
   Loader2,
   Mail,
   Paperclip,
+  Power,
   PlusCircle,
   Save,
   Send,
@@ -60,7 +61,7 @@ const MAX_AVISO_ATTACHMENT_BYTES = 2 * 1024 * 1024;
 export default function AdminConfig() {
   const router = useRouter();
 
-  const [activeTab, setActiveTab] = useState<'FISCAL' | 'EMAIL' | 'AVISOS'>('FISCAL');
+  const [activeTab, setActiveTab] = useState<'FISCAL' | 'EMAIL' | 'MANUTENCAO' | 'AVISOS'>('FISCAL');
   const [config, setConfig] = useState<any>({});
   const [avisos, setAvisos] = useState<AvisoGlobal[]>([]);
   const [avisoForm, setAvisoForm] = useState<AvisoGlobal>(avisoInicial);
@@ -185,22 +186,53 @@ export default function AdminConfig() {
     }
   };
 
-  const handleSave = async () => {
+  const persistConfig = async (
+    nextConfig = config,
+    successMessage = 'Configuracoes salvas com sucesso.',
+    confirmarAlteracaoManutencao = false,
+  ) => {
     setSaving(true);
     try {
       const res = await fetch('/api/admin/config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config),
+        body: JSON.stringify({ ...nextConfig, confirmarAlteracaoManutencao }),
       });
       const data = await res.json();
-      if (res.ok) showMessage('Configuracoes salvas com sucesso.', 'sucesso');
-      else showMessage(`Erro ao salvar: ${data.error || 'Desconhecido'}`, 'erro');
+      if (res.ok) {
+        setConfig(data);
+        showMessage(successMessage, 'sucesso');
+        return true;
+      }
+      showMessage(`Erro ao salvar: ${data.error || 'Desconhecido'}`, 'erro');
+      return false;
     } catch {
       showMessage('Erro de conexao com o servidor.', 'erro');
+      return false;
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleSave = () => {
+    void persistConfig();
+  };
+
+  const handleMaintenanceToggle = async (checked: boolean) => {
+    const confirmed = window.confirm(checked
+      ? 'Ativar o modo de manutenção agora? Clientes e contadores com sessão ativa serão direcionados para a página de atualização.'
+      : 'Desativar o modo de manutenção e liberar novamente o acesso de clientes e contadores?');
+    if (!confirmed) return;
+
+    const previous = config;
+    const next = { ...config, manutencaoAtiva: checked };
+    setConfig(next);
+    const saved = await persistConfig(
+      next,
+      checked ? 'Modo de manutenção ativado.' : 'Modo de manutenção desativado. Operação liberada.',
+      true,
+    );
+    if (!saved) setConfig(previous);
   };
 
   const handleTestEmail = async () => {
@@ -254,6 +286,9 @@ export default function AdminConfig() {
         <button onClick={() => setActiveTab('EMAIL')} className={`pb-3 px-6 font-bold text-sm flex items-center gap-2 transition border-b-2 whitespace-nowrap ${activeTab === 'EMAIL' ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
           <Mail size={18} /> Servidor de E-mail (SMTP)
         </button>
+        <button onClick={() => setActiveTab('MANUTENCAO')} className={`pb-3 px-6 font-bold text-sm flex items-center gap-2 transition border-b-2 whitespace-nowrap ${activeTab === 'MANUTENCAO' ? 'border-amber-600 text-amber-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+          <Power size={18} /> Manutenção
+        </button>
         <button onClick={() => setActiveTab('AVISOS')} className={`pb-3 px-6 font-bold text-sm flex items-center gap-2 transition border-b-2 whitespace-nowrap ${activeTab === 'AVISOS' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
           <Bell size={18} /> Avisos Globais
         </button>
@@ -284,6 +319,16 @@ export default function AdminConfig() {
             setConfig={setConfig}
             saving={saving}
             handleSave={handleSave}
+          />
+        )}
+
+        {activeTab === 'MANUTENCAO' && (
+          <MaintenanceSettings
+            config={config}
+            setConfig={setConfig}
+            saving={saving}
+            handleSave={handleSave}
+            handleToggle={handleMaintenanceToggle}
           />
         )}
 
@@ -355,6 +400,108 @@ function FiscalToggle({
     >
       <span className={`inline-block h-5 w-5 rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-6' : 'translate-x-1'}`} />
     </button>
+  );
+}
+
+function MaintenanceSettings({
+  config,
+  setConfig,
+  saving,
+  handleSave,
+  handleToggle,
+}: {
+  config: any;
+  setConfig: (config: any) => void;
+  saving: boolean;
+  handleSave: () => void;
+  handleToggle: (checked: boolean) => void;
+}) {
+  const active = Boolean(config.manutencaoAtiva);
+
+  return (
+    <div className="space-y-7 animate-in fade-in slide-in-from-left-4 duration-300">
+      <div className={`flex flex-col gap-5 rounded-2xl border p-6 md:flex-row md:items-center md:justify-between ${active ? 'border-amber-300 bg-amber-50' : 'border-emerald-200 bg-emerald-50'}`}>
+        <div className="flex gap-4">
+          <div className={`h-fit rounded-full bg-white p-3 shadow-sm ring-1 ${active ? 'text-amber-700 ring-amber-200' : 'text-emerald-700 ring-emerald-100'}`}>
+            <Power size={26} />
+          </div>
+          <div>
+            <div className="mb-1 flex flex-wrap items-center gap-2">
+              <h3 className="text-lg font-black text-slate-950">Modo de manutenção do SaaS</h3>
+              <span className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-wide ${active ? 'bg-amber-600 text-white' : 'bg-emerald-700 text-white'}`}>
+                {active ? 'Acesso pausado' : 'Operacao normal'}
+              </span>
+            </div>
+            <p className="max-w-2xl text-sm leading-relaxed text-slate-700">
+              Quando ativo, clientes e contadores são direcionados para a página de atualização. Administradores e suporte continuam com acesso para acompanhar e liberar o sistema.
+            </p>
+          </div>
+        </div>
+        <FiscalToggle
+          checked={active}
+          disabled={saving}
+          label={active ? 'Desativar modo de manutenção' : 'Ativar modo de manutenção'}
+          onChange={handleToggle}
+        />
+      </div>
+
+      <div>
+        <p className="text-xs font-black uppercase tracking-[0.18em] text-amber-700">Comunicação ao usuário</p>
+        <h3 className="mt-1 text-xl font-black text-slate-900">Conteúdo da página de atualização</h3>
+        <p className="mt-1 text-sm text-slate-500">Prepare a mensagem antes de ativar a chave. Campos vazios usam o texto padrão do SaaS.</p>
+      </div>
+
+      <div className="grid gap-5">
+        <div>
+          <label className="mb-2 block text-xs font-black uppercase tracking-wide text-slate-600">Titulo principal</label>
+          <input
+            value={config.manutencaoTitulo || ''}
+            maxLength={120}
+            onChange={(event) => setConfig({ ...config, manutencaoTitulo: event.target.value })}
+            placeholder="Estamos realizando uma atualização"
+            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-amber-500 focus:ring-4 focus:ring-amber-100"
+          />
+        </div>
+        <div>
+          <label className="mb-2 block text-xs font-black uppercase tracking-wide text-slate-600">Mensagem</label>
+          <textarea
+            value={config.manutencaoMensagem || ''}
+            maxLength={1200}
+            rows={5}
+            onChange={(event) => setConfig({ ...config, manutencaoMensagem: event.target.value })}
+            placeholder="Estamos trabalhando para deixar sua experiência ainda melhor."
+            className="w-full resize-none rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm leading-6 text-slate-900 outline-none transition focus:border-amber-500 focus:ring-4 focus:ring-amber-100"
+          />
+        </div>
+        <div>
+          <label className="mb-2 block text-xs font-black uppercase tracking-wide text-slate-600">Previsão ou próxima atualização</label>
+          <input
+            value={config.manutencaoPrevisao || ''}
+            maxLength={160}
+            onChange={(event) => setConfig({ ...config, manutencaoPrevisao: event.target.value })}
+            placeholder="Ex.: Retorno previsto para hoje, às 22h"
+            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-amber-500 focus:ring-4 focus:ring-amber-100"
+          />
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-blue-200 bg-blue-50 p-5 text-sm text-blue-950">
+        <div className="flex items-start gap-3">
+          <ShieldCheck className="mt-0.5 shrink-0 text-blue-700" size={21} />
+          <p><strong>Proteção operacional:</strong> sessões abertas verificam o estado a cada 30 segundos e ao voltar para a aba. Uma sessão expirada é encerrada e enviada ao login, sem deixar a tela congelada.</p>
+        </div>
+      </div>
+
+      <div className="flex flex-col justify-end gap-3 border-t border-slate-200 pt-5 sm:flex-row">
+        <button onClick={() => window.open('/manutencao?preview=1', '_blank', 'noopener,noreferrer')} className="flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-6 py-3 text-sm font-black text-slate-700 transition hover:bg-slate-50">
+          <Eye size={17} /> Pré-visualizar página
+        </button>
+        <button onClick={handleSave} disabled={saving} className="flex items-center gap-2 rounded-xl bg-slate-900 px-6 py-3 text-sm font-black text-white shadow-lg transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60">
+          {saving ? <Loader2 size={17} className="animate-spin" /> : <Save size={17} />}
+          Salvar texto da manutenção
+        </button>
+      </div>
+    </div>
   );
 }
 

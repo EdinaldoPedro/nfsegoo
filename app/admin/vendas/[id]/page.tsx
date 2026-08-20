@@ -629,7 +629,7 @@ export default function DetalheVendaCompleto() {
     const confirmar = await dialog.showConfirm({
       type: 'info',
       title: 'Atualizar PDF?',
-      description: 'A bancada vai chamar o robo do Portal Nacional para baixar e salvar o PDF desta venda.',
+      description: 'A bancada vai gerar novamente a DANFSe a partir do XML oficial e substituir o PDF salvo desta venda.',
       confirmText: 'Atualizar PDF',
     });
 
@@ -763,7 +763,7 @@ export default function DetalheVendaCompleto() {
     notaCancelada: venda.status === 'CANCELADA' || notaAtual?.status === 'CANCELADA',
     eventoCancelamentoOk: Boolean(notaAtual?.xmlCancelamentoEventoBase64),
   };
-  const podeReprocessarPdf = integridadePdf.notaAutorizada && integridadePdf.chaveOk && integridadePdf.xmlOk && !integridadePdf.pdfOk;
+  const podeReprocessarPdf = integridadePdf.notaAutorizada && integridadePdf.chaveOk && integridadePdf.xmlOk;
   const podeSincronizarRetorno = integridadePdf.chaveOk;
 
   const tabs: Array<{ id: ActiveTab; label: string; icon: any; color: string }> = [
@@ -1318,9 +1318,7 @@ export default function DetalheVendaCompleto() {
                 </button>
               ) : (
                 <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500">
-                  {integridadePdf.pdfOk
-                    ? 'PDF ja esta salvo para esta venda.'
-                    : 'O botao sera liberado quando a nota tiver chave e XML oficial.'}
+                  O botao sera liberado quando a nota tiver chave e XML oficial.
                 </p>
               )}
             </div>

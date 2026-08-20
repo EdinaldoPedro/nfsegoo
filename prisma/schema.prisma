@@ -313,6 +313,11 @@ model ConfiguracaoSistema {
   ibsCbsSimplesAtivo        Boolean @default(false)
   ibsCbsLucroPresumidoAtivo Boolean @default(true)
   ibsCbsLucroRealAtivo      Boolean @default(true)
+  manutencaoAtiva           Boolean @default(false)
+  manutencaoTitulo          String? @default("Estamos realizando uma atualização")
+  manutencaoMensagem        String? @db.Text
+  manutencaoPrevisao        String?
+  manutencaoAtualizadaEm    DateTime?
 }
 
 model GlobalNotice {

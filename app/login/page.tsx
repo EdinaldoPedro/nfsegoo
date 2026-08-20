@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -14,6 +14,7 @@ import {
   Sparkles,
   UserRoundCheck,
 } from 'lucide-react';
+import { clearClientSession } from '@/app/utils/client-session';
 
 export default function Login() {
   const router = useRouter();
@@ -21,6 +22,13 @@ export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+
+  useEffect(() => {
+    const reason = new URLSearchParams(window.location.search).get('motivo');
+    if (reason === 'sessao-expirada') {
+      setError('Sua sessão expirou ou foi encerrada. Entre novamente para continuar.');
+    }
+  }, []);
 
   const handleSubmit = async (e: any) => {
     e.preventDefault();
@@ -42,9 +50,14 @@ export default function Login() {
         return;
       }
 
-      localStorage.clear();
+      clearClientSession();
       localStorage.setItem('userId', dados.user.id);
       localStorage.setItem('userRole', dados.user.role);
+
+      if (dados.maintenanceActive) {
+        window.location.replace('/manutencao');
+        return;
+      }
 
       if (dados.user.email.startsWith('reset_')) {
         router.push('/verificar-email');

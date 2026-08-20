@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { checkIsStaff } from '@/app/utils/permissions';
+import { logoutAndRedirect } from '@/app/utils/client-session';
 
 export const dynamic = 'force-dynamic';
 
@@ -127,12 +128,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   const handleLogout = async () => {
     try {
-        await fetch('/api/auth/logout', { method: 'POST' });
-        // Limpa qualquer resquício antigo
-        localStorage.clear(); 
-        sessionStorage.clear();
-        // Redireciona para o login
-        router.push('/');
+        await logoutAndRedirect();
     } catch (error) {
         console.error("Erro ao terminar sessão", error);
     }

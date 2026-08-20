@@ -70,8 +70,15 @@ export async function POST(request: Request) {
     });
 
     // Retorna dados sem o token
+    const systemConfig = await prisma.configuracaoSistema.findUnique({
+      where: { id: 'config' },
+      select: { manutencaoAtiva: true },
+    });
+    const staffRoles = ['ADMIN', 'MASTER', 'SUPORTE', 'SUPORTE_TI'];
+
     return NextResponse.json({
       success: true,
+      maintenanceActive: Boolean(systemConfig?.manutencaoAtiva) && !staffRoles.includes(user.role),
       user: {
           id: user.id,
           nome: user.nome,
