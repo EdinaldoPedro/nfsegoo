@@ -10,6 +10,7 @@ import { getMensagemErroFiscalCliente } from '@/app/utils/fiscal-error-messages'
 import { isPercentualFiscalValido, parseDecimalInput } from '@/app/utils/number-format';
 import { assertFiscalDecision, resolveFiscalDecision } from '@/app/services/emissor/fiscal/FiscalRuleEngine';
 import { getPfAddressRequiredMessage, PF_ADDRESS_REQUIRED_CODE } from '@/app/utils/customer-address';
+import { confirmDpsNumber, getDpsSequence, normalizeDpsEnvironment } from '@/app/services/dpsSequenceService';
 
 const prisma = new PrismaClient();
 const emissaoJobModel = (prisma as any).emissaoJob;
@@ -718,11 +719,18 @@ async function executarEmissao(job: any) {
 
   const valorFloat = parseNumero(payload.valor);
   const serieFinal = payload.serieDPS || prestador.serieDPS || '900';
+  const ambienteDps = normalizeDpsEnvironment(prestador.ambiente);
+  const ultimoDpsConhecido = await getDpsSequence({
+    empresaId: prestador.id,
+    ambiente: ambienteDps,
+    serie: serieFinal,
+    fallback: ambienteDps === 'PRODUCAO' ? prestador.ultimoDPS : 0,
+  });
   const dpsFinal = job.reservedDpsNumero
     ? Number(job.reservedDpsNumero)
     : payload.numeroDPS
       ? parseInt(payload.numeroDPS)
-      : (prestador.ultimoDPS || 0) + 1;
+      : ultimoDpsConhecido + 1;
 
   await emissaoJobModel.update({
     where: { id: job.id },
@@ -1044,23 +1052,45 @@ async function executarEmissao(job: any) {
   if (prestador.ambiente === 'HOMOLOGACAO') {
     if (creditReserved) await releaseEmissionCredit(job.reservedPlanHistoryId);
 
-    if (!payload.vendaId) {
-      await prisma.venda.update({
-        where: { id: venda.id },
-        data: {
-          status: 'DESCARTADA',
-          arquivadoEm: new Date(),
-          arquivadoPor: user.id,
-          motivoArquivamento: 'Homologacao validada sem gerar nota fiscal.',
-        } as any,
-      });
-    }
+    await confirmDpsNumber({
+      empresaId: prestador.id,
+      ambiente: 'HOMOLOGACAO',
+      serie: serieFinal,
+      numero: dpsFinal,
+      origem: 'VALIDACAO_HOMOLOGACAO',
+      userId: job.actorUserId,
+    });
+
+    await prisma.venda.update({
+      where: { id: venda.id },
+      data: {
+        status: 'HOMOLOGACAO_VALIDADA',
+        arquivadoEm: null,
+        arquivadoPor: null,
+        motivoArquivamento: null,
+      } as any,
+    });
+
+    await createLog({
+      level: 'INFO',
+      action: 'HOMOLOGACAO_VALIDADA',
+      message: 'DPS validada em homologacao. Altere o ambiente para producao antes da emissao oficial.',
+      empresaId: prestador.id,
+      vendaId: venda.id,
+      details: {
+        numeroDPS: dpsFinal,
+        serieDPS: serieFinal,
+        tentativas: tentativasEmissao,
+        jobId: job.id,
+        proximaAcao: 'Alterar o ambiente para PRODUCAO e reenviar a venda.',
+      },
+    });
 
     await emissaoJobModel.update({
       where: { id: job.id },
       data: {
         status: 'AUTORIZADA',
-        statusMessage: 'Validacao concluida em homologacao.',
+        statusMessage: 'DPS validada em homologacao. Altere o ambiente para producao e reenvie para emitir oficialmente.',
         finishedAt: new Date(),
       },
     });
@@ -1069,8 +1099,18 @@ async function executarEmissao(job: any) {
 
   if (!creditReserved && job.reservedPlanHistoryId) await incrementUsage(job.reservedPlanHistoryId);
 
-  if (prestador.ambiente === 'PRODUCAO' && dpsFinal > (prestador.ultimoDPS || 0)) {
-    await prisma.empresa.update({ where: { id: prestador.id }, data: { ultimoDPS: dpsFinal } });
+  if (prestador.ambiente === 'PRODUCAO') {
+    await confirmDpsNumber({
+      empresaId: prestador.id,
+      ambiente: 'PRODUCAO',
+      serie: serieFinal,
+      numero: dpsFinal,
+      origem: 'EMISSAO_PRODUCAO',
+      userId: job.actorUserId,
+    });
+    if (dpsFinal > (prestador.ultimoDPS || 0)) {
+      await prisma.empresa.update({ where: { id: prestador.id }, data: { ultimoDPS: dpsFinal } });
+    }
   }
 
   const nota = await prisma.notaFiscal.create({

@@ -8,6 +8,7 @@ import { stripEmpresaSecrets } from '@/app/utils/safe-data';
 import { isPercentualFiscalValido, parseDecimalInput } from '@/app/utils/number-format';
 import { resolveFiscalDecision } from '@/app/services/emissor/fiscal/FiscalRuleEngine';
 import { validateNationalAddress } from '@/app/utils/customer-address';
+import { getDpsSequence, normalizeDpsEnvironment } from '@/app/services/dpsSequenceService';
 
 type CheckStatus = 'ok' | 'warn' | 'error' | 'info';
 
@@ -144,7 +145,14 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
   const valorFinal = asNumber(overrides.valor, Number(venda.valor));
   const descricaoFinal = String(overrides.descricao ?? venda.descricao ?? '').trim();
   const serieFinal = String(firstDefined(overrides.serieDPS, prestador.serieDPS, '900'));
-  const numeroDPSFinal = firstDefined(overrides.numeroDPS) ? asNumber(overrides.numeroDPS) : (prestador.ultimoDPS || 0) + 1;
+  const ambienteDps = normalizeDpsEnvironment(prestador.ambiente);
+  const ultimoDpsConhecido = await getDpsSequence({
+    empresaId: prestador.id,
+    ambiente: ambienteDps,
+    serie: serieFinal,
+    fallback: ambienteDps === 'PRODUCAO' ? prestador.ultimoDPS : 0,
+  });
+  const numeroDPSFinal = firstDefined(overrides.numeroDPS) ? asNumber(overrides.numeroDPS) : ultimoDpsConhecido + 1;
   const prestadorInscricaoMunicipal = optionalText(firstDefined(overrides.inscricaoMunicipalPrestador, prestador.inscricaoMunicipal));
   const prestadorRegimeEspecial = optionalText(firstDefined(overrides.regimeEspecialTributacao, prestador.regimeEspecialTributacao));
   const tipoTributacaoFinal = asText(firstDefined(overrides.tipoTributacao, prestador.tipoTributacaoPadrao, '1'), '1');

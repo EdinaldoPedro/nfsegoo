@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 import { isSupportRole } from '@/app/utils/access-control';
 import { prisma } from '@/app/utils/prisma';
+import { validateSelectableNbs } from '@/app/utils/nbs';
 import { createLog, sanitizeLogValue } from '@/app/services/logger';
 import { stripEmpresaSecrets } from '@/app/utils/safe-data';
 import { getTributacaoPorCnae } from '@/app/utils/tributacao';
@@ -245,6 +246,9 @@ export async function PUT(request: Request, { params }: { params: { id: string }
 
   try {
     const body = await request.json();
+    const nbsValidation = await validateSelectableNbs(body.codigoNbs);
+    if (nbsValidation.error) return NextResponse.json({ error: nbsValidation.error }, { status: 400 });
+    body.codigoNbs = nbsValidation.code;
     const updated = await prisma.venda.update({
       where: { id: params.id },
       data: {

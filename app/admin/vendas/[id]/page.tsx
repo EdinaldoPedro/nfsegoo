@@ -34,6 +34,7 @@ import {
   User,
 } from 'lucide-react';
 import { useDialog } from '@/app/contexts/DialogContext';
+import NbsSelector from '@/components/NbsSelector';
 
 type ActiveTab = 'resumo' | 'correcao' | 'validacao' | 'xml' | 'retornos' | 'logs';
 
@@ -182,6 +183,7 @@ function logIndicaErroTemporario(log: any) {
 function statusStyle(status: string) {
   if (status === 'ERRO_EMISSAO') return 'bg-red-100 text-red-700 border-red-200';
   if (status === 'CONCLUIDA') return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+  if (status === 'HOMOLOGACAO_VALIDADA') return 'bg-violet-100 text-violet-700 border-violet-200';
   if (status === 'PROCESSANDO') return 'bg-blue-100 text-blue-700 border-blue-200';
   return 'bg-slate-100 text-slate-700 border-slate-200';
 }
@@ -552,11 +554,15 @@ export default function DetalheVendaCompleto() {
     const envio = payloadEnvio();
 
     try {
-      await fetch(`/api/admin/vendas/${vendaId}`, {
+      const resSave = await fetch(`/api/admin/vendas/${vendaId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(envio),
       });
+      if (!resSave.ok) {
+        const saveError = await resSave.json().catch(() => ({}));
+        throw new Error(saveError.error || 'Não foi possível validar e salvar os dados da venda.');
+      }
 
       if (reenviar) {
         const resRetry = await fetch('/api/notas/retry', {
@@ -790,7 +796,7 @@ export default function DetalheVendaCompleto() {
                   <span className={`text-[10px] px-2 py-1 rounded-full border uppercase font-black ${statusStyle(venda.status)}`}>
                     {venda.status === 'PROCESSANDO' ? (
                       <span className="flex items-center gap-1"><Loader2 size={10} className="animate-spin" /> Processando</span>
-                    ) : venda.status.replace('_', ' ')}
+                    ) : venda.status === 'HOMOLOGACAO_VALIDADA' ? 'Homologação validada' : venda.status.replaceAll('_', ' ')}
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 mt-1">
@@ -1008,7 +1014,7 @@ export default function DetalheVendaCompleto() {
                 </div>
                 <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-4">
                   <TextInput label="item LC" value={formData.itemLc} onChange={(value) => updateFormField('itemLc', value)} mono disabled={!isEditing} />
-                  <TextInput label="cNBS" value={formData.codigoNbs} onChange={(value) => updateFormField('codigoNbs', value)} mono disabled={!isEditing} />
+                  <label className="block"><span className="mb-1.5 block text-xs font-black uppercase tracking-wide text-slate-500">cNBS</span><NbsSelector value={formData.codigoNbs} onChange={(value) => updateFormField('codigoNbs', value)} disabled={!isEditing} /></label>
                   <TextInput label="valor vServ" value={formData.valor} onChange={(value) => updateFormField('valor', value)} mono disabled={!isEditing} />
                   <TextInput label="valor moeda estrangeira" value={formData.valorMoedaEstrangeira} onChange={(value) => updateFormField('valorMoedaEstrangeira', value)} mono disabled={!isEditing} />
                 </div>
@@ -1244,7 +1250,7 @@ export default function DetalheVendaCompleto() {
         </div>
 
         <aside className="space-y-6">
-          <section className={`rounded-2xl p-6 border shadow-sm ${venda.status === 'ERRO_EMISSAO' ? 'bg-red-50 border-red-200' : venda.status === 'PROCESSANDO' ? 'bg-blue-50 border-blue-200' : 'bg-white border-slate-200'}`}>
+          <section className={`rounded-2xl p-6 border shadow-sm ${venda.status === 'ERRO_EMISSAO' ? 'bg-red-50 border-red-200' : venda.status === 'PROCESSANDO' ? 'bg-blue-50 border-blue-200' : venda.status === 'HOMOLOGACAO_VALIDADA' ? 'bg-violet-50 border-violet-200' : 'bg-white border-slate-200'}`}>
             <h4 className="text-xs font-black uppercase tracking-widest text-slate-500 mb-3">Status atual</h4>
             {venda.status === 'ERRO_EMISSAO' ? (
               <div>
@@ -1262,6 +1268,16 @@ export default function DetalheVendaCompleto() {
                   <CheckCircle /> Autorizada
                 </div>
                 <p className="text-sm text-slate-600">Nota fiscal emitida com sucesso.</p>
+              </div>
+            ) : venda.status === 'HOMOLOGACAO_VALIDADA' ? (
+              <div>
+                <div className="flex items-center gap-2 text-violet-700 font-black text-lg mb-2">
+                  <ShieldCheck /> Homologação validada
+                </div>
+                <p className="text-sm leading-relaxed text-violet-800">A DPS foi aceita no ambiente de testes e nenhuma nota fiscal oficial foi criada. Altere o emissor para Produção e reenvie esta venda para emitir oficialmente.</p>
+                <button onClick={() => router.push(`/admin/emissoes/${venda.empresaId}`)} className="mt-4 w-full rounded-xl bg-violet-700 px-4 py-3 text-sm font-bold text-white transition hover:bg-violet-800">
+                  Alterar ambiente para Produção
+                </button>
               </div>
             ) : venda.status === 'PROCESSANDO' ? (
               <div>

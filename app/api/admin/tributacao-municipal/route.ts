@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
+import { validateSelectableNbs } from '@/app/utils/nbs';
 
 const prisma = new PrismaClient();
 
@@ -126,6 +127,9 @@ export async function POST(request: Request) {
     const body = await request.json();
     const validationError = validateFiscalRuleBody(body);
     if (validationError) return NextResponse.json({ error: validationError }, { status: 400 });
+    const nbsValidation = await validateSelectableNbs(body.nbsPadrao);
+    if (nbsValidation.error) return NextResponse.json({ error: nbsValidation.error }, { status: 400 });
+    body.nbsPadrao = nbsValidation.code;
 
     if (!body.cnae || !body.codigoIbge || (body.exigeCodigoTributacaoMunicipal !== false && !body.codigoTributacaoMunicipal)) {
       return NextResponse.json({ error: 'CNAE, municipio e codigo municipal obrigatorio devem ser informados.' }, { status: 400 });
@@ -173,6 +177,9 @@ export async function PUT(request: Request) {
     const body = await request.json();
     const validationError = validateFiscalRuleBody(body);
     if (validationError) return NextResponse.json({ error: validationError }, { status: 400 });
+    const nbsValidation = await validateSelectableNbs(body.nbsPadrao);
+    if (nbsValidation.error) return NextResponse.json({ error: nbsValidation.error }, { status: 400 });
+    body.nbsPadrao = nbsValidation.code;
     
     if (body.codigoTributacaoMunicipal) {
         const conflito = await prisma.tributacaoMunicipal.findFirst({

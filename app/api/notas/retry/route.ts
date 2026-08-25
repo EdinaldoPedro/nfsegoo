@@ -4,6 +4,7 @@ import { validateRequest } from '@/app/utils/api-security';
 import { hasEmpresaAccess } from '@/app/utils/access-control';
 import { prisma } from '@/app/utils/prisma';
 import { getInternalBaseUrl } from '@/app/utils/request-url';
+import { validateSelectableNbs } from '@/app/utils/nbs';
 
 function parsePayload(payloadJson?: string | null) {
   if (!payloadJson) return {};
@@ -29,6 +30,11 @@ export async function POST(request: Request) {
 
   try {
     const { vendaId, dadosAtualizados } = await request.json();
+    if (dadosAtualizados?.codigoNbs !== undefined) {
+      const nbsValidation = await validateSelectableNbs(dadosAtualizados.codigoNbs);
+      if (nbsValidation.error) return NextResponse.json({ error: nbsValidation.error }, { status: 400 });
+      dadosAtualizados.codigoNbs = nbsValidation.code;
+    }
     retryVendaId = vendaId;
 
     const venda = await prisma.venda.findUnique({

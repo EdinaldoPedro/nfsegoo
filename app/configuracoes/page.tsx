@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { 
   Building2, Save, ArrowLeft, Search, MapPin, Briefcase, 
   Lock, CheckCircle, Trash2, Info, Upload, FileKey, Settings, Loader2, AlertCircle
+  , RefreshCw, ShieldCheck
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import AppHeader from '@/components/AppHeader';
@@ -31,6 +32,12 @@ export default function ConfiguracoesEmpresa() {
   }>({ status: 'idle', mensagem: '' });
   const [dadosCertificado, setDadosCertificado] = useState<{ativo: boolean, vencimento: string | null}>({ ativo: false, vencimento: null });
   const [modoEdicaoCertificado, setModoEdicaoCertificado] = useState(false);
+  const [sincronizandoDps, setSincronizandoDps] = useState(false);
+  const [dpsStatus, setDpsStatus] = useState<{
+    tipo: 'idle' | 'sucesso' | 'parcial' | 'erro';
+    mensagem: string;
+    sincronizadoEm?: string | null;
+  }>({ tipo: 'idle', mensagem: '' });
 
   const [empresa, setEmpresa] = useState({
     documento: '',
@@ -85,15 +92,21 @@ export default function ConfiguracoesEmpresa() {
 
         if (res.ok) {
           const dados = await res.json();
+          const ambienteCarregado = dados.ambiente || 'HOMOLOGACAO';
+          const serieCarregada = dados.serieDPS || '900';
+          const sequenciaAtual = (dados.sequenciasDps || []).find((item: any) => item.ambiente === ambienteCarregado && item.serie === serieCarregada);
           setEmpresa(prev => ({ 
               ...prev, 
               ...dados,
               // Garante que o IBGE vindo do banco seja lido corretamente
               codigoIbge: dados.codigoIbge || '',
-              serieDPS: dados.serieDPS || '900',
-              ultimoDPS: dados.ultimoDPS || 0,
-              ambiente: dados.ambiente || 'HOMOLOGACAO'
+              serieDPS: serieCarregada,
+              ultimoDPS: sequenciaAtual?.ultimoConfirmado ?? (ambienteCarregado === 'PRODUCAO' ? dados.ultimoDPS || 0 : 0),
+              ambiente: ambienteCarregado
           }));
+          if (sequenciaAtual?.sincronizadoEm) {
+              setDpsStatus({ tipo: sequenciaAtual.statusSincronizacao === 'PARCIAL' ? 'parcial' : 'sucesso', mensagem: `Última sincronização: ${new Date(sequenciaAtual.sincronizadoEm).toLocaleString('pt-BR')}.`, sincronizadoEm: sequenciaAtual.sincronizadoEm });
+          }
           
           if (dados.atividades) setAtividades(dados.atividades);
           
@@ -229,6 +242,60 @@ export default function ConfiguracoesEmpresa() {
       window.location.reload();
   };
 
+  const carregarSequenciaDps = async (ambiente: string, serie: string) => {
+      const serieNormalizada = String(serie || '').trim().toUpperCase();
+      if (!/^[A-Z0-9]{1,5}$/.test(serieNormalizada)) return;
+      const userId = localStorage.getItem('userId');
+      const contextId = localStorage.getItem('empresaContextId');
+      try {
+          const res = await fetch(`/api/dps/sincronizar?ambiente=${encodeURIComponent(ambiente)}&serie=${encodeURIComponent(serieNormalizada)}`, {
+              cache: 'no-store',
+              headers: { 'x-user-id': userId || '', 'x-empresa-id': contextId || '' },
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Não foi possível carregar a sequência.');
+          setEmpresa((atual) => ({ ...atual, ambiente, serieDPS: serieNormalizada, ultimoDPS: data.ultimoConfirmado || 0 }));
+          setDpsStatus(data.sincronizadoEm
+              ? { tipo: data.statusSincronizacao === 'PARCIAL' ? 'parcial' : 'sucesso', mensagem: `Última sincronização: ${new Date(data.sincronizadoEm).toLocaleString('pt-BR')}.`, sincronizadoEm: data.sincronizadoEm }
+              : { tipo: 'idle', mensagem: 'Esta combinação de ambiente e série ainda não foi sincronizada.' });
+      } catch (error: any) {
+          setDpsStatus({ tipo: 'erro', mensagem: error.message });
+      }
+  };
+
+  const sincronizarNumeracaoDps = async () => {
+      if (!dadosCertificado.ativo && !certFile) {
+          showMessage('Cadastre e salve o certificado A1 antes de sincronizar.', 'erro');
+          return false;
+      }
+      const confirmado = window.confirm(`Consultar no Portal Nacional a numeração da série ${empresa.serieDPS} em ${empresa.ambiente === 'PRODUCAO' ? 'Produção' : 'Homologação'}? Esta operação não emite nota fiscal.`);
+      if (!confirmado) return false;
+
+      setSincronizandoDps(true);
+      setDpsStatus({ tipo: 'idle', mensagem: 'Consultando a numeração no Portal Nacional sem emitir nota...' });
+      const userId = localStorage.getItem('userId');
+      const contextId = localStorage.getItem('empresaContextId');
+      try {
+          const res = await fetch('/api/dps/sincronizar', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '', 'x-empresa-id': contextId || '' },
+              body: JSON.stringify({ ambiente: empresa.ambiente, serie: empresa.serieDPS, ultimoConhecido: empresa.ultimoDPS }),
+          });
+          const data = await res.json();
+          if (!res.ok && res.status !== 206) throw new Error(data.error || 'Não foi possível sincronizar a DPS.');
+          setEmpresa((atual) => ({ ...atual, ultimoDPS: data.ultimoConfirmado }));
+          setDpsStatus({ tipo: data.completo ? 'sucesso' : 'parcial', mensagem: data.message, sincronizadoEm: data.sincronizadoEm || new Date().toISOString() });
+          showMessage(data.completo ? 'Numeração DPS sincronizada com sucesso.' : 'Sincronização parcial. Você pode continuar pelo mesmo botão.', 'sucesso');
+          return true;
+      } catch (error: any) {
+          setDpsStatus({ tipo: 'erro', mensagem: error.message });
+          showMessage(error.message, 'erro');
+          return false;
+      } finally {
+          setSincronizandoDps(false);
+      }
+  };
+
   const handleSalvar = async (e: React.FormEvent | null, extraData: any = {}) => {
     if (e) e.preventDefault();
     
@@ -268,7 +335,12 @@ export default function ConfiguracoesEmpresa() {
 
       if (res.ok) {
         showMessage('✅ Cadastro salvo com sucesso!', 'sucesso');
-        if (certFile || extraData.deletarCertificado) {
+        if (resposta.primeiroCertificadoCadastrado) {
+            setDadosCertificado({ ativo: true, vencimento: certificadoCheck.vencimento || null });
+            const desejaSincronizar = window.confirm('Certificado validado e salvo. Deseja sincronizar agora a numeração da DPS com o Portal Nacional? A consulta não emitirá nota fiscal.');
+            if (desejaSincronizar) await sincronizarNumeracaoDps();
+            setTimeout(() => window.location.reload(), 1200);
+        } else if (certFile || extraData.deletarCertificado) {
             setTimeout(() => window.location.reload(), 1500);
         }
       } else { showMessage(`❌ ${resposta.error || 'Erro ao salvar.'}`, 'erro'); }
@@ -429,7 +501,7 @@ export default function ConfiguracoesEmpresa() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">Ambiente de Emissão</label>
-                    <select className="w-full p-3 border rounded-lg bg-white text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none" value={empresa.ambiente} onChange={e => setEmpresa({...empresa, ambiente: e.target.value})}>
+                    <select className="w-full p-3 border rounded-lg bg-white text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none" value={empresa.ambiente} onChange={e => void carregarSequenciaDps(e.target.value, empresa.serieDPS)}>
                         <option value="HOMOLOGACAO">Homologação (Teste)</option>
                         <option value="PRODUCAO">Produção (Valendo)</option>
                     </select>
@@ -439,14 +511,33 @@ export default function ConfiguracoesEmpresa() {
                 </div>
                 <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">Série do DPS</label>
-                    <input type="text" className="w-full p-3 border rounded-lg bg-white text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none" value={empresa.serieDPS} onChange={e => setEmpresa({...empresa, serieDPS: e.target.value})} placeholder="Ex: 900"/>
+                    <input type="text" className="w-full p-3 border rounded-lg bg-white text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none" value={empresa.serieDPS} onChange={e => setEmpresa({...empresa, serieDPS: e.target.value.toUpperCase()})} onBlur={() => void carregarSequenciaDps(empresa.ambiente, empresa.serieDPS)} placeholder="Ex: 900" maxLength={5}/>
                     <p className="text-xs text-slate-500 mt-1">Série usada na numeração da DPS. Geralmente "900" para testes ou "1" para produção.</p>
                 </div>
                 <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">Último Número Usado</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">Último Número Confirmado</label>
                     <input type="number" className="w-full p-3 border rounded-lg bg-white text-blue-700 font-bold focus:ring-2 focus:ring-blue-500 outline-none" value={empresa.ultimoDPS} onChange={e => setEmpresa({...empresa, ultimoDPS: parseInt(e.target.value)})}/>
-                    <p className="text-xs text-slate-500 mt-1">O sistema sempre usará o próximo número. Ex.: se está 0, a próxima emissão será 1.</p>
+                    <p className="text-xs text-slate-500 mt-1">Controle separado por ambiente e série. Próxima DPS: <strong>{Math.max(0, Number(empresa.ultimoDPS || 0)) + 1}</strong>.</p>
                 </div>
+            </div>
+            <div className="mt-6 rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
+              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-xl bg-blue-50 p-2.5 text-blue-700"><ShieldCheck size={21}/></div>
+                  <div>
+                    <h4 className="font-bold text-slate-900">Sincronização segura com o Portal Nacional</h4>
+                    <p className="mt-1 text-sm text-slate-600">Consulta a existência das DPS sem transmitir XML e sem emitir nota fiscal.</p>
+                  </div>
+                </div>
+                <button type="button" onClick={() => void sincronizarNumeracaoDps()} disabled={sincronizandoDps || (!dadosCertificado.ativo && !certFile)} className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
+                  {sincronizandoDps ? <Loader2 size={17} className="animate-spin"/> : <RefreshCw size={17}/>} {sincronizandoDps ? 'Sincronizando...' : 'Sincronizar numeração'}
+                </button>
+              </div>
+              {dpsStatus.mensagem && (
+                <div className={`mt-4 rounded-xl border px-4 py-3 text-sm ${dpsStatus.tipo === 'erro' ? 'border-red-200 bg-red-50 text-red-700' : dpsStatus.tipo === 'parcial' ? 'border-amber-200 bg-amber-50 text-amber-800' : dpsStatus.tipo === 'sucesso' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-blue-100 bg-blue-50 text-blue-700'}`}>
+                  {dpsStatus.mensagem}
+                </div>
+              )}
             </div>
           </div>
 

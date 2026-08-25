@@ -3,7 +3,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { 
     Search, FileText, MoreVertical, Ban, RefreshCcw, 
     Loader2, AlertCircle, FileCode, Printer, AlertTriangle, 
-    X, LifeBuoy, ChevronLeft, ChevronRight, Eye, CheckCircle2
+    X, LifeBuoy, ChevronLeft, ChevronRight, Eye, CheckCircle2,
+    Send, Pencil, Trash2
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useDialog } from '@/app/contexts/DialogContext';
@@ -23,6 +24,7 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
   // Estados de Controle
   const [downloadingPdfId, setDownloadingPdfId] = useState<string | null>(null);
   const [viewingPdfId, setViewingPdfId] = useState<string | null>(null);
+  const [actionVendaId, setActionVendaId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
@@ -184,8 +186,8 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
-  const fetchVendas = useCallback(() => {
-    setLoading(true);
+  const fetchVendas = useCallback((silent = false) => {
+    if (!silent) setLoading(true);
     const userId = localStorage.getItem('userId');
     const contextId = localStorage.getItem('empresaContextId'); 
     const limit = compact ? 5 : 10;
@@ -202,10 +204,18 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
     .then(r => r.json())
     .then(res => { setVendas(res.data || []); setTotalPages(res.meta?.totalPages || 1); })
     .catch(() => setVendas([]))
-    .finally(() => setLoading(false));
+    .finally(() => {
+        if (!silent) setLoading(false);
+    });
   }, [page, debouncedSearch, compact, onlyValid]);
 
   useEffect(() => { fetchVendas(); }, [fetchVendas]);
+
+  useEffect(() => {
+      if (!vendas.some((venda) => venda.status === 'PROCESSANDO')) return;
+      const interval = window.setInterval(() => fetchVendas(true), 3000);
+      return () => window.clearInterval(interval);
+  }, [vendas, fetchVendas]);
 
   // --- PEDIR AJUDA (CORRIGIDO AUTH) ---
   const handlePedirAjuda = async (vendaId: string, motivoErro: string) => {
@@ -301,10 +311,76 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
 
   const handleCorrigir = (vendaId: string) => router.push(`/emitir?retry=${vendaId}`);
 
+  const handleEnviarEmissao = async (venda: any) => {
+      const confirmado = await dialog.showConfirm({
+          type: 'warning',
+          title: 'Enviar esta venda?',
+          description: 'O SaaS usará o ambiente atual da empresa. Em Homologação, a DPS será apenas validada e voltará para este mesmo ciclo. Em Produção, será solicitada a emissão oficial da NFS-e.',
+          confirmText: 'Enviar para emissão',
+          cancelText: 'Cancelar',
+      });
+      if (!confirmado) return;
+
+      const userId = localStorage.getItem('userId');
+      setActionVendaId(venda.id);
+      setActiveMenu(null);
+      setVendas((atuais) => atuais.map((item) => item.id === venda.id ? { ...item, status: 'PROCESSANDO' } : item));
+
+      try {
+          const res = await fetch('/api/notas/retry', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+              body: JSON.stringify({ vendaId: venda.id, dadosAtualizados: {} }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.userAction || data.error || 'Não foi possível enviar a venda.');
+          await dialog.showAlert({ type: 'success', title: 'Envio iniciado', description: 'A venda entrou na fila. O status será atualizado automaticamente.' });
+          window.setTimeout(fetchVendas, 1800);
+          window.setTimeout(fetchVendas, 4500);
+      } catch (error: any) {
+          await dialog.showAlert({ type: 'danger', title: 'Falha no envio', description: error.message });
+          fetchVendas();
+      } finally {
+          setActionVendaId(null);
+      }
+  };
+
+  const handleExcluirVenda = async (venda: any) => {
+      const confirmado = await dialog.showConfirm({
+          type: 'danger',
+          title: 'Excluir esta venda?',
+          description: 'A venda será removida do histórico visível. Esta ação só é permitida quando não existe uma nota fiscal válida vinculada.',
+          confirmText: 'Excluir venda',
+          cancelText: 'Cancelar',
+      });
+      if (!confirmado) return;
+
+      const userId = localStorage.getItem('userId');
+      setActionVendaId(venda.id);
+      setActiveMenu(null);
+      try {
+          const res = await fetch('/api/notas/gerenciar', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+              body: JSON.stringify({ acao: 'EXCLUIR_VENDA', vendaId: venda.id }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Não foi possível excluir a venda.');
+          setVendas((atuais) => atuais.filter((item) => item.id !== venda.id));
+          await dialog.showAlert({ type: 'success', title: 'Venda excluída', description: 'A venda foi removida do histórico.' });
+      } catch (error: any) {
+          await dialog.showAlert({ type: 'danger', title: 'Exclusão bloqueada', description: error.message });
+      } finally {
+          setActionVendaId(null);
+      }
+  };
+
   // Dados do item ativo
   const activeVendaData = activeMenu ? vendas.find(v => v.id === activeMenu.id) : null;
   const activeNotaData = activeVendaData?.notas?.[0];
   const activeIsCancelada = activeVendaData?.status === 'CANCELADA' || activeNotaData?.status === 'CANCELADA';
+  const activeHasValidNota = Boolean(activeNotaData && ['AUTORIZADA', 'CANCELADA'].includes(activeNotaData.status));
+  const activeIsHomologacao = activeVendaData?.status === 'HOMOLOGACAO_VALIDADA';
   const activePdfDisponivel = Boolean(activeNotaData?.pdfBase64);
   const activePdfEmAndamento = activeNotaData?.id && downloadingPdfId === activeNotaData.id;
   const activePdfLabel = activePdfEmAndamento
@@ -344,6 +420,23 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
                 }}
             >
                 <div className="py-1">
+                    {activeIsHomologacao && !activeHasValidNota ? (
+                      <>
+                        <button onClick={() => handleEnviarEmissao(activeVendaData)} disabled={actionVendaId === activeVendaData.id}
+                            className="w-full border-b border-slate-50 px-4 py-3 text-left text-sm font-medium text-blue-700 hover:bg-blue-50 flex items-center gap-2 disabled:opacity-50">
+                            {actionVendaId === activeVendaData.id ? <Loader2 size={16} className="animate-spin"/> : <Send size={16}/>} Enviar para emissão
+                        </button>
+                        <button onClick={() => handleCorrigir(activeVendaData.id)}
+                            className="w-full border-b border-slate-50 px-4 py-3 text-left text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2">
+                            <Pencil size={16} className="text-violet-600"/> Editar e enviar
+                        </button>
+                        <button onClick={() => handleExcluirVenda(activeVendaData)} disabled={actionVendaId === activeVendaData.id}
+                            className="w-full px-4 py-3 text-left text-sm font-medium text-red-600 hover:bg-red-50 flex items-center gap-2 disabled:opacity-50">
+                            <Trash2 size={16}/> Excluir venda
+                        </button>
+                      </>
+                    ) : activeHasValidNota ? (
+                      <>
                     <button onClick={() => handleViewPdf(activeNotaData.id, activeNotaData.numero)} disabled={viewingPdfId === activeNotaData.id}
                         className="w-full text-left px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2 border-b border-slate-50">
                         {viewingPdfId === activeNotaData.id ? <Loader2 size={16} className="animate-spin"/> : <Eye size={16} className="text-blue-500"/>}
@@ -376,6 +469,8 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
                             <Ban size={16}/> Cancelar Nota
                         </button>
                     )}
+                      </>
+                    ) : null}
                 </div>
             </div>
           </>
@@ -491,6 +586,7 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
                         const nota = venda.notas[0]; 
                         const isCancelada = venda.status === 'CANCELADA' || nota?.status === 'CANCELADA';
                         const isAutorizada = venda.status === 'CONCLUIDA' || isCancelada;
+                        const isHomologacao = venda.status === 'HOMOLOGACAO_VALIDADA';
                         const erroPrecisaSuporte = Boolean(venda.erroPrecisaSuporte);
 
                         return (
@@ -504,9 +600,14 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
                                 </td>
                                 <td className="p-4">
                                     {nota?.codigoTribNacional ? (
-                                        <span className="font-mono text-xs font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded border border-blue-100 cursor-help" title={nota.nomeServico || venda.descricao}>
-                                            {nota.codigoTribNacional}
-                                        </span>
+                                        <div className="max-w-[320px]">
+                                            <span
+                                                className="inline-flex rounded border border-blue-100 bg-blue-50 px-2 py-1 font-mono text-xs font-bold text-blue-600"
+                                                title={nota.nomeServico || nota.descricaoServicoInformada || venda.descricao}
+                                            >
+                                                {nota.codigoTribNacional}
+                                            </span>
+                                        </div>
                                     ) : <span className="text-slate-300">-</span>}
                                 </td>
                                 <td className="p-4 font-medium text-slate-600 whitespace-nowrap">
@@ -524,9 +625,10 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
                                         <span className={`px-2 py-1 rounded-full text-[10px] font-bold border ${
                                             isCancelada ? 'bg-gray-100 text-gray-500 border-gray-200 line-through' :
                                             venda.status === 'CONCLUIDA' ? 'bg-green-100 text-green-700 border-green-200' :
+                                            isHomologacao ? 'bg-violet-100 text-violet-700 border-violet-200' :
                                             'bg-blue-50 text-blue-700 border-blue-200'
                                         }`}>
-                                            {isCancelada ? 'CANCELADA' : (venda.status === 'CONCLUIDA' ? 'AUTORIZADA' : venda.status)}
+                                            {isCancelada ? 'CANCELADA' : (venda.status === 'CONCLUIDA' ? 'AUTORIZADA' : isHomologacao ? 'HOMOLOGAÇÃO VALIDADA' : venda.status)}
                                         </span>
                                     )}
                                 </td>
@@ -542,7 +644,7 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
                                                 </button>
                                             )}
                                         </div>
-                                    ) : isAutorizada && (
+                                    ) : (isAutorizada || isHomologacao) && (
                                         <button 
                                             onClick={(e) => toggleMenu(e, venda.id)} 
                                             className={`p-2 rounded-full transition ${activeMenu?.id === venda.id ? 'bg-blue-100 text-blue-600' : 'hover:bg-slate-200 text-slate-400'}`}

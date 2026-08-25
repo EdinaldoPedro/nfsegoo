@@ -21,7 +21,7 @@ import {
   XCircle,
 } from 'lucide-react';
 
-type StatusFiltro = 'todos' | 'falhas' | 'autorizadas' | 'processando' | 'pendentes' | 'canceladas';
+type StatusFiltro = 'todos' | 'falhas' | 'autorizadas' | 'homologacao' | 'processando' | 'pendentes' | 'canceladas';
 
 function formatMoney(value: any) {
   return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -55,6 +55,9 @@ function statusMeta(status: string) {
   if (status === 'PROCESSANDO') {
     return { label: 'Processando', icon: Clock3, badge: 'bg-blue-50 text-blue-700 border-blue-200', bar: 'bg-blue-500' };
   }
+  if (status === 'HOMOLOGACAO_VALIDADA') {
+    return { label: 'Homologação validada', icon: ShieldCheck, badge: 'bg-violet-50 text-violet-700 border-violet-200', bar: 'bg-violet-500' };
+  }
   if (status === 'CANCELADA') {
     return { label: 'Cancelada', icon: Ban, badge: 'bg-slate-100 text-slate-600 border-slate-200', bar: 'bg-slate-400' };
   }
@@ -68,6 +71,7 @@ function metricCard(label: string, value: any, tone = 'slate') {
     emerald: 'bg-emerald-50 border-emerald-200 text-emerald-800',
     blue: 'bg-blue-50 border-blue-200 text-blue-800',
     amber: 'bg-amber-50 border-amber-200 text-amber-800',
+    purple: 'bg-violet-50 border-violet-200 text-violet-800',
   };
 
   return (
@@ -155,12 +159,13 @@ export default function DetalheEmissor() {
         acc.valor += Number(venda.valor || 0);
         if (venda.status === 'CONCLUIDA') acc.autorizadas += 1;
         else if (venda.status === 'ERRO_EMISSAO') acc.falhas += 1;
+        else if (venda.status === 'HOMOLOGACAO_VALIDADA') acc.homologacao += 1;
         else if (venda.status === 'PROCESSANDO') acc.processando += 1;
         else if (venda.status === 'CANCELADA') acc.canceladas += 1;
         else acc.pendentes += 1;
         return acc;
       },
-      { total: 0, valor: 0, autorizadas: 0, falhas: 0, processando: 0, pendentes: 0, canceladas: 0 },
+      { total: 0, valor: 0, autorizadas: 0, falhas: 0, homologacao: 0, processando: 0, pendentes: 0, canceladas: 0 },
     );
   }, [vendas]);
 
@@ -176,6 +181,7 @@ export default function DetalheEmissor() {
         filtro === 'todos'
         || (filtro === 'falhas' && venda.status === 'ERRO_EMISSAO')
         || (filtro === 'autorizadas' && venda.status === 'CONCLUIDA')
+        || (filtro === 'homologacao' && venda.status === 'HOMOLOGACAO_VALIDADA')
         || (filtro === 'processando' && venda.status === 'PROCESSANDO')
         || (filtro === 'pendentes' && venda.status === 'PENDENTE')
         || (filtro === 'canceladas' && venda.status === 'CANCELADA');
@@ -264,10 +270,11 @@ export default function DetalheEmissor() {
       </header>
 
       <main className="mx-auto max-w-7xl px-6 py-6 space-y-6">
-        <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-4">
+        <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-7 gap-4">
           {metricCard('Vendas', resumo.total)}
           {metricCard('Autorizadas', resumo.autorizadas, 'emerald')}
           {metricCard('Falhas', resumo.falhas, 'red')}
+          {metricCard('Homologação', resumo.homologacao, 'purple')}
           {metricCard('Processando', resumo.processando, 'blue')}
           {metricCard('Pendentes', resumo.pendentes, 'amber')}
           {metricCard('Valor total', formatMoney(resumo.valor))}
@@ -319,6 +326,7 @@ export default function DetalheEmissor() {
                 ['todos', 'Todos'],
                 ['falhas', 'Falhas'],
                 ['autorizadas', 'Autorizadas'],
+                ['homologacao', 'Homologação'],
                 ['processando', 'Processando'],
                 ['pendentes', 'Pendentes'],
                 ['canceladas', 'Canceladas'],
@@ -384,6 +392,9 @@ export default function DetalheEmissor() {
                           </p>
                           {venda.status === 'ERRO_EMISSAO' && (
                             <p className="mt-2 text-xs font-semibold text-red-700">Clique para abrir a bancada de correção desta venda.</p>
+                          )}
+                          {venda.status === 'HOMOLOGACAO_VALIDADA' && (
+                            <p className="mt-2 text-xs font-semibold text-violet-700">DPS aceita em testes. Mude o emissor para Produção antes de reenviar.</p>
                           )}
                         </div>
                       </div>

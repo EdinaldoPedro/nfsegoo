@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Search, Edit, Save, X, ChevronLeft, ChevronRight, CheckCircle, XCircle, Briefcase, FileCode2, ShieldCheck, Percent } from 'lucide-react';
 import { useDialog } from '@/app/contexts/DialogContext';
+import NbsSelector from '@/components/NbsSelector';
 
 const inputBase = 'w-full rounded-xl border border-slate-200 bg-white p-3 text-sm outline-none transition focus:border-blue-300 focus:ring-2 focus:ring-blue-100';
 
@@ -117,7 +118,7 @@ export default function AdminCnaes() {
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                   <div><label className="mb-1 block text-xs font-black uppercase text-slate-500">Item LC 116/03</label><input className={inputBase} value={editing.itemLc || ''} onChange={e => setEditing({ ...editing, itemLc: e.target.value })} placeholder="Ex: 1.07" /></div>
                   <div><label className="mb-1 block text-xs font-black uppercase text-slate-500">Cód. Trib. Nacional</label><input className={inputBase} value={editing.codigoTributacaoNacional || ''} onChange={e => setEditing({ ...editing, codigoTributacaoNacional: e.target.value })} placeholder="Ex: 01.07.01" /></div>
-                  <div><label className="mb-1 block text-xs font-black uppercase text-slate-500">Código NBS</label><input className={inputBase} value={editing.codigoNbs || ''} onChange={e => setEditing({ ...editing, codigoNbs: e.target.value })} placeholder="Ex: 123456789" /></div>
+                  <div><label className="mb-1 block text-xs font-black uppercase text-slate-500">Código NBS</label><NbsSelector value={editing.codigoNbs} onChange={(codigoNbs) => setEditing({ ...editing, codigoNbs })} /></div>
                 </div>
               </div>
 

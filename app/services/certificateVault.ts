@@ -12,6 +12,7 @@ type CertificatePurpose =
   | 'SIGN_CANCEL'
   | 'DOWNLOAD_PDF'
   | 'CONSULT_CPF_INSCRICAO'
+  | 'CONSULT_DPS'
   | 'VALIDATE_CERT';
 
 interface CertificateSource {

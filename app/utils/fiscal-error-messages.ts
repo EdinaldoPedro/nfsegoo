@@ -31,6 +31,16 @@ export function isErroEnderecoTomadorPf(value: unknown) {
 }
 
 export function getMensagemErroFiscalCliente(value: unknown) {
+  const text = stringifySafe(value).toLowerCase();
+
+  if (text.includes('e0120') || (text.includes('im do prestador') && text.includes('não deve ser informad'))) {
+    return {
+      message: 'O Portal Nacional informou que a inscrição municipal do prestador não deve ser enviada para este município. Remova a IM das configurações da empresa e reenvie a DPS.',
+      needsSupport: false,
+      reasonType: 'INSCRICAO_MUNICIPAL_NAO_INFORMAR',
+    };
+  }
+
   if (isErroEnderecoTomadorPf(value)) {
     return {
       message: 'O Portal exige o endereço completo desta pessoa física. Atualize CEP, logradouro, número, bairro, cidade, UF e código IBGE no cadastro do cliente antes de reenviar.',

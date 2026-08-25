@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Search, Edit, Save, X, Plus, Trash2, MapPin, ChevronLeft, ChevronRight, Briefcase, Percent, FileCode2, Database } from 'lucide-react';
 import SearchableSelect from '@/components/SearchableSelect';
 import { useDialog } from '@/app/contexts/DialogContext';
+import NbsSelector from '@/components/NbsSelector';
 
 const inputBase = 'w-full rounded-xl border border-slate-200 bg-white p-3 text-sm outline-none transition focus:border-blue-300 focus:ring-2 focus:ring-blue-100';
 
@@ -192,7 +193,7 @@ export default function TributacaoMunicipalPage() {
                   <label className="flex items-center gap-2 rounded-xl border bg-white p-3 text-sm font-bold"><input type="checkbox" checked={form.exigeNbs} onChange={e => setForm({ ...form, exigeNbs: e.target.checked })} /> Exige NBS</label>
                 </div>
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-                  <div><label className="mb-1 block text-xs font-bold text-slate-500">NBS padrão</label><input className={inputBase} value={form.nbsPadrao || ''} onChange={e => setForm({ ...form, nbsPadrao: e.target.value })} /></div>
+                  <div><label className="mb-1 block text-xs font-bold text-slate-500">NBS padrão</label><NbsSelector value={form.nbsPadrao} onChange={(nbsPadrao) => setForm({ ...form, nbsPadrao })} /></div>
                   <div><label className="mb-1 block text-xs font-bold text-slate-500">Prioridade</label><input type="number" className={inputBase} value={form.prioridade} onChange={e => setForm({ ...form, prioridade: e.target.value })} /></div>
                   <div><label className="mb-1 block text-xs font-bold text-slate-500">Início</label><input type="date" className={inputBase} value={form.inicioVigencia || ''} onChange={e => setForm({ ...form, inicioVigencia: e.target.value })} /></div>
                   <div><label className="mb-1 block text-xs font-bold text-slate-500">Fim</label><input type="date" className={inputBase} value={form.fimVigencia || ''} onChange={e => setForm({ ...form, fimVigencia: e.target.value })} /></div>

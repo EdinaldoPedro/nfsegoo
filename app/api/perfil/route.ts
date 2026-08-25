@@ -6,6 +6,7 @@ import { encrypt } from '@/app/utils/crypto';
 import { hasEmpresaAccess, isAdminRole, resolveEmpresaContexto } from '@/app/utils/access-control';
 import { validarCertificadoA1 } from '@/app/utils/certificadoA1Validation';
 import { renovarUsoMensalSeNecessario } from '@/app/services/planService';
+import { listDpsSequences, normalizeDpsEnvironment, normalizeDpsSeries, setUserDpsSequence } from '@/app/services/dpsSequenceService';
 
 export const dynamic = 'force-dynamic';
 
@@ -158,7 +159,7 @@ export async function GET(request: Request) {
       if (empresaAlvoId) {
           const emp = await prisma.empresa.findUnique({ where: { id: empresaAlvoId }, include: { atividades: true } });
           if (emp) {
-              dadosEmpresa = emp;
+              dadosEmpresa = { ...emp, sequenciasDps: await listDpsSequences(emp.id) };
               if (emp.cep && (!emp.codigoIbge || emp.codigoIbge.length < 7)) {
                   const ibgeNovo = await buscarIbgePorCep(emp.cep);
                   if (ibgeNovo) {
@@ -262,6 +263,8 @@ export async function PUT(request: Request) {
   const userId = targetId;
   const contextEmpresaId = request.headers.get('x-empresa-id');
   const body = await request.json();
+  let primeiroCertificadoCadastrado = false;
+  let empresaSalvaId: string | null = null;
 
   if (!userId) return NextResponse.json({ error: 'Proibido' }, { status: 401 });
 
@@ -310,8 +313,11 @@ export async function PUT(request: Request) {
           regimeTributario: body.regimeTributario, cep: body.cep, logradouro: body.logradouro,
           numero: body.numero, bairro: body.bairro, cidade: body.cidade, uf: body.uf,
           codigoIbge: body.codigoIbge, email: body.emailComercial || body.email,
-          cadastroCompleto: true, serieDPS: body.serieDPS, 
-          ultimoDPS: body.ultimoDPS ? parseInt(String(body.ultimoDPS)) : undefined, ambiente: body.ambiente
+          cadastroCompleto: true, serieDPS: body.serieDPS,
+          ultimoDPS: body.ambiente === 'PRODUCAO' && body.ultimoDPS !== undefined
+            ? Math.max(0, parseInt(String(body.ultimoDPS)) || 0)
+            : undefined,
+          ambiente: body.ambiente
       };
 
       if (body.deletarCertificado) {
@@ -372,6 +378,11 @@ export async function PUT(request: Request) {
           }
       }
 
+      const certificadoAnterior = empresaAlvoId
+        ? await prisma.empresa.findUnique({ where: { id: empresaAlvoId }, select: { certificadoA1: true } })
+        : null;
+      primeiroCertificadoCadastrado = Boolean(body.certificadoArquivo && body.certificadoSenha && !certificadoAnterior?.certificadoA1);
+
       const empresaSalva = empresaAlvoId
           ? await prisma.empresa.update({
               where: { id: empresaAlvoId },
@@ -380,6 +391,20 @@ export async function PUT(request: Request) {
           : await prisma.empresa.create({
               data: { documento: cnpjLimpo, ...dadosEmpresa }
           });
+      empresaSalvaId = empresaSalva.id;
+
+      if (!body.deletarCertificado && body.serieDPS) {
+          const ambienteDps = normalizeDpsEnvironment(body.ambiente);
+          const serieDps = normalizeDpsSeries(body.serieDPS);
+          const ultimoInformado = Math.max(0, parseInt(String(body.ultimoDPS || 0)) || 0);
+          await setUserDpsSequence({
+              empresaId: empresaSalva.id,
+              ambiente: ambienteDps,
+              serie: serieDps,
+              ultimoConfirmado: ultimoInformado,
+              userId,
+          });
+      }
 
       if (user?.empresaId !== empresaSalva.id && !contextEmpresaId) {
           await prisma.user.update({ where: { id: userId }, data: { empresaId: empresaSalva.id } });
@@ -403,7 +428,7 @@ export async function PUT(request: Request) {
           }
       }
     }
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, primeiroCertificadoCadastrado, empresaId: empresaSalvaId });
   } catch (error: any) {
     return NextResponse.json({ error: 'Erro interno.' }, { status: 500 });
   }

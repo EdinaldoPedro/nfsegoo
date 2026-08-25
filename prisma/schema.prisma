@@ -110,6 +110,7 @@ model Empresa {
   donoUser                 User?             @relation("DonoEmpresa")
   vinculadoA               UserCliente[]
   vendasRealizadas         Venda[]           @relation("VendaPrestador")
+  sequenciasDps            DpsSequencia[]
   minhaCarteira            VinculoCarteira[]
   donoFaturamentoId        String?
   donoFaturamento          User?             @relation("FaturamentoEmpresa", fields: [donoFaturamentoId], references: [id])
@@ -124,6 +125,26 @@ model Empresa {
   @@index([contadorCustodianteId])
   @@index([proprietarioUserId])
   @@index([statusPropriedade])
+}
+
+model DpsSequencia {
+  id                  String    @id @default(uuid())
+  empresaId           String
+  ambiente            String
+  serie               String
+  ultimoConfirmado    Int       @default(0)
+  sincronizadoEm      DateTime?
+  origem              String    @default("MANUAL")
+  statusSincronizacao String    @default("NAO_SINCRONIZADO")
+  atualizadoPor       String?
+  syncToken           String?
+  syncLockedUntil     DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  empresa             Empresa   @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  @@unique([empresaId, ambiente, serie])
+  @@index([empresaId, ambiente])
 }
 
 model Cliente {
@@ -298,24 +319,24 @@ model NotaFiscal {
 }
 
 model ConfiguracaoSistema {
-  id                        String  @id @default("config")
+  id                        String    @id @default("config")
   modeloDpsJson             String?
-  versaoApi                 String  @default("1.00")
-  ambiente                  String  @default("PRODUCAO")
+  versaoApi                 String    @default("1.00")
+  ambiente                  String    @default("PRODUCAO")
   smtpHost                  String?
-  smtpPort                  Int?    @default(587)
+  smtpPort                  Int?      @default(587)
   smtpUser                  String?
   smtpPass                  String?
-  smtpSecure                Boolean @default(false)
+  smtpSecure                Boolean   @default(false)
   emailRemetente            String?
-  ibsCbsPilotoAtivo         Boolean @default(true)
-  ibsCbsMeiAtivo            Boolean @default(false)
-  ibsCbsSimplesAtivo        Boolean @default(false)
-  ibsCbsLucroPresumidoAtivo Boolean @default(true)
-  ibsCbsLucroRealAtivo      Boolean @default(true)
-  manutencaoAtiva           Boolean @default(false)
-  manutencaoTitulo          String? @default("Estamos realizando uma atualização")
-  manutencaoMensagem        String? @db.Text
+  ibsCbsPilotoAtivo         Boolean   @default(true)
+  ibsCbsMeiAtivo            Boolean   @default(false)
+  ibsCbsSimplesAtivo        Boolean   @default(false)
+  ibsCbsLucroPresumidoAtivo Boolean   @default(true)
+  ibsCbsLucroRealAtivo      Boolean   @default(true)
+  manutencaoAtiva           Boolean   @default(false)
+  manutencaoTitulo          String?   @default("Estamos realizando uma atualização")
+  manutencaoMensagem        String?   @db.Text
   manutencaoPrevisao        String?
   manutencaoAtualizadaEm    DateTime?
 }
@@ -453,6 +474,41 @@ model TributacaoMunicipal {
 
   @@unique([cnae, codigoIbge, codigoTributacaoMunicipal])
   @@index([codigoIbge, cnae, ativo, inicioVigencia, fimVigencia])
+}
+
+model NbsCatalogo {
+  id                   String   @id @default(uuid())
+  codigoFormatado      String   @unique
+  codigoNumerico       String?  @unique
+  descricao            String
+  descricaoNormalizada String
+  nivel                Int
+  codigoPai            String?
+  selecionavel         Boolean  @default(false)
+  ativo                Boolean  @default(true)
+  versao               String   @default("2.0")
+  fonteUrl             String
+  importadoEm          DateTime @default(now())
+  checksumFonte        String?
+
+  @@index([selecionavel, ativo])
+  @@index([codigoPai])
+  @@index([descricaoNormalizada])
+}
+
+model TributacaoNacionalCatalogo {
+  id                   String   @id @default(uuid())
+  codigoNumerico       String   @unique
+  codigoFormatado      String
+  descricao            String
+  descricaoNormalizada String
+  ativo                Boolean  @default(true)
+  fonteUrl             String
+  importadoEm          DateTime @default(now())
+  checksumFonte        String?
+
+  @@index([ativo, codigoNumerico])
+  @@index([descricaoNormalizada])
 }
 
 model Plan {

@@ -186,8 +186,9 @@ function participante(node: XmlNode, tipo: string, emitNode?: XmlNode): Particip
   const documento = text(source, ['CNPJ']) || text(source, ['CPF']) || text(source, ['NIF']);
   const codigoMunicipio = text(end, ['cMun']);
   const cep = text(end, ['CEP']);
+  const codigoPostalExterior = text(end, ['cEndPost']);
   const emitMunicipio = emitNode ? text(emitNode, ['enderNac', 'cMun']) : '';
-  const municipio = text(end, ['xMun']) || text(source, ['xMun']);
+  const municipio = text(end, ['xMun']) || text(source, ['xMun']) || text(end, ['xCidade']) || text(source, ['xCidade']);
   const uf = text(end, ['UF']) || text(source, ['UF']);
   return {
     tipo,
@@ -196,7 +197,9 @@ function participante(node: XmlNode, tipo: string, emitNode?: XmlNode): Particip
     telefone: formatPhone(text(source, ['fone'])),
     nome: text(source, ['xNome']),
     municipioUf: [municipio, uf].filter(Boolean).join(' / '),
-    codigoIbgeCep: [formatCodigoMunicipio(codigoMunicipio || emitMunicipio), formatCep(cep)].filter(Boolean).join(' / '),
+    codigoIbgeCep: codigoPostalExterior
+      ? `${codigoPostalExterior} (ext)`
+      : [formatCodigoMunicipio(codigoMunicipio || emitMunicipio), formatCep(cep)].filter(Boolean).join(' / '),
     endereco: endereco(source),
     email: text(source, ['email']),
     simplesNacional: '',
@@ -290,6 +293,7 @@ export function parseDanfseXml(input: string | Buffer, options: DanfseGeneratorO
   const ibsTotais = first(ibscbsNfse, 'totCIBS');
   const tribFed = first(valoresDps, 'tribFed');
   const tribMun = first(valoresDps, 'tribMun');
+  const codigoTribIssqn = text(tribMun, ['tribISSQN']);
   const totalTrib = first(valoresDps, 'totTrib');
   const chave = String(info?.getAttribute('Id') || '').replace(/^NFS/, '') || text(info, ['chNFSe']);
   const prestadorData = participante(prest, 'PRESTADOR / FORNECEDOR', emit);
@@ -405,11 +409,15 @@ export function parseDanfseXml(input: string | Buffer, options: DanfseGeneratorO
       descricao: text(first(serv, 'cServ'), ['xDescServ']),
     },
     issqn: {
-      tipo: text(tribMun, ['tribISSQN']) === '1' ? 'Operação Tributável' : text(tribMun, ['tribISSQN']),
-      incidencia: [text(info, ['xLocIncid']) || '-', ufEmissao || '-', '-'].join(' / '),
+      tipo: ({ '1': 'Operação Tributável', '3': 'Exportação de Serviço' } as Record<string, string>)[codigoTribIssqn]
+        || codigoTribIssqn,
+      incidencia: codigoTribIssqn === '3'
+        ? 'Nenhum'
+        : [text(info, ['xLocIncid']) || '-', ufEmissao || '-', '-'].join(' / '),
       base: money(text(valoresNfse, ['vBC'])),
       aliquota: percent(text(valoresNfse, ['pAliqAplic'])),
-      retencao: text(tribMun, ['tpRetISSQN']) === '1' ? 'Não Retido' : text(tribMun, ['tpRetISSQN']),
+      retencao: ({ '1': 'Não Retido', '2': 'Retido pelo Tomador' } as Record<string, string>)[text(tribMun, ['tpRetISSQN'])]
+        || text(tribMun, ['tpRetISSQN']),
       valor: money(text(valoresNfse, ['vISSQN'])),
       regimeEspecial: regimeEspecial(text(first(prest, 'regTrib'), ['regEspTrib'])),
       imunidade: text(tribMun, ['tpImunidade']),
@@ -457,14 +465,14 @@ export function parseDanfseXml(input: string | Buffer, options: DanfseGeneratorO
   };
 }
 
-type Cell = { label: string; value?: string; width?: number; shaded?: boolean };
+type Cell = { label: string; value?: string; width?: number; shaded?: boolean; align?: 'left' | 'center' };
 type RowOptions = { margin?: number; topLine?: boolean; lineEnd?: number };
 
-function pdfText(doc: jsPDF, value: string, x: number, y: number, maxWidth: number, size = 7, bold = false, maxLines = 2) {
+function pdfText(doc: jsPDF, value: string, x: number, y: number, maxWidth: number, size = 7, bold = false, maxLines = 2, align: 'left' | 'center' = 'left') {
   doc.setFont('helvetica', bold ? 'bold' : 'normal');
   doc.setFontSize(size);
   const lines = doc.splitTextToSize(value || '', Math.max(1, maxWidth));
-  doc.text(lines.slice(0, maxLines), x, y, { lineHeightFactor: 1.05 });
+  doc.text(lines.slice(0, maxLines), align === 'center' ? x + maxWidth / 2 : x, y, { lineHeightFactor: 1.05, align });
 }
 
 function row(doc: jsPDF, y: number, height: number, cells: Cell[], options: RowOptions = {}) {
@@ -479,10 +487,10 @@ function row(doc: jsPDF, y: number, height: number, cells: Cell[], options: RowO
       doc.setFillColor(238, 238, 238);
       doc.rect(x, y, width, height, 'F');
     }
-    pdfText(doc, cell.label, x + 1.2, y + 3.2, width - 2.4, 6.2, true, 1);
+    pdfText(doc, cell.label, x + 1.2, y + 3.2, width - 2.4, 6.2, true, 1, cell.align);
     if (cell.value !== undefined) {
       const maxLines = Math.max(1, Math.floor((height - 6.4) / 2.7) + 1);
-      pdfText(doc, cell.value || '-', x + 1.2, y + 6.4, width - 2.4, 7.2, false, maxLines);
+      pdfText(doc, cell.value || '-', x + 1.2, y + 6.4, width - 2.4, 7.2, false, maxLines, cell.align);
     }
     x += width;
   }
@@ -569,7 +577,7 @@ export async function generateDanfsePdf(input: string | Buffer, options: DanfseG
     { label: 'NÚMERO DA NFS-e', value: data.numeroNfse },
     { label: 'COMPETÊNCIA DA NFS-e', value: data.competencia },
     { label: 'DATA E HORA DA EMISSÃO DA NFS-e', value: data.emissaoNfse, width: 102 },
-  ], { lineEnd: 157 });
+  ], { topLine: false });
   y = row(doc, y, 7, [
     { label: 'NÚMERO DA DPS', value: data.numeroDps },
     { label: 'SÉRIE DA DPS', value: data.serieDps },
@@ -588,10 +596,10 @@ export async function generateDanfsePdf(input: string | Buffer, options: DanfseG
   y = participantBlock(doc, y, data.tomador);
   y = hasParticipant(data.destinatario)
     ? participantBlock(doc, y, data.destinatario)
-    : row(doc, y, 4.5, [{ label: 'DESTINATÁRIO DA OPERAÇÃO NÃO IDENTIFICADO NA NFS-e', width: 204 }]);
+    : row(doc, y, 4.5, [{ label: 'DESTINATÁRIO DA OPERAÇÃO NÃO IDENTIFICADO NA NFS-e', width: 204, align: 'center' }]);
   y = hasParticipant(data.intermediario)
     ? participantBlock(doc, y, data.intermediario)
-    : row(doc, y, 4.5, [{ label: 'INTERMEDIÁRIO DA OPERAÇÃO NÃO IDENTIFICADO NA NFS-e', width: 204 }]);
+    : row(doc, y, 4.5, [{ label: 'INTERMEDIÁRIO DA OPERAÇÃO NÃO IDENTIFICADO NA NFS-e', width: 204, align: 'center' }]);
 
   y = row(doc, y, 7, [
     { label: 'SERVIÇO PRESTADO', shaded: true },

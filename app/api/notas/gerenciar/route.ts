@@ -93,6 +93,51 @@ export async function POST(request: Request) {
     const hasAccess = await hasEmpresaAccess(user, venda.empresaId);
     if (!hasAccess) return NextResponse.json({ error: 'Acesso proibido' }, { status: 403 });
 
+    if (acao === 'EXCLUIR_VENDA') {
+      const notaValida = venda.notas.find((nota) =>
+        ['AUTORIZADA', 'CANCELADA'].includes(nota.status) || Boolean(nota.chaveAcesso),
+      );
+
+      if (notaValida) {
+        return NextResponse.json(
+          { error: 'Esta venda possui uma nota fiscal válida e não pode ser excluída. Use o cancelamento fiscal quando aplicável.' },
+          { status: 409 },
+        );
+      }
+
+      const agora = new Date();
+      await prisma.$transaction([
+        prisma.notaFiscal.updateMany({
+          where: { vendaId: venda.id },
+          data: {
+            arquivadoEm: agora,
+            arquivadoPor: userId,
+            motivoArquivamento: 'Venda sem nota válida excluída pelo usuário.',
+          } as any,
+        }),
+        prisma.venda.update({
+          where: { id: venda.id },
+          data: {
+            status: 'DESCARTADA',
+            arquivadoEm: agora,
+            arquivadoPor: userId,
+            motivoArquivamento: 'Venda sem nota válida excluída pelo usuário.',
+          } as any,
+        }),
+      ]);
+
+      await createLog({
+        level: 'INFO',
+        action: 'VENDA_EXCLUIDA_USUARIO',
+        message: 'Venda sem nota fiscal válida removida do histórico pelo usuário.',
+        empresaId: venda.empresaId,
+        vendaId: venda.id,
+        userId,
+      });
+
+      return NextResponse.json({ success: true, message: 'Venda excluída do histórico.' });
+    }
+
     if (acao === 'CANCELAR') {
       const notaAtiva = venda.notas.find((n) => n.status === 'AUTORIZADA' || n.status === 'CANCELADA');
 

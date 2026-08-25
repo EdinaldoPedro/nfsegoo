@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
+import { validateSelectableNbs } from '@/app/utils/nbs';
 
 const prisma = new PrismaClient();
 
@@ -128,6 +129,8 @@ export async function PUT(request: Request) {
     if ((cstIbsCbs && cstLimpo.length !== 3) || (classeTribIbsCbs && classeLimpa.length !== 6) || (cstLimpo && classeLimpa && classeLimpa.slice(0, 3) !== cstLimpo)) {
       return NextResponse.json({ error: 'CST/cClassTrib do IBS/CBS estão incompletos ou incompatíveis.' }, { status: 400 });
     }
+    const nbsValidation = await validateSelectableNbs(codigoNbs);
+    if (nbsValidation.error) return NextResponse.json({ error: nbsValidation.error }, { status: 400 });
 
     const crsfAtiva = retemCrsf === true || retemCrsf === 'true';
     const irAtiva = retemIr === true || retemIr === 'true';
@@ -141,7 +144,7 @@ export async function PUT(request: Request) {
       data: {
         itemLc,
         codigoTributacaoNacional,
-        codigoNbs,
+        codigoNbs: nbsValidation.code,
         temRetencaoInss,
         retemCrsf,
         modoRetencoes: modoRetencoes || 'SUGERIR',

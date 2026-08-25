@@ -193,6 +193,12 @@ function EmitirNotaContent() {
           const hintRascunho = rascunhoSalvo ? '\n\nSalvei um rascunho para voce retomar pela lateral desta tela.' : '';
 
           if (rascunhoSalvo) {
+              if (respostaErro.draftReasonType === 'INSCRICAO_MUNICIPAL_NAO_INFORMAR') {
+                  const irConfig = await dialog.showConfirm({ type: 'warning', title: 'Não enviar Inscrição Municipal', description: `${actionText}${hintRascunho}`, confirmText: 'Abrir Configurações', cancelText: 'Ficar na revisão' });
+                  if (irConfig) router.push('/configuracoes');
+                  else setStep(3);
+                  return;
+              }
               if (respostaErro.draftReasonType === 'INSCRICAO_MUNICIPAL') {
                   const irConfig = await dialog.showConfirm({ type: 'danger', title: 'Inscricao Municipal (I.M)', description: `${actionText}${hintRascunho}`, confirmText: 'Atualizar I.M Agora', cancelText: 'Ficar na revisao' });
                   if (irConfig) router.push('/configuracoes');
