@@ -362,7 +362,7 @@ export default function ContadorDashboard() {
 
   return (
     <div className="saas-shell text-slate-950">
-      <div className="saas-container max-w-7xl py-6">
+      <div className="saas-container py-6">
         <header className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <p className="text-xs font-black uppercase tracking-[0.22em] text-blue-600">Área do contador</p>

@@ -225,17 +225,17 @@ export default function ClienteDashboard() {
       </div>
       <AppHeader title="NFSe Goo" subtitle={nomeUsuario ? `Olá, ${nomeUsuario}` : 'Ambiente Beta'} eyebrow="Dashboard" />
 
-      <div className="saas-container flex flex-col gap-5 xl:flex-row xl:gap-8">
+      <div className="saas-container grid min-w-0 grid-cols-1 gap-[var(--saas-section-gap)] min-[1440px]:grid-cols-[minmax(280px,320px)_minmax(0,1fr)]">
         
         {/* === VITRINE (MARGEM ESQUERDA) === */}
-        <div className="w-full shrink-0 xl:w-[320px]">
-            <div className="space-y-4 xl:sticky xl:top-32 xl:space-y-6">
-              <div className="h-[220px] sm:h-[250px] xl:h-[450px]">
+        <aside className="w-full min-w-0">
+            <div className="space-y-5 min-[1440px]:sticky min-[1440px]:top-[calc(var(--saas-context-offset)+7rem)] min-[1440px]:space-y-8">
+              <div>
                 <Vitrine />
               </div>
               {perfilCarregado && <CentralAvisos avisos={avisosDashboard} />}
             </div>
-        </div>
+        </aside>
 
         {/* === CONTEÚDO PRINCIPAL === */}
         <div className="flex-1 space-y-8 min-w-0">
@@ -282,7 +282,7 @@ export default function ClienteDashboard() {
 
             {/* Orientacao fiscal e chamada principal */}
             {perfilCarregado && (
-                <div className={`grid grid-cols-1 gap-6 ${exibirSaudeFiscal ? '2xl:grid-cols-[minmax(320px,0.9fr)_minmax(520px,1.1fr)]' : 'lg:grid-cols-2'}`}>
+                <div className={`grid grid-cols-1 gap-6 ${exibirSaudeFiscal ? 'min-[1180px]:grid-cols-[minmax(280px,0.9fr)_minmax(420px,1.1fr)]' : 'min-[900px]:grid-cols-2'}`}>
                     <ProximaAcaoCard data={proximaAcao} bloqueado={isBloqueado} />
 
                     {exibirSaudeFiscal && (

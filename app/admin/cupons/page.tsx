@@ -116,8 +116,8 @@ export default function AdminCuponsPage() {
     };
 
     return (
-        <div className="p-4 md:p-8 bg-slate-50 min-h-screen">
-            <div className="max-w-6xl mx-auto">
+        <div className="min-h-screen bg-slate-50">
+            <div className="mx-auto max-w-6xl">
                 {/* CABEÇALHO E ABAS */}
                 <div className="mb-8">
                     <h1 className="text-2xl md:text-3xl font-black text-slate-800 flex items-center gap-3 mb-6">

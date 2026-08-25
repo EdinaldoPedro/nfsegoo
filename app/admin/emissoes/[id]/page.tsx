@@ -219,7 +219,7 @@ export default function DetalheEmissor() {
   return (
     <div className="min-h-screen bg-slate-100">
       <header className="border-b border-slate-200 bg-white shadow-sm">
-        <div className="mx-auto max-w-7xl px-6 py-6">
+        <div className="saas-content px-[var(--saas-gutter)] py-6">
           <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
             <div className="flex gap-4">
               <button onClick={() => router.back()} className="mt-1 h-11 w-11 rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 flex items-center justify-center">
@@ -269,7 +269,7 @@ export default function DetalheEmissor() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl px-6 py-6 space-y-6">
+      <main className="saas-content space-y-6 px-[var(--saas-gutter)] py-6">
         <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-7 gap-4">
           {metricCard('Vendas', resumo.total)}
           {metricCard('Autorizadas', resumo.autorizadas, 'emerald')}

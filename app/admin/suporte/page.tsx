@@ -46,7 +46,7 @@ export default function AdminSuporte() {
   if(loading) return <div className="flex h-screen items-center justify-center text-slate-500"><Loader2 className="animate-spin mr-2"/> Carregando painel...</div>;
 
   return (
-    <div className="p-6">
+    <div>
       <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-bold text-slate-800">Helpdesk</h1>
           <Link href="/admin/suporte/catalogo" className="bg-slate-800 text-white px-4 py-2 rounded flex items-center gap-2 hover:bg-slate-900 text-sm font-bold shadow-md transition">
@@ -54,8 +54,8 @@ export default function AdminSuporte() {
           </Link>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-          <table className="w-full text-left text-sm">
+      <div className="saas-table-scroll rounded-xl border bg-white shadow-sm">
+          <table className="min-w-[760px] w-full text-left text-sm">
               <thead className="bg-slate-50 border-b text-slate-500 uppercase text-xs">
                   <tr>
                       <th className="p-4">Assunto / Cliente</th>

@@ -31,7 +31,7 @@ export default function MetricasCrm() {
     if (!metrics) return <div className="p-8 text-center text-red-500">Erro ao carregar dados.</div>;
 
     return (
-        <div className="p-6 max-w-7xl mx-auto space-y-8">
+        <div className="mx-auto max-w-7xl space-y-8">
             <div className="flex items-center justify-between mb-8">
                 <div className="flex items-center gap-4">
                     <button onClick={() => router.push('/admin/crm')} className="p-2 bg-slate-100 hover:bg-slate-200 rounded-full transition text-slate-600">

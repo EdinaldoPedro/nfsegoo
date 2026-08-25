@@ -836,7 +836,7 @@ function EmitirNotaContent() {
   ];
 
   return (
-    <div className="max-w-7xl mx-auto py-10 px-4 relative">
+    <div className="saas-container relative py-6 md:py-10">
       {loading && (
         <div className="fixed inset-0 z-[9999] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-xl bg-white rounded-xl shadow-2xl border border-blue-100 overflow-hidden">

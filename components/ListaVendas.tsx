@@ -563,8 +563,8 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
         )}
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-left text-sm text-slate-600">
+      <div className="saas-table-scroll">
+        <table className="min-w-[760px] w-full text-left text-sm text-slate-600">
             <thead className="bg-slate-50 text-xs uppercase font-semibold text-slate-500">
                 <tr>
                     <th className="p-4">Nota</th>

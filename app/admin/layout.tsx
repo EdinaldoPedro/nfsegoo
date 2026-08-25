@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { 
   LayoutDashboard, Users, Building, Shield, Activity, 
   LogOut, MapPin, List, LifeBuoy, CreditCard, Settings, Map, Briefcase, Ticket,
-  ClipboardList, Wrench
+  ClipboardList, Wrench, Menu, X
 } from 'lucide-react';
 import Link from 'next/link';
 import { checkIsStaff } from '@/app/utils/permissions';
@@ -16,6 +16,7 @@ export const dynamic = 'force-dynamic';
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [authorized, setAuthorized] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -135,8 +136,17 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 };
 
   return (
-    <div className="min-h-screen bg-slate-100 flex">
-        <aside className="w-64 bg-slate-900 text-white flex flex-col fixed h-full shadow-xl z-20">
+    <div className="min-h-screen bg-slate-100 lg:flex">
+        {sidebarOpen && (
+          <button
+            type="button"
+            aria-label="Fechar navegação"
+            className="fixed inset-0 z-30 bg-slate-950/55 backdrop-blur-sm lg:hidden"
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
+
+        <aside className={`fixed inset-y-0 left-0 z-40 flex w-64 flex-col bg-slate-900 text-white shadow-xl transition-transform duration-200 lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
             <div className="p-6 border-b border-slate-800 flex items-center gap-3">
                 <div className="bg-blue-600 p-2 rounded-lg">
                     <Shield size={24} className="text-white" />
@@ -145,6 +155,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                     <h1 className="font-bold text-lg tracking-tight">Admin</h1>
                     <p className="text-xs text-slate-400">Master Access</p>
                 </div>
+                <button type="button" aria-label="Fechar menu" onClick={() => setSidebarOpen(false)} className="ml-auto rounded-lg p-2 text-slate-300 hover:bg-slate-800 lg:hidden">
+                  <X size={20} />
+                </button>
             </div>
 
             <nav className="flex-1 p-4 space-y-5 overflow-y-auto custom-scrollbar">
@@ -158,6 +171,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                                 <Link
                                 key={item.href}
                                 href={item.href}
+                                onClick={() => setSidebarOpen(false)}
                                 className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all font-medium ${
                                     item.href === '/admin/bancadas'
                                         ? 'bg-blue-900/50 text-blue-200 border border-blue-800/50 hover:bg-blue-800/50'
@@ -189,8 +203,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             </div>
         </aside>
 
-        <main className="flex-1 ml-64 p-8 overflow-y-auto">
-            <div className="max-w-7xl mx-auto">
+        <main className="min-w-0 flex-1 lg:ml-64">
+            <div className="sticky top-0 z-20 flex h-14 items-center border-b border-slate-200 bg-white/95 px-[var(--saas-gutter)] shadow-sm backdrop-blur lg:hidden">
+              <button type="button" onClick={() => setSidebarOpen(true)} className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-700" aria-label="Abrir navegação">
+                <Menu size={21} />
+              </button>
+              <span className="ml-3 font-black text-slate-900">Admin</span>
+            </div>
+            <div className="admin-page mx-auto max-w-[var(--saas-content-max)] p-[var(--saas-gutter)]">
                 {children}
             </div>
         </main>

@@ -86,7 +86,7 @@ export default function PerfilCrmCliente() {
     const totalEmpresasOperacionais = (resumo.empresasProprietarias || 0) + (resumo.empresasCustodiadas || 0);
 
     return (
-        <div className="p-6 max-w-7xl mx-auto space-y-6">
+        <div className="mx-auto max-w-7xl space-y-6">
             {/* CABEÇALHO */}
             <div className="flex items-center gap-4 mb-8">
                 <button onClick={() => router.back()} className="p-2 bg-slate-100 hover:bg-slate-200 rounded-full transition text-slate-600">

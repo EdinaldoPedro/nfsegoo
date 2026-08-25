@@ -6,6 +6,10 @@
   --foreground: #171717;
   --card-bg: #ffffff;
   --border-color: #e2e8f0;
+  --saas-content-max: 1600px;
+  --saas-gutter: clamp(0.875rem, 2vw, 2rem);
+  --saas-section-gap: clamp(1rem, 1.6vw, 2rem);
+  --saas-context-offset: 0px;
 }
 
 /* Define as variáveis quando a classe "dark" estiver presente no HTML */
@@ -41,16 +45,57 @@ body {
 
   .saas-container {
     width: 100%;
-    max-width: 1600px;
+    max-width: var(--saas-content-max);
     margin-left: auto;
     margin-right: auto;
-    padding: 1rem;
+    padding: var(--saas-gutter);
   }
 
-  @media (min-width: 768px) {
-    .saas-container {
-      padding: 2rem;
-    }
+  .saas-content {
+    width: 100%;
+    max-width: var(--saas-content-max);
+    margin-inline: auto;
+  }
+
+  .saas-flow {
+    display: flex;
+    flex-direction: column;
+    gap: var(--saas-section-gap);
+    min-width: 0;
+  }
+
+  .saas-responsive-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+    gap: clamp(0.75rem, 1.2vw, 1.5rem);
+  }
+
+  .saas-sticky-header {
+    position: sticky;
+    top: var(--saas-context-offset);
+  }
+
+  .admin-page {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .saas-shell main,
+  .saas-shell section,
+  .saas-shell article,
+  .admin-page main,
+  .admin-page section,
+  .admin-page article {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .saas-table-scroll {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-gutter: stable;
   }
 
   .saas-page-header {
@@ -65,6 +110,8 @@ body {
     background: #ffffff;
     border-radius: 1.5rem;
     box-shadow: 0 12px 34px rgba(15, 23, 42, 0.06);
+    min-width: 0;
+    max-width: 100%;
   }
 
   .saas-card-soft {
@@ -72,6 +119,8 @@ body {
     background: rgba(255, 255, 255, 0.78);
     border-radius: 1.5rem;
     box-shadow: 0 10px 26px rgba(15, 23, 42, 0.045);
+    min-width: 0;
+    max-width: 100%;
   }
 
   .saas-section-title {
@@ -146,7 +195,7 @@ body {
   }
 }
 
-@media (max-width: 1280px), (max-height: 760px) {
+@media (max-width: 1280px) {
   .saas-container {
     padding: 1rem;
   }
@@ -171,6 +220,13 @@ body {
   .saas-btn-secondary {
     min-height: 2.6rem;
     padding: 0.65rem 0.95rem;
+  }
+}
+
+@media (max-height: 760px) and (min-width: 901px) {
+  .saas-container {
+    padding-top: 0.875rem;
+    padding-bottom: 0.875rem;
   }
 }
 

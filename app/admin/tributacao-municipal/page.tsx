@@ -137,7 +137,7 @@ export default function TributacaoMunicipalPage() {
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><FileCode2 className="text-purple-600" /><p className="mt-3 text-3xl font-black text-slate-950">{exigeNbs}</p><p className="text-xs font-bold uppercase text-slate-400">Exigem NBS na página</p></div>
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="saas-table-scroll rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-col gap-4 border-b bg-slate-50 p-5 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h2 className="text-lg font-black text-slate-950">Regras municipais</h2>
@@ -149,7 +149,7 @@ export default function TributacaoMunicipalPage() {
           </div>
         </div>
 
-        <table className="w-full text-left text-sm">
+        <table className="min-w-[760px] w-full text-left text-sm">
           <thead className="border-b bg-white text-xs font-black uppercase text-slate-400">
             <tr><th className="p-4">CNAE</th><th className="p-4">Cidade</th><th className="p-4">Código Municipal</th><th className="p-4 text-center">ISS</th><th className="p-4 text-center">NBS</th><th className="p-4 text-right">Ações</th></tr>
           </thead>

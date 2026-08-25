@@ -268,7 +268,7 @@ export default function AdminConfig() {
   }
 
   return (
-    <div className="p-6 md:p-10 max-w-6xl mx-auto min-h-screen bg-slate-50">
+    <div className="mx-auto min-h-screen max-w-6xl bg-slate-50">
       <div className="flex items-center gap-4 mb-8">
         <div className="p-3 bg-purple-600 text-white rounded-lg shadow-md">
           <Settings size={32} />

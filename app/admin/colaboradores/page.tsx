@@ -639,8 +639,8 @@ export default function GestaoColaboradores() {
       )}
 
       {/* LISTA DE COLABORADORES */}
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full text-left text-sm">
+      <div className="saas-table-scroll rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <table className="min-w-[760px] w-full text-left text-sm">
             <thead className="border-b bg-slate-50">
                 <tr>
                     <th className="p-4 text-slate-500 font-bold uppercase text-xs">Nome</th>

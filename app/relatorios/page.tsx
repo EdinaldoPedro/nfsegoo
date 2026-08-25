@@ -279,8 +279,9 @@ const fetchData = async () => {
 
     if (isBlocked) {
         return (
-            <div className="min-h-screen bg-slate-50">
-                <header className="flex justify-between items-center p-6 border-b bg-white shadow-sm">
+            <div className="saas-shell">
+                <header className="saas-page-header border-x-0 border-t-0">
+                  <div className="saas-content flex items-center justify-between gap-4 px-[var(--saas-gutter)] py-4">
                     <div className="flex items-center gap-4">
                         <button onClick={() => router.back()} className="p-2 hover:bg-slate-100 rounded-full transition text-slate-500">
                             <ChevronLeft size={24}/>
@@ -288,6 +289,7 @@ const fetchData = async () => {
                         <h1 className="text-xl font-bold text-slate-800">Relatórios Fiscais</h1>
                     </div>
                     <Sidebar />
+                  </div>
                 </header>
                 <div className="flex flex-col items-center justify-center p-8 mt-12 text-center animate-in fade-in zoom-in duration-500">
                     <div className="bg-red-100 p-6 rounded-full text-red-500 mb-6 shadow-inner">
@@ -306,8 +308,9 @@ const fetchData = async () => {
     }
 
     return (
-        <div className="min-h-screen bg-slate-50">
-            <header className="flex justify-between items-center p-6 border-b bg-white sticky top-0 z-30 shadow-sm">
+        <div className="saas-shell">
+            <header className="saas-page-header saas-sticky-header z-30 border-x-0 border-t-0">
+              <div className="saas-content flex items-center justify-between gap-4 px-[var(--saas-gutter)] py-4">
                 <div className="flex items-center gap-4">
                     <button onClick={() => router.back()} className="p-2 hover:bg-slate-100 rounded-full transition text-slate-500">
                         <ChevronLeft size={24}/>
@@ -315,9 +318,10 @@ const fetchData = async () => {
                     <h1 className="text-xl font-bold text-slate-800">Relatórios Fiscais</h1>
                 </div>
                 <Sidebar />
+              </div>
             </header>
 
-            <div className="p-6 max-w-7xl mx-auto space-y-6">
+            <div className="saas-container space-y-6">
                 
                 {/* 1. RESUMO */}
                 <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
@@ -422,8 +426,8 @@ const fetchData = async () => {
 
                 {/* 3. TABELA */}
                 <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                <div className="overflow-x-auto">
-                    <table className="w-full text-left text-sm">
+                <div className="saas-table-scroll">
+                    <table className="min-w-[760px] w-full text-left text-sm">
                         <thead className="bg-slate-50 border-b text-xs uppercase text-slate-500 font-bold">
                             <tr>
                                 <th className="p-4 w-10 text-center">

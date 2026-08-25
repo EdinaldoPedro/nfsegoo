@@ -320,7 +320,7 @@ export default function GestaoClientes() {
   const pacotesAtivosEdicao = (editingUser?.planHistories || []).filter((history: any) => history.plan?.tipo && history.plan.tipo !== 'PLANO');
 
   return (
-    <div className="p-6">
+    <div>
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold text-slate-800">Clientes (SaaS)</h1>
         <div className="relative">
@@ -762,8 +762,8 @@ export default function GestaoClientes() {
       )}
 
       {/* TABELA */}
-      <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-        <table className="w-full text-left text-sm">
+      <div className="saas-table-scroll rounded-xl border bg-white shadow-sm">
+        <table className="min-w-[760px] w-full text-left text-sm">
             <thead className="bg-slate-50 border-b">
                 <tr>
                     <th className="p-4">Cliente</th>

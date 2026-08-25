@@ -15,8 +15,8 @@ type AppHeaderProps = {
 
 export default function AppHeader({ title, subtitle, backHref, eyebrow, action, showLogo = true }: AppHeaderProps) {
   return (
-    <header className="saas-page-header sticky top-0 z-30 border-x-0 border-t-0 rounded-none">
-      <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-4 px-4 py-4 md:px-8">
+    <header className="saas-page-header saas-sticky-header z-30 border-x-0 border-t-0 rounded-none">
+      <div className="saas-content flex items-center justify-between gap-4 px-[var(--saas-gutter)] py-4">
         <div className="flex min-w-0 items-center gap-4">
           {backHref ? (
             <Link href={backHref} className="saas-btn-secondary h-11 w-11 shrink-0 p-0" aria-label="Voltar">

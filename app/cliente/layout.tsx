@@ -36,10 +36,13 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
   };
 
   return (
-    <div className={`min-h-screen ${isSupport ? 'bg-amber-50' : ''}`}>
+    <div
+      className={`min-h-screen ${isSupport ? 'bg-amber-50' : ''}`}
+      style={{ '--saas-context-offset': isSupport || isContadorContext ? '57px' : '0px' } as React.CSSProperties}
+    >
       {isSupport && (
         <div className="sticky top-0 z-50 border-b border-amber-200 bg-amber-50/95 px-4 py-2 shadow-sm backdrop-blur md:px-8">
-          <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-4">
+          <div className="saas-content flex items-center justify-between gap-4">
             <span className="flex items-center gap-2 text-sm font-black text-amber-800">
               <LifeBuoy size={17} /> Modo suporte ativo
               <span className="hidden font-semibold text-amber-700 md:inline">visualizando como cliente</span>
@@ -56,7 +59,7 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
 
       {isContadorContext && (
         <div className="sticky top-0 z-50 border-b border-violet-200 bg-violet-600/95 px-4 py-2 text-white shadow-sm backdrop-blur animate-in slide-in-from-top md:px-8">
-          <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-4">
+          <div className="saas-content flex items-center justify-between gap-4">
             <div className="flex items-center gap-2">
               <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/15">
                 <ShieldAlert size={17} className="text-violet-100" />

@@ -162,7 +162,7 @@ export default function ListaEmissores() {
   if (error) return <div className="p-8 text-center text-red-500">{error}</div>;
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-6">
       <section className="rounded-2xl bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900 text-white p-7 shadow-sm overflow-hidden relative">
         <div className="absolute right-8 top-6 w-40 h-40 border border-white/10 rounded-full"></div>
         <div className="relative flex flex-col lg:flex-row lg:items-end lg:justify-between gap-6">

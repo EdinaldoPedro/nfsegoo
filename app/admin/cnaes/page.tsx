@@ -171,8 +171,8 @@ export default function AdminCnaes() {
         </div>
       )}
 
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full text-left text-sm">
+      <div className="saas-table-scroll rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <table className="min-w-[760px] w-full text-left text-sm">
           <thead className="border-b bg-slate-50 text-xs font-black uppercase text-slate-400">
             <tr><th className="p-4">CNAE</th><th className="p-4">Descrição</th><th className="p-4 text-center">Trib. Nac.</th><th className="p-4 text-center">INSS</th><th className="p-4 text-center">CRSF</th><th className="p-4 text-center">IR</th><th className="p-4 text-right">Ação</th></tr>
           </thead>

@@ -195,7 +195,7 @@ export default function GestaoCobertura() {
         </div>
       </section>
 
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <section className="saas-table-scroll rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 bg-slate-50 p-4">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
             <div className="relative w-full xl:max-w-md">
@@ -230,7 +230,7 @@ export default function GestaoCobertura() {
           </div>
         </div>
 
-        <table className="w-full text-left text-sm">
+        <table className="min-w-[760px] w-full text-left text-sm">
           <thead className="border-b bg-white text-xs font-black uppercase text-slate-400">
             <tr>
               <th className="p-4">Regime</th>
