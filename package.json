@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "test:danfse": "node -r ./scripts/register-typescript-tests.cjs --test app/services/pdf/DanfseGenerator.test.cjs",
     "studio": "node node_modules/prisma/build/index.js studio",
     "lint": "eslint ."
   },

@@ -60,6 +60,69 @@ interface Participante {
   regimeApuracao: string;
 }
 
+const PT_TO_MM = 25.4 / 72;
+export const DANFSE_LAYOUT = Object.freeze({
+  page: { width: 210, height: 297 },
+  margin: 3,
+  outerBorderMm: 0.35,
+  internalLineMm: 0.5 * PT_TO_MM,
+  qr: { x: 172.8, y: 18.4, size: 15.2 },
+  contentBottom: 279,
+  footerY: 281,
+});
+
+type DanfseFonts = { title: string; content: string; embedded: boolean };
+const fontsByDocument = new WeakMap<jsPDF, DanfseFonts>();
+const fontBase64Cache = new Map<string, string>();
+
+function firstExistingPath(candidates: Array<string | undefined>) {
+  return candidates.find((candidate): candidate is string => Boolean(candidate && fs.existsSync(candidate)));
+}
+
+function fontBase64(fontPath: string) {
+  const cached = fontBase64Cache.get(fontPath);
+  if (cached) return cached;
+  const value = fs.readFileSync(fontPath).toString('base64');
+  fontBase64Cache.set(fontPath, value);
+  return value;
+}
+
+function registerDanfseFonts(doc: jsPDF): DanfseFonts {
+  const publicFonts = path.join(process.cwd(), 'public', 'fonts');
+  const windowsFonts = process.env.WINDIR ? path.join(process.env.WINDIR, 'Fonts') : 'C:\\Windows\\Fonts';
+  const arialRegular = firstExistingPath([
+    process.env.DANFSE_ARIAL_REGULAR_PATH,
+    path.join(publicFonts, 'Arial.ttf'),
+    path.join(windowsFonts, 'arial.ttf'),
+  ]);
+  const arialBold = firstExistingPath([
+    process.env.DANFSE_ARIAL_BOLD_PATH,
+    path.join(publicFonts, 'Arial-Bold.ttf'),
+    path.join(windowsFonts, 'arialbd.ttf'),
+  ]);
+  const microsoftSans = firstExistingPath([
+    process.env.DANFSE_MICROSOFT_SANS_PATH,
+    path.join(publicFonts, 'Microsoft-Sans-Serif.ttf'),
+    path.join(windowsFonts, 'micross.ttf'),
+  ]);
+
+  if (!arialRegular || !arialBold || !microsoftSans) {
+    const fallback = { title: 'helvetica', content: 'helvetica', embedded: false };
+    fontsByDocument.set(doc, fallback);
+    return fallback;
+  }
+
+  doc.addFileToVFS('DanfseArial.ttf', fontBase64(arialRegular));
+  doc.addFont('DanfseArial.ttf', 'DanfseArial', 'normal');
+  doc.addFileToVFS('DanfseArialBold.ttf', fontBase64(arialBold));
+  doc.addFont('DanfseArialBold.ttf', 'DanfseArial', 'bold');
+  doc.addFileToVFS('DanfseMicrosoftSans.ttf', fontBase64(microsoftSans));
+  doc.addFont('DanfseMicrosoftSans.ttf', 'DanfseMicrosoftSans', 'normal');
+  const embedded = { title: 'DanfseArial', content: 'DanfseMicrosoftSans', embedded: true };
+  fontsByDocument.set(doc, embedded);
+  return embedded;
+}
+
 const vazioParticipante = (tipo: string): Participante => ({
   tipo,
   documento: '',
@@ -468,11 +531,32 @@ export function parseDanfseXml(input: string | Buffer, options: DanfseGeneratorO
 type Cell = { label: string; value?: string; width?: number; shaded?: boolean; align?: 'left' | 'center' };
 type RowOptions = { margin?: number; topLine?: boolean; lineEnd?: number };
 
+function fittedLines(doc: jsPDF, value: string, maxWidth: number, requestedSize: number, maxLines: number) {
+  const minimumSize = Math.min(requestedSize, 5.2);
+  let size = requestedSize;
+  let lines = doc.splitTextToSize(value || '', Math.max(1, maxWidth)) as string[];
+  while (lines.length > maxLines && size > minimumSize) {
+    size = Math.max(minimumSize, size - 0.25);
+    doc.setFontSize(size);
+    lines = doc.splitTextToSize(value || '', Math.max(1, maxWidth)) as string[];
+  }
+  if (lines.length > maxLines) {
+    lines = lines.slice(0, maxLines);
+    const last = lines.length - 1;
+    let finalLine = String(lines[last] || '');
+    while (finalLine && doc.getTextWidth(`${finalLine}...`) > maxWidth) finalLine = finalLine.slice(0, -1);
+    lines[last] = `${finalLine.trimEnd()}...`;
+  }
+  return { lines, size };
+}
+
 function pdfText(doc: jsPDF, value: string, x: number, y: number, maxWidth: number, size = 7, bold = false, maxLines = 2, align: 'left' | 'center' = 'left') {
-  doc.setFont('helvetica', bold ? 'bold' : 'normal');
+  const fonts = fontsByDocument.get(doc) || { title: 'helvetica', content: 'helvetica', embedded: false };
+  doc.setFont(bold ? fonts.title : fonts.content, bold ? 'bold' : 'normal');
   doc.setFontSize(size);
-  const lines = doc.splitTextToSize(value || '', Math.max(1, maxWidth));
-  doc.text(lines.slice(0, maxLines), align === 'center' ? x + maxWidth / 2 : x, y, { lineHeightFactor: 1.05, align });
+  const fitted = fittedLines(doc, value, maxWidth, size, maxLines);
+  doc.setFontSize(fitted.size);
+  doc.text(fitted.lines, align === 'center' ? x + maxWidth / 2 : x, y, { lineHeightFactor: 1.05, align });
 }
 
 function row(doc: jsPDF, y: number, height: number, cells: Cell[], options: RowOptions = {}) {
@@ -496,7 +580,7 @@ function row(doc: jsPDF, y: number, height: number, cells: Cell[], options: RowO
   }
   if (options.topLine !== false) {
     doc.setDrawColor(0);
-    doc.setLineWidth(0.18);
+    doc.setLineWidth(DANFSE_LAYOUT.internalLineMm);
     doc.line(margin, y, options.lineEnd ?? 210 - margin, y);
   }
   return y + height;
@@ -530,10 +614,15 @@ function participantBlock(doc: jsPDF, y: number, participant: Participante) {
 export async function generateDanfsePdf(input: string | Buffer, options: DanfseGeneratorOptions = {}): Promise<Buffer> {
   const data = parseDanfseXml(input, options);
   const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true });
-  const margin = 3;
-  doc.setProperties({ title: `DANFSe ${data.numeroNfse || data.chaveAcesso}`, subject: 'Documento Auxiliar da NFS-e' });
+  const margin = DANFSE_LAYOUT.margin;
+  const fonts = registerDanfseFonts(doc);
+  doc.setProperties({
+    title: `DANFSe ${data.numeroNfse || data.chaveAcesso}`,
+    subject: 'Documento Auxiliar da NFS-e - NT 008 v1.02',
+    keywords: `DANFSe,NT008,v1.02,fonts:${fonts.embedded ? 'embedded' : 'fallback'}`,
+  });
   doc.setDrawColor(0);
-  doc.setLineWidth(0.35);
+  doc.setLineWidth(DANFSE_LAYOUT.outerBorderMm);
   doc.rect(2, 2, 206, 293);
 
   doc.setFillColor(242, 242, 242);
@@ -569,8 +658,8 @@ export async function generateDanfsePdf(input: string | Buffer, options: DanfseG
     ? `https://www.nfse.gov.br/ConsultaPublica/?tpc=1&chave=${encodeURIComponent(data.chaveAcesso)}`
     : 'https://www.nfse.gov.br/ConsultaPublica/?tpc=1&chave=';
   const qr = await QRCode.toDataURL(qrPayload, { margin: 0, width: 220, errorCorrectionLevel: 'M' });
-  doc.addImage(qr, 'PNG', 173, 18.5 + homologacaoOffset, 15, 15);
-  pdfText(doc, 'A autenticidade desta NFS-e pode ser verificada\npela leitura deste código QR ou pela consulta da\nchave de acesso no portal nacional da NFS-e', 157, 35 + homologacaoOffset, 47, 5.6, false, 3);
+  doc.addImage(qr, 'PNG', DANFSE_LAYOUT.qr.x, DANFSE_LAYOUT.qr.y + homologacaoOffset, DANFSE_LAYOUT.qr.size, DANFSE_LAYOUT.qr.size);
+  pdfText(doc, 'A autenticidade desta NFS-e pode ser verificada\npela leitura deste código QR ou pela consulta da\nchave de acesso no portal nacional da NFS-e', 157, 37.5 + homologacaoOffset, 47, 5.6, false, 3);
 
   let y = 26 + homologacaoOffset;
   y = row(doc, y, 8, [
@@ -607,7 +696,9 @@ export async function generateDanfsePdf(input: string | Buffer, options: DanfseG
     { label: 'Código da NBS', value: data.servico.codigoNbs },
     { label: 'Local da Prestação / Sigla UF / País', value: data.servico.localPrestacao },
   ]);
-  y = row(doc, y, 6, [{ label: '', value: data.servico.descricaoTributacao, width: 204 }], { topLine: false });
+  if (data.servico.descricaoTributacao) {
+    y = row(doc, y, 6, [{ label: '', value: data.servico.descricaoTributacao, width: 204 }], { topLine: false });
+  }
   y = row(doc, y, 9, [{ label: 'Descrição do Serviço', value: data.servico.descricao, width: 204 }], { topLine: false });
   y = row(doc, y, 7, [
     { label: 'TRIBUTAÇÃO MUNICIPAL (ISSQN)', shaded: true },
@@ -676,16 +767,20 @@ export async function generateDanfsePdf(input: string | Buffer, options: DanfseG
   ], { topLine: false });
   y = row(doc, y, 9, [{ label: 'INFORMAÇÕES COMPLEMENTARES', value: data.informacoesComplementares, width: 204 }]);
 
+  if (y > DANFSE_LAYOUT.contentBottom) {
+    throw new Error(`O conteúdo do DANFSe ultrapassa a área de página única da NT 008 v1.02 (${y.toFixed(2)} mm).`);
+  }
+
   const watermark = options.cancelada ? 'CANCELADA' : options.substituida ? 'SUBSTITUÍDA' : '';
   if (watermark) {
     doc.setTextColor(166, 166, 166);
-    doc.setFont('helvetica', 'normal');
+    doc.setFont(fonts.title, 'normal');
     doc.setFontSize(70);
     doc.text(watermark, 105, 175, { align: 'center', angle: 45 });
     doc.setTextColor(0);
   }
 
-  const footerY = 281;
+  const footerY = DANFSE_LAYOUT.footerY;
   doc.line(margin, footerY, 206, footerY);
   doc.line(55, footerY, 55, 291);
   doc.line(106, footerY, 106, 291);
@@ -694,6 +789,10 @@ export async function generateDanfsePdf(input: string | Buffer, options: DanfseG
   pdfText(doc, 'Nº NFS-e / CHAVE NFS-e', 107, footerY + 3, 98, 6.2, true, 1);
   pdfText(doc, [data.numeroNfse, data.chaveAcesso].filter(Boolean).join(' / '), 107, footerY + 6.4, 98, 7, false, 2);
   doc.line(margin, 291, 206, 291);
+
+  if (doc.getNumberOfPages() !== 1) {
+    throw new Error(`O DANFSe deve possuir exatamente uma página; foram geradas ${doc.getNumberOfPages()}.`);
+  }
 
   return Buffer.from(doc.output('arraybuffer'));
 }
