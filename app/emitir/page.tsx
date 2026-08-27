@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, Suspense } from "react";
-import { CheckCircle, ArrowRight, ArrowLeft, Building2, Calculator, FileCheck, Briefcase, Loader2, Home, UserPlus, AlertTriangle, Send, FileSearch, FileCode2, BadgeCheck, ServerCog, FileClock, Trash2, HelpCircle, Info } from "lucide-react";
+import { CheckCircle, ArrowRight, ArrowLeft, Calculator, FileCheck, Briefcase, Loader2, Home, UserPlus, AlertTriangle, Send, FileSearch, FileCode2, BadgeCheck, ServerCog, FileClock, Trash2, ChevronDown } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useDialog } from "@/app/contexts/DialogContext";
 import Link from "next/link";
@@ -72,6 +72,7 @@ function EmitirNotaContent() {
   const [rascunhos, setRascunhos] = useState<NotaRascunho[]>([]);
   const [loadingRascunhos, setLoadingRascunhos] = useState(false);
   const [activeRascunhoId, setActiveRascunhoId] = useState<string | null>(null);
+  const [showRascunhos, setShowRascunhos] = useState(false);
   
   const [progressStatus, setProgressStatus] = useState("Iniciando...");
   const [progressPercent, setProgressPercent] = useState(0);
@@ -182,7 +183,8 @@ function EmitirNotaContent() {
       setNfData((prev) => ({ ...prev, ...rascunho.payload.nfData }));
       if (rascunho.payload.retencoes) setRetencoes(rascunho.payload.retencoes);
       setActiveRascunhoId(rascunho.id);
-      setStep(3);
+      setShowRascunhos(false);
+      setStep(2);
   };
 
   // === TRATAMENTO DE ERROS ===
@@ -190,23 +192,23 @@ function EmitirNotaContent() {
       if (respostaErro.userAction) {
           const actionText = respostaErro.userAction;
           const rascunhoSalvo = respostaErro.draftEligible ? await salvarRascunhoFalha(respostaErro) : false;
-          const hintRascunho = rascunhoSalvo ? '\n\nSalvei um rascunho para voce retomar pela lateral desta tela.' : '';
+          const hintRascunho = rascunhoSalvo ? '\n\nSalvei um rascunho para você retomar pelo botão Rascunhos no topo desta tela.' : '';
 
           if (rascunhoSalvo) {
               if (respostaErro.draftReasonType === 'INSCRICAO_MUNICIPAL_NAO_INFORMAR') {
                   const irConfig = await dialog.showConfirm({ type: 'warning', title: 'Não enviar Inscrição Municipal', description: `${actionText}${hintRascunho}`, confirmText: 'Abrir Configurações', cancelText: 'Ficar na revisão' });
                   if (irConfig) router.push('/configuracoes');
-                  else setStep(3);
+                  else setStep(2);
                   return;
               }
               if (respostaErro.draftReasonType === 'INSCRICAO_MUNICIPAL') {
                   const irConfig = await dialog.showConfirm({ type: 'danger', title: 'Inscricao Municipal (I.M)', description: `${actionText}${hintRascunho}`, confirmText: 'Atualizar I.M Agora', cancelText: 'Ficar na revisao' });
                   if (irConfig) router.push('/configuracoes');
-                  else setStep(3);
+                  else setStep(2);
                   return;
               }
               await dialog.showAlert({ type: 'warning', title: 'Rascunho salvo', description: `${actionText}${hintRascunho}` });
-              setStep(3);
+              setStep(2);
               return;
           }
 
@@ -547,7 +549,7 @@ function EmitirNotaContent() {
                         serieDPS: venda.serieDPS ? String(venda.serieDPS) : prev.serieDPS,
                     }));
                     
-                    setStep(3); // Pula para o passo 3 só DEPOIS de preencher tudo
+                    setStep(2); // Abre a revisão somente depois de recuperar todos os dados
                     setLoadingRetry(false); // Remove a tela de carregamento
                 }, 800); 
                 
@@ -575,9 +577,13 @@ function EmitirNotaContent() {
                 description: getPfAddressRequiredMessage(cliente),
             });
         }
-        setStep(step + 1);
-    } else { 
-        setStep(step + 1); 
+        if (!nfData.codigoCnae) return dialog.showAlert("Selecione a atividade econômica para continuar.");
+        if ((parseFloat(nfData.valor) || 0) <= 0) return dialog.showAlert("Informe um valor de serviço maior que zero.");
+        if (!nfData.servicoDescricao.trim()) return dialog.showAlert("Informe a discriminação do serviço.");
+        if (cliente?.tipo === 'EXT' && (parseFloat(nfData.valorMoedaEstrangeira) || 0) <= 0) {
+            return dialog.showAlert("Informe o valor faturado na moeda do contrato.");
+        }
+        setStep(2);
     }
   };
 
@@ -805,7 +811,7 @@ function EmitirNotaContent() {
   const cnaeRecuperadoForaDaLista = !!nfData.codigoCnae && !cnaeSelecionadoObj;
 
   const valorEstrangeiroNum = parseFloat(nfData.valorMoedaEstrangeira) || 0;
-  const isStep2Invalid = step === 2 && (valorNumerico <= 0 || !nfData.servicoDescricao.trim() || (isExterior && valorEstrangeiroNum <= 0));
+  const isDadosNotaInvalid = !nfData.clienteId || clientePfEnderecoPendente || !nfData.codigoCnae || valorNumerico <= 0 || !nfData.servicoDescricao.trim() || (isExterior && valorEstrangeiroNum <= 0);
 
   const cnaeDescricaoCurta = cnaeSelecionadoObj?.descricao ? (cnaeSelecionadoObj.descricao.length > 20 ? cnaeSelecionadoObj.descricao.substring(0, 20) + '...' : cnaeSelecionadoObj.descricao) : '';
 
@@ -836,7 +842,7 @@ function EmitirNotaContent() {
   ];
 
   return (
-    <div className="saas-container relative py-6 md:py-10">
+    <div className="saas-container relative max-w-7xl py-5 md:py-8">
       {loading && (
         <div className="fixed inset-0 z-[9999] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-xl bg-white rounded-xl shadow-2xl border border-blue-100 overflow-hidden">
@@ -892,31 +898,52 @@ function EmitirNotaContent() {
           </div>
         </div>
       )}
-      <div className="mb-6">
-        <button onClick={() => router.push('/cliente/dashboard')} className="flex items-center gap-2 text-slate-500 hover:text-blue-600 transition font-medium text-sm group">
-            <div className="p-2 bg-white rounded-full border border-slate-200 group-hover:border-blue-200 group-hover:bg-blue-50 transition"><Home size={18} /></div> Voltar ao Início
-        </button>
-      </div>
-
-      <div className="flex justify-between items-center mb-8">
-          <h2 className="text-2xl font-bold text-slate-800">{retryId ? `Corrigir Venda` : 'Emitir Nova NFS-e'}</h2>
-          {retryId && <span className="bg-orange-100 text-orange-700 px-3 py-1 rounded-full text-xs font-bold">MODO CORREÇÃO</span>}
-      </div>
-
-      <div className="flex justify-between mb-8 relative">
-        <div className="absolute top-1/2 left-0 w-full h-1 bg-slate-200 -z-10 transform -translate-y-1/2"></div>
-        {[{ id: 1, label: "Tomador", icon: Building2 }, { id: 2, label: "Serviço", icon: Calculator }, { id: 3, label: "Revisão", icon: FileCheck }].map((s) => (
-          <div key={s.id} className={`flex flex-col items-center bg-slate-100 px-4 py-2 rounded-lg ${step >= s.id ? "text-blue-600" : "text-slate-400"}`}>
-            <div className={`w-10 h-10 rounded-full flex items-center justify-center mb-2 ${step >= s.id ? "bg-blue-600 text-white" : "bg-slate-300 text-slate-500"}`}><s.icon size={20} /></div>
-            <span className="text-sm font-medium">{s.label}</span>
+      <header className="mb-6 rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm md:px-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <button onClick={() => router.push('/cliente/dashboard')} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-500 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600" title="Voltar ao início">
+              <Home size={18} />
+            </button>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-xl font-black tracking-tight text-slate-900 md:text-2xl">{retryId ? 'Corrigir venda' : 'Emitir nova NFS-e'}</h2>
+                {retryId && <span className="rounded-full bg-orange-100 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-orange-700">Modo correção</span>}
+              </div>
+              <p className="mt-1 text-sm text-slate-500">Preencha os dados essenciais e confira antes de enviar.</p>
+            </div>
           </div>
-        ))}
-      </div>
 
-      <GuiaEmissao step={step} ambiente={perfilEmpresa?.ambiente} />
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`rounded-full border px-3 py-1.5 text-xs font-black ${perfilEmpresa?.ambiente === 'HOMOLOGACAO' ? 'border-orange-200 bg-orange-50 text-orange-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+              {perfilEmpresa?.ambiente === 'HOMOLOGACAO' ? 'Homologação' : 'Produção'}
+            </span>
+            <button onClick={() => setShowRascunhos((open) => !open)} className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700">
+              <FileClock size={17} /> Rascunhos
+              {rascunhos.length > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-600 px-1.5 text-[10px] text-white">{rascunhos.length}</span>}
+              <ChevronDown size={15} className={`transition-transform ${showRascunhos ? 'rotate-180' : ''}`} />
+            </button>
+          </div>
+        </div>
 
-      {step === 1 && (
-        <aside className="mb-6 bg-white border border-slate-200 rounded-xl shadow-sm p-5 lg:fixed lg:left-6 lg:top-44 lg:w-[290px] lg:max-h-[calc(100vh-190px)] lg:overflow-y-auto">
+        <div className="mt-5 grid grid-cols-2 overflow-hidden rounded-xl border border-slate-200 bg-slate-50 p-1">
+          {[{ id: 1, label: 'Dados da nota', icon: FileCheck }, { id: 2, label: 'Revisar e emitir', icon: BadgeCheck }].map((item) => {
+            const Icon = item.icon;
+            const active = step === item.id;
+            const complete = step > item.id;
+            return (
+              <div key={item.id} className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-bold transition ${active ? 'bg-white text-blue-700 shadow-sm' : complete ? 'text-emerald-700' : 'text-slate-400'}`}>
+                <span className={`flex h-7 w-7 items-center justify-center rounded-full ${active ? 'bg-blue-600 text-white' : complete ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>
+                  {complete ? <CheckCircle size={15} /> : <Icon size={15} />}
+                </span>
+                {item.label}
+              </div>
+            );
+          })}
+        </div>
+      </header>
+
+      {showRascunhos && (
+        <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex items-center justify-between gap-3 mb-4">
             <div>
               <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-600">Rascunhos</p>
@@ -936,7 +963,7 @@ function EmitirNotaContent() {
               Rascunhos aparecem aqui quando uma emissao falha por algo corrigivel.
             </p>
           ) : (
-            <div className="space-y-3">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               {rascunhos.map((rascunho) => {
                 const draftData = rascunho.payload?.nfData || {};
                 const cliente = draftData.clienteNome || 'Tomador';
@@ -963,22 +990,26 @@ function EmitirNotaContent() {
                       onClick={() => retomarRascunho(rascunho)}
                       className="mt-3 w-full rounded-lg bg-blue-600 px-3 py-2 text-xs font-black text-white hover:bg-blue-700"
                     >
-                      Retomar na revisao
+                      Retomar na revisão
                     </button>
                   </div>
                 );
               })}
             </div>
           )}
-        </aside>
+        </section>
       )}
 
-      <div className="bg-white p-8 rounded-xl shadow-lg border border-slate-200">
+      <div className={step === 1 ? 'grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]' : 'mx-auto max-w-5xl'}>
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:p-7">
         
         {step === 1 && (
-          <div className="space-y-6">
+          <section className="space-y-5">
             <div className="flex justify-between items-center">
-                <h3 className="text-xl font-semibold text-slate-700">Quem é o cliente?</h3>
+                <div>
+                  <h3 className="text-lg font-black text-slate-900">Tomador</h3>
+                  <p className="mt-1 text-sm text-slate-500">Selecione quem receberá a nota fiscal.</p>
+                </div>
                 <Link href="/cliente" className="text-sm text-blue-600 font-bold hover:underline flex items-center gap-1"><UserPlus size={16}/> Cadastrar Novo Cliente</Link>
             </div>
 
@@ -1010,15 +1041,18 @@ function EmitirNotaContent() {
                     </div>
                 )}
             </div>
-          </div>
+          </section>
         )}
 
-        {step === 2 && (
-          <div className="space-y-6">
-            <h3 className="text-xl font-semibold text-slate-700">Detalhes do Serviço</h3>
+        {step === 1 && (
+          <section className="mt-7 space-y-6 border-t border-slate-200 pt-7">
+            <div>
+              <h3 className="text-lg font-black text-slate-900">Serviço</h3>
+              <p className="mt-1 text-sm text-slate-500">Informe a atividade, os valores e a descrição que seguirão para o Portal Nacional.</p>
+            </div>
             
-            <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
-                <label className="block text-sm font-bold text-yellow-800 mb-2 flex items-center gap-2"><Briefcase size={18} /> Atividade Econômica (CNAE)</label>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <label className="mb-2 flex items-center gap-2 text-sm font-bold text-slate-700"><Briefcase size={18} className="text-blue-600" /> Atividade Econômica (CNAE)</label>
                 <select className="w-full p-3 border rounded-lg bg-white outline-blue-500 text-slate-700" value={nfData.codigoCnae} onChange={(e) => setNfData({...nfData, codigoCnae: e.target.value})}>
                     {!nfData.codigoCnae && <option value="">Selecione uma atividade...</option>}
                     {cnaeRecuperadoForaDaLista && (
@@ -1058,6 +1092,11 @@ function EmitirNotaContent() {
                     </div>
                 </div>
             )}
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Discriminação do Serviço</label>
+              <textarea rows={4} placeholder="Descreva claramente o serviço prestado..." className="w-full resize-none rounded-xl border border-slate-200 p-3 text-slate-700 outline-blue-500" value={nfData.servicoDescricao} onChange={(e) => setNfData({...nfData, servicoDescricao: e.target.value})}></textarea>
+            </div>
             
             {perfilEmpresa?.regimeTributario !== 'MEI' && (tomadorPermiteRetencoes || cnaeSelecionadoObj?.temRetencaoInss || mostraRetencoesFederais) && (
                 <div className="mt-6 border-t pt-4">
@@ -1158,16 +1197,20 @@ function EmitirNotaContent() {
                 </div>
             )}
             
-            <div className="pt-4 border-t">
-              <label className="block text-sm font-medium text-slate-700 mb-2">Discriminação do Serviço</label>
-              <textarea rows={4} placeholder="Descrição detalhada do serviço prestado..." className="w-full p-3 border rounded-lg outline-blue-500 text-slate-700 resize-none" value={nfData.servicoDescricao} onChange={(e) => setNfData({...nfData, servicoDescricao: e.target.value})}></textarea>
-            </div>
-          </div>
+          </section>
         )}
 
-        {step === 3 && (
+        {step === 2 && (
           <div className="space-y-6">
-            <h3 className="text-xl font-semibold text-slate-700">Revisão e Fechamento</h3>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-xl font-black text-slate-900">Revise e confirme</h3>
+                <p className="mt-1 text-sm text-slate-500">Confira os dados que serão enviados ao Portal Nacional.</p>
+              </div>
+              <button onClick={() => setStep(1)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-bold text-slate-600 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700">
+                Editar dados
+              </button>
+            </div>
             <div className="bg-slate-50 p-6 rounded-lg space-y-4 border border-slate-200">
               
               <div className="flex justify-between border-b border-slate-200 pb-2 items-center">
@@ -1274,9 +1317,9 @@ function EmitirNotaContent() {
           </div>
           
           <div className="w-full flex justify-end">
-            {step < 3 ? (
-                <button onClick={handleNext} disabled={loading || (step === 1 && (!nfData.clienteId || clientePfEnderecoPendente)) || isStep2Invalid} className={`bg-blue-600 text-white px-6 py-3 rounded-lg flex items-center gap-2 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed`}>
-                    {loading ? <Loader2 className="animate-spin" size={18}/> : 'Próximo'} <ArrowRight size={18} />
+            {step < 2 ? (
+                <button onClick={handleNext} disabled={loading || isDadosNotaInvalid} className="flex items-center gap-2 rounded-xl bg-blue-600 px-6 py-3 font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
+                    {loading ? <Loader2 className="animate-spin" size={18}/> : 'Revisar nota'} <ArrowRight size={18} />
                 </button>
             ) : (
                 loading ? (
@@ -1288,64 +1331,46 @@ function EmitirNotaContent() {
           </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-function GuiaEmissao({ step, ambiente }: { step: number; ambiente?: string }) {
-  const orientacoes: Record<number, { title: string; description: string; tips: string[]; tone: string }> = {
-    1: {
-      title: 'Escolha o tomador correto',
-      description: 'A nota herda os dados fiscais do cliente selecionado. Para PF nacional, o endereço completo precisa estar salvo no cadastro.',
-      tips: ['Confira CPF/CNPJ e endereço antes de avançar.', 'Cadastros antigos de PF sem endereço ficam bloqueados até a atualização.', 'Rascunhos aparecem aqui quando uma emissão falha por algo corrigível.'],
-      tone: 'blue',
-    },
-    2: {
-      title: 'Preencha o servico com calma',
-      description: 'CNAE, valor e descricao definem a tributacao enviada ao Portal Nacional.',
-      tips: ['Use o CNAE correto para evitar rejeicao.', 'Retencoes aparecem conforme regra fiscal cadastrada.', 'O valor precisa ser maior que zero.'],
-      tone: 'slate',
-    },
-    3: {
-      title: ambiente === 'HOMOLOGACAO' ? 'Revise antes de validar' : 'Revise antes de emitir',
-      description: ambiente === 'HOMOLOGACAO'
-        ? 'Em homologacao a nota e apenas validada, sem valor fiscal.'
-        : 'Depois de autorizada, cancelamento exige justificativa e fica registrado no Portal Nacional.',
-      tips: ['A data de competencia pode ser ajustada dentro do limite permitido.', 'DPS fica automatico; altere apenas se o Portal pedir.', 'Acompanhe o processamento ate a nota aparecer no historico.'],
-      tone: ambiente === 'HOMOLOGACAO' ? 'amber' : 'green',
-    },
-  };
-
-  const atual = orientacoes[step] || orientacoes[1];
-  const toneClass: Record<string, string> = {
-    blue: 'border-blue-100 bg-blue-50 text-blue-900',
-    slate: 'border-slate-200 bg-white text-slate-800',
-    green: 'border-emerald-100 bg-emerald-50 text-emerald-900',
-    amber: 'border-amber-200 bg-amber-50 text-amber-900',
-  };
-
-  return (
-    <section className={`mb-6 rounded-2xl border p-4 shadow-sm ${toneClass[atual.tone]}`}>
-      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-        <div className="flex gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/80">
-            <HelpCircle size={19} />
+      {step === 1 && (
+        <aside className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm lg:sticky lg:top-5">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.16em] text-blue-600">Resumo</p>
+              <h3 className="mt-1 text-lg font-black text-slate-900">Sua nota</h3>
+            </div>
+            <div className={`h-2.5 w-2.5 rounded-full ${isDadosNotaInvalid ? 'bg-amber-400' : 'bg-emerald-500'}`} />
           </div>
-          <div>
-            <h3 className="text-sm font-black">{atual.title}</h3>
-            <p className="mt-1 text-sm leading-6 opacity-80">{atual.description}</p>
+
+          <dl className="mt-4 space-y-4 text-sm">
+            <div>
+              <dt className="text-xs font-bold uppercase tracking-wide text-slate-400">Tomador</dt>
+              <dd className="mt-1 break-words font-bold text-slate-800">{nfData.clienteNome || 'Não selecionado'}</dd>
+              {clienteSel?.documento && <dd className="mt-0.5 text-xs text-slate-500">{clienteSel.documento}</dd>}
+            </div>
+            <div>
+              <dt className="text-xs font-bold uppercase tracking-wide text-slate-400">Atividade</dt>
+              <dd className="mt-1 font-bold text-slate-800">{nfData.codigoCnae || 'Não selecionada'}</dd>
+              {cnaeSelecionadoObj?.descricao && <dd className="mt-0.5 line-clamp-2 text-xs leading-5 text-slate-500">{cnaeSelecionadoObj.descricao}</dd>}
+            </div>
+            <div className="grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-3">
+              <div>
+                <dt className="text-[10px] font-bold uppercase text-slate-400">Valor bruto</dt>
+                <dd className="mt-1 font-black text-slate-900">{valorNumerico.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</dd>
+              </div>
+              <div className="text-right">
+                <dt className="text-[10px] font-bold uppercase text-slate-400">Valor líquido</dt>
+                <dd className="mt-1 font-black text-emerald-700">{valorLiquido.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</dd>
+              </div>
+            </div>
+          </dl>
+
+          <div className={`mt-5 rounded-xl border p-3 text-xs font-semibold ${isDadosNotaInvalid ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>
+            {isDadosNotaInvalid ? 'Complete os campos obrigatórios para revisar a nota.' : 'Dados essenciais preenchidos. A nota está pronta para revisão.'}
           </div>
-        </div>
-        <div className="grid gap-2 text-xs font-semibold opacity-80 md:min-w-[330px]">
-          {atual.tips.map((tip) => (
-            <span key={tip} className="flex items-start gap-2">
-              <Info size={14} className="mt-0.5 shrink-0" />
-              {tip}
-            </span>
-          ))}
-        </div>
+        </aside>
+      )}
       </div>
-    </section>
+    </div>
   );
 }
 
