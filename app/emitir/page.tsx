@@ -794,7 +794,7 @@ function EmitirNotaContent() {
   const cnaeSelecionadoObj = meusCnaes.find(c => c.codigo === nfData.codigoCnae);
   const regimePermiteCrsfIr = ['LUCRO_PRESUMIDO', 'LUCRO_REAL'].includes(perfilEmpresa?.regimeTributario);
   const tomadorPermiteRetencoes = isPJ && !isPF && !isExterior;
-  const mostraRetencoesFederais = perfilEmpresa?.regimeTributario !== 'MEI' && Boolean(cnaeSelecionadoObj?.retemCrsf || cnaeSelecionadoObj?.retemIr);
+  const mostraRetencoesFederais = regimePermiteCrsfIr && Boolean(cnaeSelecionadoObj?.retemCrsf || cnaeSelecionadoObj?.retemIr);
   const retencoesMarcadasPorPadrao = cnaeSelecionadoObj?.modoRetencoes === 'AUTOMATICO';
   const permiteEditarCrsfIr = tomadorPermiteRetencoes && regimePermiteCrsfIr;
   const permiteEditarInss = tomadorPermiteRetencoes && perfilEmpresa?.regimeTributario !== 'MEI';
@@ -1114,11 +1114,9 @@ function EmitirNotaContent() {
                           <p className="text-xs text-slate-500">
                             {!tomadorPermiteRetencoes
                               ? `${isExterior ? 'Tomador no exterior' : 'Pessoa física'}: retenções federais não se aplicam e serão zeradas pelo servidor; as opções permanecem visíveis para consulta.`
-                              : !regimePermiteCrsfIr
-                                ? 'Prestador do Simples Nacional: PIS, COFINS, CSLL e IRRF ficam desabilitados; o INSS continua dependendo da atividade.'
-                                : retencoesMarcadasPorPadrao
-                                  ? 'O CNAE marcou as retenções aplicáveis como padrão. O operador pode desmarcar quando o pagamento ou o tomador não exigir retenção, inclusive em situações específicas de condomínio.'
-                                  : 'As alíquotas foram sugeridas pelo CNAE. Confirme as retenções aplicáveis a este pagamento.'}
+                              : retencoesMarcadasPorPadrao
+                                ? 'O CNAE marcou as retenções aplicáveis como padrão. O operador pode desmarcar quando o pagamento ou o tomador não exigir retenção, inclusive em situações específicas de condomínio.'
+                                : 'As alíquotas foram sugeridas pelo CNAE. Confirme as retenções aplicáveis a este pagamento.'}
                             {cnaeSelecionadoObj?.retemCrsf && !crsfAtingiuMinimo && permiteEditarCrsfIr ? ' A CRSF está abaixo do mínimo configurado.' : ''}
                             {cnaeSelecionadoObj?.retemIr && !irAtingiuMinimo && permiteEditarCrsfIr ? ' O IRRF está abaixo do mínimo configurado.' : ''}
                           </p>

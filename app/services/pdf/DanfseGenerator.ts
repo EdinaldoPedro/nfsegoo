@@ -199,6 +199,11 @@ function formatCodigoMunicipio(value: string) {
   return digits.length === 7 ? digits.replace(/^(\d{2})(\d{5})$/, '$1.$2') : value;
 }
 
+function formatCodigoTributacaoNacional(value: string) {
+  const digits = onlyDigits(value);
+  return digits.length === 6 ? digits.replace(/^(\d{2})(\d{2})(\d{2})$/, '$1.$2.$3') : value;
+}
+
 function formatPhone(value: string) {
   const digits = onlyDigits(value);
   if (digits.length === 11) return digits.replace(/^(\d{2})(\d{5})(\d{4})$/, '($1) $2-$3');
@@ -465,7 +470,7 @@ export function parseDanfseXml(input: string | Buffer, options: DanfseGeneratorO
     destinatario: destinatarioData,
     intermediario: participante(inter, 'INTERMEDIÁRIO'),
     servico: {
-      codigoTributacao: [codigoTribNac, codigoTribMun].filter(Boolean).join(' / '),
+      codigoTributacao: [formatCodigoTributacaoNacional(codigoTribNac), codigoTribMun].filter(Boolean).join(' / '),
       codigoNbs: codigoNbs ? codigoNbs.replace(/^(\d)(\d{4})(\d{2})(\d{2})$/, '$1.$2.$3.$4') : '',
       localPrestacao: localUfPais,
       descricaoTributacao: text(info, ['xTribNac']) || text(info, ['xTribMun']),
@@ -699,7 +704,9 @@ export async function generateDanfsePdf(input: string | Buffer, options: DanfseG
   if (data.servico.descricaoTributacao) {
     y = row(doc, y, 6, [{ label: '', value: data.servico.descricaoTributacao, width: 204 }], { topLine: false });
   }
-  y = row(doc, y, 9, [{ label: 'Descrição do Serviço', value: data.servico.descricao, width: 204 }], { topLine: false });
+  const descricaoServicoLines = doc.splitTextToSize(data.servico.descricao || '-', 201.6).length;
+  const descricaoServicoHeight = Math.max(9, 7 + Math.max(0, descricaoServicoLines - 1) * 2.7);
+  y = row(doc, y, descricaoServicoHeight, [{ label: 'Descrição do Serviço', value: data.servico.descricao, width: 204 }], { topLine: false });
   y = row(doc, y, 7, [
     { label: 'TRIBUTAÇÃO MUNICIPAL (ISSQN)', shaded: true },
     { label: 'Tipo de Tributação do ISSQN', value: data.issqn.tipo },
