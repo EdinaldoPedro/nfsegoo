@@ -8,9 +8,12 @@ import {
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import AppHeader from '@/components/AppHeader';
+import { useDialog } from '@/app/contexts/DialogContext';
+import { normalizarRegimeTributario } from '@/app/utils/regime-tributario';
 
 export default function ConfiguracoesEmpresa() {
   const router = useRouter();
+  const dialog = useDialog();
   const [loading, setLoading] = useState(false);
   const [carregandoPerfil, setCarregandoPerfil] = useState(true);
   const [erroCarregamento, setErroCarregamento] = useState('');
@@ -98,6 +101,7 @@ export default function ConfiguracoesEmpresa() {
           setEmpresa(prev => ({ 
               ...prev, 
               ...dados,
+              regimeTributario: normalizarRegimeTributario(dados.regimeTributario) || '',
               // Garante que o IBGE vindo do banco seja lido corretamente
               codigoIbge: dados.codigoIbge || '',
               serieDPS: serieCarregada,
@@ -137,7 +141,10 @@ export default function ConfiguracoesEmpresa() {
     const docLimpo = empresa.documento.replace(/\D/g, '');
     
     if (isLocked && !forcarAtualizacao) return; 
-    if (docLimpo.length !== 14) { alert("CNPJ inválido."); return; }
+    if (docLimpo.length !== 14) {
+      await dialog.showAlert({ type: 'warning', title: 'Revise o CNPJ', description: 'Informe os 14 dígitos do CNPJ para continuar.' });
+      return;
+    }
 
     setBuscando(true);
     try {
@@ -237,7 +244,13 @@ export default function ConfiguracoesEmpresa() {
   };
 
   const handleDeletarCertificado = async () => {
-      if(!confirm("Tem certeza? Sem o certificado você não poderá emitir notas.")) return;
+      if (!await dialog.showConfirm({
+        type: 'danger',
+        title: 'Remover certificado digital?',
+        description: 'Sem o certificado A1, novas notas fiscais não poderão ser emitidas até que outro certificado seja cadastrado.',
+        confirmText: 'Remover certificado',
+        cancelText: 'Manter certificado',
+      })) return;
       await handleSalvar(null, { deletarCertificado: true });
       window.location.reload();
   };
@@ -268,7 +281,13 @@ export default function ConfiguracoesEmpresa() {
           showMessage('Cadastre e salve o certificado A1 antes de sincronizar.', 'erro');
           return false;
       }
-      const confirmado = window.confirm(`Consultar no Portal Nacional a numeração da série ${empresa.serieDPS} em ${empresa.ambiente === 'PRODUCAO' ? 'Produção' : 'Homologação'}? Esta operação não emite nota fiscal.`);
+      const confirmado = await dialog.showConfirm({
+        type: 'info',
+        title: 'Sincronizar numeração da DPS?',
+        description: `Vamos consultar no Portal Nacional o último número da série ${empresa.serieDPS}, no ambiente de ${empresa.ambiente === 'PRODUCAO' ? 'produção' : 'homologação'}. A consulta não emite nota fiscal.`,
+        confirmText: 'Sincronizar agora',
+        cancelText: 'Agora não',
+      });
       if (!confirmado) return false;
 
       setSincronizandoDps(true);
@@ -337,7 +356,13 @@ export default function ConfiguracoesEmpresa() {
         showMessage('✅ Cadastro salvo com sucesso!', 'sucesso');
         if (resposta.primeiroCertificadoCadastrado) {
             setDadosCertificado({ ativo: true, vencimento: certificadoCheck.vencimento || null });
-            const desejaSincronizar = window.confirm('Certificado validado e salvo. Deseja sincronizar agora a numeração da DPS com o Portal Nacional? A consulta não emitirá nota fiscal.');
+            const desejaSincronizar = await dialog.showConfirm({
+              type: 'success',
+              title: 'Certificado salvo',
+              description: 'O certificado foi validado. Deseja consultar agora a numeração da DPS no Portal Nacional? Essa consulta não emite nota fiscal.',
+              confirmText: 'Sincronizar agora',
+              cancelText: 'Fazer depois',
+            });
             if (desejaSincronizar) await sincronizarNumeracaoDps();
             setTimeout(() => window.location.reload(), 1200);
         } else if (certFile || extraData.deletarCertificado) {
@@ -455,12 +480,12 @@ export default function ConfiguracoesEmpresa() {
                         className={`w-full p-3 border rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none ${!empresa.regimeTributario ? 'border-red-300 text-gray-500' : 'text-gray-800'}`} 
                         value={empresa.regimeTributario || ''} 
                         onChange={e => setEmpresa({...empresa, regimeTributario: e.target.value})}
+                        required
                       >
                           <option value="" disabled>Selecione um regime...</option>
                           <option value="MEI">Microempreendedor Individual (MEI)</option>
                           <option value="SIMPLES">Simples Nacional</option>
                           <option value="LUCRO_PRESUMIDO">Lucro Presumido</option>
-                          <option value="LUCRO_REAL">Lucro Real</option>
                       </select>
                   </div>
               </div>

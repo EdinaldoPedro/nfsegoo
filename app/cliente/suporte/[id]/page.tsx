@@ -147,7 +147,7 @@ export default function ClienteTicketDetalhes({ params }: { params: { id: string
         const texto = acao === 'CANCELAR' ? 'cancelar este chamado' : 'marcar como resolvido';
         const status = acao === 'CANCELAR' ? 'CANCELADO' : 'RESOLVIDO';
 
-        if (!await dialog.showConfirm({ title: 'Confirmar ação?', description: `Deseja realmente ${texto}?` })) return;
+        if (!await dialog.showConfirm({ title: 'Atualizar este chamado?', description: `Confirme para ${texto}. O novo status ficará visível no histórico do atendimento.`, confirmText: 'Atualizar chamado', cancelText: 'Voltar' })) return;
 
         const userId = localStorage.getItem('userId');
 

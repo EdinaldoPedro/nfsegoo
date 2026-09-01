@@ -4,8 +4,16 @@ import { writeFileSync } from 'node:fs';
 import { getFederalRetentionEligibility, getIbsCbsPilotControl, getPisCofinsDueDefaults, isIbsCbsMandatory, meetsFederalRetentionMinimum, retentionType, roundHalfEven, shouldEnableIbsCbs } from './FiscalMath.ts';
 import { NacionalAdapter } from '../adapters/NacionalAdapter.ts';
 import { validateDpsXml } from '../validation/DpsPreflightValidator.ts';
+import { assertRegimeTributarioSuportado, normalizarRegimeTributario } from '../../../utils/regime-tributario.ts';
 
 const retention = (retido, valor) => ({ retido, valor });
+
+test('exige regime suportado sem presumir MEI', () => {
+  assert.equal(normalizarRegimeTributario('mei'), 'MEI');
+  assert.equal(normalizarRegimeTributario('LUCRO_REAL'), null);
+  assert.throws(() => assertRegimeTributarioSuportado(''), { code: 'REGIME_TRIBUTARIO_OBRIGATORIO' });
+  assert.throws(() => assertRegimeTributarioSuportado('LUCRO_REAL'), { code: 'REGIME_TRIBUTARIO_NAO_SUPORTADO' });
+});
 
 test('mapeia todas as combinacoes atuais de PIS/COFINS/CSLL da NT 007', () => {
   const cases = [
@@ -47,10 +55,6 @@ test('pilota IBS/CBS por chave geral e regime sem alterar a obrigatoriedade', ()
   });
   assert.equal(getIbsCbsPilotControl('MEI').enabled, false);
   assert.equal(getIbsCbsPilotControl('SIMPLES', { ibsCbsSimplesAtivo: true }).enabled, true);
-  assert.equal(getIbsCbsPilotControl('LUCRO_REAL', {
-    ibsCbsPilotoAtivo: false,
-    ibsCbsLucroRealAtivo: true,
-  }).enabled, false);
   assert.equal(getIbsCbsPilotControl('REGIME_DESCONHECIDO').enabled, false);
   assert.equal(shouldEnableIbsCbs({ mandatory: false, competence: '2025-12-31', pilotEnabled: true, ruleEnabled: true }), false);
   assert.equal(shouldEnableIbsCbs({ mandatory: false, competence: '2026-08-19', pilotEnabled: true, ruleEnabled: false }), false);
@@ -59,7 +63,6 @@ test('pilota IBS/CBS por chave geral e regime sem alterar a obrigatoriedade', ()
 
 test('separa a apuracao propria padrao do Lucro Presumido das retencoes', () => {
   assert.deepEqual(getPisCofinsDueDefaults('LUCRO_PRESUMIDO'), { enabled: true, pis: 0.65, cofins: 3, cst: '01' });
-  assert.equal(getPisCofinsDueDefaults('LUCRO_REAL').enabled, false);
   assert.equal(getPisCofinsDueDefaults('SIMPLES').enabled, false);
 });
 
@@ -67,7 +70,7 @@ test('restringe retenções federais por tomador e regime sem bloquear PJ normal
   assert.deepEqual(getFederalRetentionEligibility('LUCRO_PRESUMIDO', 'PF', 'Brasil'), {
     domesticLegalEntity: false, crsfAndIrrf: false, inss: false, reason: 'PF',
   });
-  assert.deepEqual(getFederalRetentionEligibility('LUCRO_REAL', 'PJ', 'US'), {
+  assert.deepEqual(getFederalRetentionEligibility('LUCRO_PRESUMIDO', 'PJ', 'US'), {
     domesticLegalEntity: false, crsfAndIrrf: false, inss: false, reason: 'EXTERIOR',
   });
   assert.deepEqual(getFederalRetentionEligibility('LUCRO_PRESUMIDO', 'PJ', 'Brasil'), {

@@ -392,20 +392,45 @@ export function parseDanfseXml(input: string | Buffer, options: DanfseGeneratorO
     prestadorData.municipioUf = [municipioEmissao, ufEmissao].filter(Boolean).join(' / ');
   }
   const tomadorData = participante(toma, 'TOMADOR / ADQUIRENTE');
-  const codigoTomador = text(first(toma, 'end'), ['endNac', 'cMun']);
+  const enderecoTomador = first(toma, 'endNac') || first(first(toma, 'end'), 'endNac') || first(toma, 'end');
+  const codigoTomador = text(enderecoTomador, ['cMun']);
+  const ufTomador = text(enderecoTomador, ['UF']) || text(toma, ['UF']);
   if (!tomadorData.municipioUf && codigoTomador) {
     if (codigoTomador === text(info, ['cLocIncid'])) {
-      tomadorData.municipioUf = [text(info, ['xLocIncid']), ufEmissao].filter(Boolean).join(' / ');
+      tomadorData.municipioUf = [text(info, ['xLocIncid']), ufTomador].filter(Boolean).join(' / ');
     } else if (codigoTomador === text(ibscbsNfse, ['cLocalidadeIncid'])) {
-      tomadorData.municipioUf = [text(ibscbsNfse, ['xLocalidadeIncid']), ufEmissao].filter(Boolean).join(' / ');
+      tomadorData.municipioUf = [text(ibscbsNfse, ['xLocalidadeIncid']), ufTomador].filter(Boolean).join(' / ');
     }
   }
   const destinatarioData = participante(dest, 'DESTINATÁRIO DA OPERAÇÃO');
   const codigoTribNac = text(first(serv, 'cServ'), ['cTribNac']);
   const codigoTribMun = text(first(serv, 'cServ'), ['cTribMun']);
   const codigoNbs = text(first(serv, 'cServ'), ['cNBS']);
+  const localPrest = first(serv, 'locPrest');
+  const paisPrestacao = text(localPrest, ['cPaisPrestacao']);
+  const codigoLocalPrestacao = text(localPrest, ['cLocPrestacao']) || text(localPrest, ['cMun']);
   const localPrestacao = text(info, ['xLocPrestacao']) || text(info, ['xLocIncid']);
-  const localUfPais = [localPrestacao || '-', ufEmissao || '-', text(first(serv, 'locPrest'), ['cPaisPrestacao']) || '-'].join(' / ');
+  const ufPrestacaoExplicita = text(localPrest, ['UF']);
+  const ufPrestacao = ufPrestacaoExplicita
+    || (codigoLocalPrestacao && codigoLocalPrestacao === codigoTomador ? ufTomador : '')
+    || (codigoLocalPrestacao && codigoLocalPrestacao === codigoMunicipioEmitente ? ufEmissao : '');
+  // A UF nunca pode ser inferida apenas a partir do emitente. Para prestação no
+  // exterior, o DANFSe oficial deixa este campo vazio; fazemos o mesmo.
+  const prestacaoExterior = Boolean(paisPrestacao && paisPrestacao !== 'BR');
+  const localUfPais = prestacaoExterior
+    ? ''
+    : [localPrestacao || '-', ufPrestacao || '-', paisPrestacao || '-'].join(' / ');
+  const codigoLocalidadeIbs = text(ibscbsNfse, ['cLocalidadeIncid']);
+  const ufIncidenciaIbs = codigoLocalidadeIbs && codigoLocalidadeIbs === codigoTomador
+    ? ufTomador
+    : codigoLocalidadeIbs && codigoLocalidadeIbs === codigoMunicipioEmitente
+      ? ufEmissao
+      : '';
+  const indicadorOperacaoIbs = text(ibscbsDps, ['cIndOp']);
+  const localidadeIbs = text(ibscbsNfse, ['xLocalidadeIncid']);
+  const indicadorIbs = indicadorOperacaoIbs || codigoLocalidadeIbs || localidadeIbs
+    ? [indicadorOperacaoIbs || '-', codigoLocalidadeIbs || '-', localidadeIbs || '-', ufIncidenciaIbs || '-'].join(' / ')
+    : '';
   const piscofins = first(tribFed, 'piscofins');
   const tpRetPisCofins = text(piscofins, ['tpRetPisCofins']);
   const retencoesSociais = [text(tribFed, ['vRetCSLL'])];
@@ -506,7 +531,7 @@ export function parseDanfseXml(input: string | Buffer, options: DanfseGeneratorO
     },
     ibscbs: {
       cstClasse: [text(first(ibscbsDps, 'gIBSCBS'), ['CST']), text(first(ibscbsDps, 'gIBSCBS'), ['cClassTrib'])].filter(Boolean).join(' / '),
-      indicador: [text(ibscbsDps, ['cIndOp']), text(ibscbsNfse, ['cLocalidadeIncid']), text(ibscbsNfse, ['xLocalidadeIncid']), ufEmissao].filter(Boolean).join(' / '),
+      indicador: indicadorIbs,
       exclusoes: money(exclusoes),
       base: money(vBcIbs),
       reducoes: [text(ibsValores, ['uf', 'pRedAliqUF']), text(ibsValores, ['mun', 'pRedAliqMun']), text(ibsValores, ['fed', 'pRedAliqCBS'])].map(percent).filter(Boolean).join(' / '),

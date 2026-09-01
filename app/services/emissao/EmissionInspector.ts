@@ -9,6 +9,7 @@ import { isPercentualFiscalValido, parseDecimalInput } from '@/app/utils/number-
 import { resolveFiscalDecision } from '@/app/services/emissor/fiscal/FiscalRuleEngine';
 import { validateNationalAddress } from '@/app/utils/customer-address';
 import { getDpsSequence, normalizeDpsEnvironment } from '@/app/services/dpsSequenceService';
+import { assertRegimeTributarioSuportado } from '@/app/utils/regime-tributario';
 
 type CheckStatus = 'ok' | 'warn' | 'error' | 'info';
 
@@ -134,6 +135,7 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
 
   const checks: CheckItem[] = [];
   const prestador = venda.empresa;
+  const regimePrestador = assertRegimeTributarioSuportado(prestador.regimeTributario);
   const tomador = venda.cliente;
   const notaAtual = venda.notas?.[0];
 
@@ -338,7 +340,7 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
   const codigoNbsResolvido = regraMunicipal?.exigeNbs ? (regraGlobal as any)?.codigoNbs || cnaePrincipal?.codigoNbs || '' : '';
   const codigoNbs = optionalText(firstDefined(overrides.codigoNbs, codigoNbsResolvido));
   const aliquotaMunicipio = firstDefined(overrides.aliquotaMunicipio, regraMunicipal?.aliquotaIss);
-  const isMei = String(prestador.regimeTributario || '').toUpperCase() === 'MEI';
+  const isMei = regimePrestador === 'MEI';
   const aliquotaIss = isMei ? 0 : (overrides.aliquota !== undefined ? asNumber(overrides.aliquota) : 0) || asNumber(prestador.aliquotaPadrao);
   const aliquotaMunicipioNumero = aliquotaMunicipio ? asNumber(aliquotaMunicipio) : null;
 
@@ -448,7 +450,7 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
     cnae: cnaeFinal,
     itemLc,
     codigoIbge: asText(firstDefined(overrides.localPrestacaoIbge, prestador.codigoIbge), ''),
-    regimeTributario: prestador.regimeTributario || 'MEI',
+    regimeTributario: regimePrestador,
     dataCompetencia: overrides.dataCompetencia,
     valor: valorFinal,
     codigoNbs,
@@ -480,7 +482,7 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
   (servico as any).ibscbs = fiscalDecision.ibscbs;
   (servico as any).dataCompetencia = overrides.dataCompetencia;
 
-  const handler = String(prestador.regimeTributario).toUpperCase() === 'MEI'
+  const handler = regimePrestador === 'MEI'
     ? new MeiHandler()
     : new SimplesNacionalHandler();
   const dadosTributarios = await handler.getDadosTributarios(servico, prestador);
@@ -505,7 +507,7 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
       id: prestador.id,
       documento: prestador.documento,
       inscricaoMunicipal: prestadorInscricaoMunicipal,
-      regimeTributario: prestador.regimeTributario as any,
+      regimeTributario: regimePrestador,
       endereco: {
         codigoIbge: asText(firstDefined(overrides.localPrestacaoIbge, prestador.codigoIbge), ''),
         uf: prestador.uf || '',

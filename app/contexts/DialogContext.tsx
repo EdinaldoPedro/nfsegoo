@@ -2,8 +2,9 @@
 
 import { createContext, useContext, useState, useRef, ReactNode } from 'react';
 import { X, AlertTriangle, CheckCircle, HelpCircle, Trash2, Info } from 'lucide-react';
+import { usePathname } from 'next/navigation';
 
-interface DialogOptions {
+export interface DialogOptions {
   title?: string;
   description: string;
   confirmText?: string;
@@ -11,6 +12,7 @@ interface DialogOptions {
   type?: 'info' | 'danger' | 'warning' | 'prompt' | 'success';
   placeholder?: string; // Apenas para prompt
   validationText?: string; // Texto que o usuário deve digitar para confirmar (ex: "DELETAR")
+  audience?: 'client' | 'backoffice';
 }
 
 interface DialogContextType {
@@ -25,13 +27,16 @@ export function DialogProvider({ children }: { children: ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
   const [options, setOptions] = useState<DialogOptions>({ description: '' });
   const [inputValue, setInputValue] = useState('');
+  const [validationError, setValidationError] = useState('');
+  const pathname = usePathname();
   
   // Refs para guardar a promessa (resolve)
   const resolver = useRef<(value: any) => void>(() => {});
 
   const openDialog = (opts: DialogOptions): Promise<any> => {
-    setOptions(opts);
+    setOptions({ ...opts, audience: opts.audience || (pathname.startsWith('/admin') ? 'backoffice' : 'client') });
     setInputValue('');
+    setValidationError('');
     setIsOpen(true);
     return new Promise((resolve) => {
       resolver.current = resolve;
@@ -41,8 +46,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
   const handleConfirm = () => {
     if (options.type === 'prompt') {
       if (options.validationText && inputValue !== options.validationText) {
-        // Treme a tela ou avisa (opcional)
-        alert(`Digite "${options.validationText}" corretamente.`);
+        setValidationError(`Digite "${options.validationText}" exatamente como exibido.`);
         return;
       }
       resolver.current(inputValue);
@@ -65,7 +69,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
         ? { description: opts, type: 'info' } 
         : { ...opts, type: opts.type || 'info' }; // Fallback explícito
       
-      await openDialog({ ...config, confirmText: 'OK' });
+      await openDialog({ ...config, confirmText: config.confirmText || 'Entendi' });
     },
     showConfirm: async (opts: DialogOptions | string) => {
       // CORREÇÃO: Mesma lógica para o confirm
@@ -91,14 +95,21 @@ export function DialogProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const defaultTitle = () => {
+    if (options.type === 'danger') return options.audience === 'backoffice' ? 'Confirmar operação crítica' : 'Atenção antes de continuar';
+    if (options.type === 'success') return options.audience === 'backoffice' ? 'Operação concluída' : 'Tudo certo';
+    if (options.type === 'warning') return options.audience === 'backoffice' ? 'Confirme a operação' : 'Revise antes de continuar';
+    return options.audience === 'backoffice' ? 'Informação operacional' : 'Informação';
+  };
+
   return (
     <DialogContext.Provider value={api as any}>
       {children}
       
       {/* UI DO MODAL (GLOBAL) */}
       {isOpen && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 text-center transform transition-all scale-100 animate-in zoom-in-95 duration-200 border border-slate-100 relative">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200" role="presentation">
+          <div role="alertdialog" aria-modal="true" aria-labelledby="global-dialog-title" aria-describedby="global-dialog-description" className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 text-center transform transition-all scale-100 animate-in zoom-in-95 duration-200 border border-slate-100 relative">
             
             {/* Botão Fechar no canto */}
             <button onClick={handleCancel} className="absolute top-4 right-4 text-slate-400 hover:text-red-500 transition">
@@ -107,11 +118,11 @@ export function DialogProvider({ children }: { children: ReactNode }) {
 
             {getIcon()}
             
-            <h3 className="text-xl font-bold text-slate-800 mb-2">
-              {options.title || (options.type === 'danger' ? 'Zona de Perigo' : options.type === 'success' ? 'Sucesso!' : 'Atenção')}
+            <h3 id="global-dialog-title" className="text-xl font-bold text-slate-800 mb-2">
+              {options.title || defaultTitle()}
             </h3>
             
-            <p className="text-slate-500 mb-6 text-sm leading-relaxed px-2">
+            <p id="global-dialog-description" className="text-slate-500 mb-6 text-sm leading-relaxed px-2">
               {options.description}
             </p>
 
@@ -131,11 +142,12 @@ export function DialogProvider({ children }: { children: ReactNode }) {
                   onChange={e => setInputValue(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && handleConfirm()}
                 />
+                {validationError && <p className="mt-2 text-xs font-semibold text-red-600" role="alert">{validationError}</p>}
               </div>
             )}
 
             <div className="grid grid-cols-2 gap-3">
-              {options.type !== 'info' && options.type !== 'success' ? (
+              {Boolean(options.cancelText) || options.type === 'danger' || options.type === 'warning' || options.type === 'prompt' ? (
                 <>
                   <button 
                     onClick={handleCancel}

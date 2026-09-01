@@ -230,7 +230,7 @@ export default function ContadorDashboard() {
 
         await showAlert({
           type: 'success',
-          title: 'Sucesso!',
+          title: 'Empresa vinculada',
           description: data.message || 'Empresa vinculada com sucesso!',
         });
 
@@ -248,7 +248,7 @@ export default function ContadorDashboard() {
       setStatusMsg('');
       showAlert({
         type: 'danger',
-        title: 'Erro de conexão',
+        title: 'Falha ao conectar com o serviço de vínculos',
         description: 'Não foi possível conectar ao servidor. Verifique sua internet.',
       });
     } finally {
@@ -294,7 +294,7 @@ export default function ContadorDashboard() {
     } catch (error: any) {
       showAlert({
         type: 'danger',
-        title: 'Falha',
+        title: 'Não foi possível concluir o vínculo',
         description: error.message || 'Nao foi possivel resolver a solicitacao.',
       });
     } finally {

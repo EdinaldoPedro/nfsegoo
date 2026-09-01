@@ -72,7 +72,6 @@ export async function PUT(request: Request) {
       'ibsCbsMeiAtivo',
       'ibsCbsSimplesAtivo',
       'ibsCbsLucroPresumidoAtivo',
-      'ibsCbsLucroRealAtivo',
     ] as const;
 
     for (const field of fiscalBooleanFields) {

@@ -298,12 +298,12 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
           const data = await res.json();
           if(res.ok) { 
               setCancelProgress(100);
-              await dialog.showAlert({ type: 'success', title: 'Sucesso', description: "Nota cancelada!" });
+              await dialog.showAlert({ type: 'success', title: 'Nota fiscal cancelada', description: 'O cancelamento foi confirmado e o status da nota foi atualizado.' });
               setCancelModalOpen(false);
               fetchVendas(); 
           } else {
               setCancelProgress(0);
-              dialog.showAlert({ type: 'danger', title: 'Falha', description: data.error });
+              dialog.showAlert({ type: 'danger', title: 'Não foi possível cancelar a nota', description: data.error || 'Revise a situação da nota e tente novamente.' });
           }
       } catch(e) { dialog.showAlert("Erro de conexão."); }
       finally { setCancelando(false); }

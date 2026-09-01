@@ -8,7 +8,6 @@ export interface IbsCbsPilotConfig {
   ibsCbsMeiAtivo?: boolean | null;
   ibsCbsSimplesAtivo?: boolean | null;
   ibsCbsLucroPresumidoAtivo?: boolean | null;
-  ibsCbsLucroRealAtivo?: boolean | null;
 }
 
 export interface IbsCbsPilotControl {
@@ -63,13 +62,11 @@ export function getIbsCbsPilotControl(regime: string, config?: IbsCbsPilotConfig
     MEI: false,
     SIMPLES: false,
     LUCRO_PRESUMIDO: true,
-    LUCRO_REAL: true,
   };
   const configured: Record<string, boolean | null | undefined> = {
     MEI: config?.ibsCbsMeiAtivo,
     SIMPLES: config?.ibsCbsSimplesAtivo,
     LUCRO_PRESUMIDO: config?.ibsCbsLucroPresumidoAtivo,
-    LUCRO_REAL: config?.ibsCbsLucroRealAtivo,
   };
   const regimeEnabled = configured[normalized] ?? defaults[normalized] ?? false;
   return { masterEnabled, regimeEnabled, enabled: masterEnabled && regimeEnabled };

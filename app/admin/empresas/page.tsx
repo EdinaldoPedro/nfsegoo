@@ -62,7 +62,7 @@ export default function BaseEmpresas() {
       });
 
       if (res.ok) {
-        await dialog.showAlert({ type: 'success', title: 'Sucesso', description: 'Cadastro atualizado!' });
+        await dialog.showAlert({ type: 'success', title: 'Cadastro da empresa atualizado', description: 'As alterações foram gravadas com sucesso.' });
         setEditingItem(null);
         carregarDados(page, termo, viewType);
       } else {
@@ -77,7 +77,7 @@ export default function BaseEmpresas() {
   const handleDelete = async (id: string) => {
     const confirmacao = await dialog.showPrompt({
       type: 'danger',
-      title: 'Zona de Perigo',
+      title: 'Excluir empresa e dados vinculados?',
       description: 'Esta ação arquivará este cadastro. Digite EXCLUIR:',
       validationText: 'EXCLUIR',
       placeholder: "Digite 'EXCLUIR'"
@@ -93,7 +93,7 @@ export default function BaseEmpresas() {
         carregarDados(page, termo, viewType);
       } else {
         const data = await res.json();
-        dialog.showAlert({ type: 'danger', title: 'Falha', description: data.error || 'Erro ao excluir.' });
+        dialog.showAlert({ type: 'danger', title: 'Falha ao excluir empresa', description: data.error || 'A API não concluiu a exclusão.' });
       }
     } catch {
       dialog.showAlert('Erro de conexão.');

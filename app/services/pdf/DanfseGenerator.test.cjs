@@ -7,15 +7,23 @@ function xmlAutorizado({ ambiente = '1', emailEmitente = 'cadastro.portal@exampl
   const enderecoTomador = exterior
     ? '<end><endExt><cEndPost>19801</cEndPost><xCidade>Wilmington</xCidade><xEstProv>Delaware</xEstProv></endExt></end><NIF>US123</NIF>'
     : '<end><endNac><cMun>3550308</cMun><CEP>01001000</CEP><xLgr>Praça da Sé</xLgr><nro>1</nro><xBairro>Sé</xBairro><UF>SP</UF></endNac></end><CNPJ>11222333000181</CNPJ>';
+  const localPrestacao = exterior
+    ? '<locPrest><cPaisPrestacao>UY</cPaisPrestacao></locPrest>'
+    : '<locPrest><cLocPrestacao>3550308</cLocPrestacao><cPaisPrestacao>BR</cPaisPrestacao></locPrest>';
+  const ibscbsDps = exterior ? '<IBSCBS><cIndOp>100301</cIndOp></IBSCBS>' : '';
+  const ibscbsNfse = exterior
+    ? '<IBSCBS><cLocalidadeIncid>9999999</cLocalidadeIncid><xLocalidadeIncid>Exterior</xLocalidadeIncid></IBSCBS>'
+    : '';
+  const nomeLocalPrestacao = exterior ? 'Uruguai' : 'São Paulo';
   return `<?xml version="1.0" encoding="UTF-8"?>
   <NFSe><infNFSe Id="NFS12345678901234567890123456789012345678901234567890">
-    <nNFSe>23</nNFSe><dhProc>2026-08-25T09:30:00</dhProc><xLocEmi>Recife</xLocEmi><xLocIncid>Recife</xLocIncid><cLocIncid>2611606</cLocIncid><cStat>100</cStat><ambGer>Emissor Nacional</ambGer>
+    <nNFSe>23</nNFSe><dhProc>2026-08-25T09:30:00</dhProc><xLocEmi>Recife</xLocEmi><xLocPrestacao>${nomeLocalPrestacao}</xLocPrestacao><xLocIncid>Recife</xLocIncid><cLocIncid>2611606</cLocIncid><cStat>100</cStat><ambGer>Emissor Nacional</ambGer>
     <emit><CNPJ>54545869000140</CNPJ><xNome>PRESTADOR TESTE</xNome><enderNac><cMun>2611606</cMun><CEP>51010000</CEP><xLgr>AVENIDA TESTE</xLgr><nro>100</nro><xBairro>BOA VIAGEM</xBairro><UF>PE</UF></enderNac>${contatoEmitente}</emit>
-    <valores><vBC>1000.00</vBC><pAliqAplic>5.00</pAliqAplic><vISSQN>50.00</vISSQN><vTotalRet>65.00</vTotalRet><vLiq>935.00</vLiq></valores>
+    <valores><vBC>1000.00</vBC><pAliqAplic>5.00</pAliqAplic><vISSQN>50.00</vISSQN><vTotalRet>65.00</vTotalRet><vLiq>935.00</vLiq></valores>${ibscbsNfse}
     <DPS><infDPS><tpAmb>${ambiente}</tpAmb><dCompet>2026-08-25</dCompet><dhEmi>2026-08-25T09:29:00</dhEmi><nDPS>13</nDPS><serie>900</serie><tpEmit>1</tpEmit>
       <prest><CNPJ>54545869000140</CNPJ><email>usuario-do-saas@example.com</email><regTrib><opSimpNac>2</opSimpNac><regApTribSN>1</regApTribSN><regEspTrib>0</regEspTrib></regTrib></prest>
       <toma>${enderecoTomador}<xNome>TOMADOR TESTE</xNome><email>tomador@example.com</email></toma>
-      <serv><cServ><cTribNac>01.01.01</cTribNac><cNBS>123456789</cNBS><xDescServ>${descricao}</xDescServ></cServ></serv>
+      <serv><cServ><cTribNac>01.01.01</cTribNac><cNBS>123456789</cNBS><xDescServ>${descricao}</xDescServ></cServ>${localPrestacao}</serv>${ibscbsDps}
       <valores><vServPrest><vServ>1000.00</vServ></vServPrest><tribMun><tribISSQN>1</tribISSQN><tpRetISSQN>1</tpRetISSQN></tribMun><tribFed><vRetIRRF>10.00</vRetIRRF><vRetCP>20.00</vRetCP><vRetCSLL>5.00</vRetCSLL><piscofins><tpRetPisCofins>1</tpRetPisCofins><vPis>10.00</vPis><vCofins>20.00</vCofins></piscofins></tribFed></valores>
     </infDPS></DPS>
   </infNFSe></NFSe>`;
@@ -47,6 +55,14 @@ test('trata tomador no exterior', () => {
   const data = parseDanfseXml(xmlAutorizado({ exterior: true }));
   assert.equal(data.tomador.documento, 'US123');
   assert.match(data.tomador.codigoIbgeCep, /19801/);
+  assert.equal(data.servico.localPrestacao, '');
+  assert.equal(data.ibscbs.indicador, '100301 / 9999999 / Exterior / -');
+  assert.doesNotMatch(data.ibscbs.indicador, /PE/);
+});
+
+test('usa a UF do tomador quando o local da prestação corresponde ao seu município', () => {
+  const data = parseDanfseXml(xmlAutorizado());
+  assert.equal(data.servico.localPrestacao, 'São Paulo / SP / BR');
 });
 
 test('fixa medidas formais da NT 008 v1.02', () => {

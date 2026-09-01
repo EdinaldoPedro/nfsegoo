@@ -16,6 +16,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
+import { useDialog } from '@/app/contexts/DialogContext';
 
 const STATUS_OPTS = [
   { val: 0, label: 'Integrado', detail: 'Operação liberada', color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
@@ -32,6 +33,7 @@ const REGIME_LABELS: Record<string, string> = {
 const inputBase = 'rounded-xl border border-slate-200 bg-white p-3 text-sm outline-none transition focus:border-blue-300 focus:ring-2 focus:ring-blue-100';
 
 export default function GestaoCobertura() {
+  const dialog = useDialog();
   const [cidades, setCidades] = useState<any[]>([]);
   const [meta, setMeta] = useState<any>({});
   const [form, setForm] = useState({ id: '', uf: '', nome: '', status: 2, regime: 'SN' });
@@ -68,7 +70,7 @@ export default function GestaoCobertura() {
   }, [page, carregar]);
 
   const salvar = async () => {
-    if (!form.uf || !form.nome) return alert('Preencha UF e cidade.');
+    if (!form.uf || !form.nome) return void dialog.showAlert({ type: 'warning', title: 'Dados obrigatórios', description: 'Preencha a UF e o nome da cidade antes de salvar.' });
     setLoading(true);
     const res = await fetch('/api/admin/cobertura', {
       method: form.id ? 'PUT' : 'POST',
@@ -80,13 +82,13 @@ export default function GestaoCobertura() {
       cancelarEdicao();
       carregar(page);
     } else {
-      alert('Erro ao salvar.');
+      await dialog.showAlert({ type: 'danger', title: 'Falha ao salvar cobertura', description: 'A API não concluiu a gravação. Revise os dados e tente novamente.' });
     }
     setLoading(false);
   };
 
   const deletar = async (id: string) => {
-    if (!confirm('Remover cidade?')) return;
+    if (!await dialog.showConfirm({ type: 'danger', title: 'Remover cidade da cobertura?', description: 'A cidade deixará de constar na matriz operacional.', confirmText: 'Remover cidade', cancelText: 'Cancelar' })) return;
     await fetch(`/api/admin/cobertura?id=${id}`, { method: 'DELETE' });
     carregar(page);
   };

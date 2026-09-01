@@ -1,8 +1,10 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { Plus, Edit, Trash2, Save, X, Book, Loader2, AlertTriangle } from 'lucide-react';
+import { useDialog } from '@/app/contexts/DialogContext';
 
 export default function GestaoCatalogo() {
+  const dialog = useDialog();
   const [itens, setItens] = useState<any[]>([]);
   const [editing, setEditing] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -46,18 +48,18 @@ export default function GestaoCatalogo() {
           if (res.ok) {
               setEditing(null);
               carregar();
-              alert("Salvo com sucesso!");
+              await dialog.showAlert({ type: 'success', title: 'Item salvo', description: 'O catálogo de suporte foi atualizado.' });
           } else {
               const err = await res.json();
-              alert("Erro ao salvar: " + (err.error || "Desconhecido"));
+              await dialog.showAlert({ type: 'danger', title: 'Falha ao salvar item', description: err.error || 'A API retornou um erro sem detalhes.' });
           }
       } catch (e) {
-          alert("Erro de conexão com a API.");
+          await dialog.showAlert({ type: 'danger', title: 'API indisponível', description: 'Não foi possível conectar ao serviço do catálogo.' });
       }
   };
 
   const handleDelete = async (id: string) => {
-      if(!confirm("Tem certeza que deseja excluir?")) return;
+      if (!await dialog.showConfirm({ type: 'danger', title: 'Excluir item do catálogo?', description: 'A exclusão é permanente e pode afetar os fluxos de suporte vinculados.', confirmText: 'Excluir item', cancelText: 'Cancelar' })) return;
       await fetch(`/api/admin/suporte/catalogo?id=${id}`, { method: 'DELETE' });
       carregar();
   };

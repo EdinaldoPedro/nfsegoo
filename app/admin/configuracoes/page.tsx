@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useDialog } from '@/app/contexts/DialogContext';
 import {
   AlertTriangle,
   Bell,
@@ -60,6 +61,7 @@ const MAX_AVISO_ATTACHMENT_BYTES = 2 * 1024 * 1024;
 
 export default function AdminConfig() {
   const router = useRouter();
+  const dialog = useDialog();
 
   const [activeTab, setActiveTab] = useState<'FISCAL' | 'EMAIL' | 'MANUTENCAO' | 'AVISOS'>('FISCAL');
   const [config, setConfig] = useState<any>({});
@@ -172,7 +174,13 @@ export default function AdminConfig() {
 
   const arquivarAviso = async (id?: string) => {
     if (!id) return;
-    if (!confirm('Arquivar este aviso? Ele deixara de aparecer para os clientes.')) return;
+    if (!await dialog.showConfirm({
+      type: 'warning',
+      title: 'Arquivar aviso?',
+      description: 'O aviso deixará de aparecer imediatamente para clientes e contadores.',
+      confirmText: 'Arquivar aviso',
+      cancelText: 'Cancelar',
+    })) return;
 
     try {
       const res = await fetch(`/api/admin/avisos?id=${id}`, { method: 'DELETE' });
@@ -219,9 +227,15 @@ export default function AdminConfig() {
   };
 
   const handleMaintenanceToggle = async (checked: boolean) => {
-    const confirmed = window.confirm(checked
-      ? 'Ativar o modo de manutenção agora? Clientes e contadores com sessão ativa serão direcionados para a página de atualização.'
-      : 'Desativar o modo de manutenção e liberar novamente o acesso de clientes e contadores?');
+    const confirmed = await dialog.showConfirm({
+      type: checked ? 'danger' : 'warning',
+      title: checked ? 'Ativar modo de manutenção?' : 'Liberar acesso ao sistema?',
+      description: checked
+        ? 'Clientes e contadores com sessão ativa serão redirecionados para a página de manutenção.'
+        : 'O acesso de clientes e contadores será restabelecido imediatamente.',
+      confirmText: checked ? 'Ativar manutenção' : 'Liberar acesso',
+      cancelText: 'Cancelar',
+    });
     if (!confirmed) return;
 
     const previous = config;
@@ -245,14 +259,14 @@ export default function AdminConfig() {
       });
       const data = await res.json();
       if (res.ok) {
-        alert(data.message);
+        await dialog.showAlert({ type: 'success', title: 'Teste SMTP concluído', description: data.message });
         showMessage(data.message, 'sucesso');
       } else {
-        alert(`Falha no teste: ${data.details || data.error}`);
+        await dialog.showAlert({ type: 'danger', title: 'Falha no teste SMTP', description: data.details || data.error || 'O provedor não retornou detalhes.' });
         showMessage(`Falha: ${data.error}`, 'erro');
       }
     } catch {
-      alert('Erro de conexao ao tentar testar.');
+      await dialog.showAlert({ type: 'danger', title: 'Falha de conexão com o SMTP', description: 'O teste não chegou ao serviço de e-mail. Verifique a rede e a configuração.' });
     } finally {
       setTesting(false);
     }
@@ -367,12 +381,6 @@ const regimesIbsCbs = [
     field: 'ibsCbsLucroPresumidoAtivo',
     label: 'Lucro Presumido',
     description: 'Mantém o preenchimento da transição para empresas no Lucro Presumido.',
-    defaultEnabled: true,
-  },
-  {
-    field: 'ibsCbsLucroRealAtivo',
-    label: 'Lucro Real',
-    description: 'Mantém o preenchimento da transição para empresas no Lucro Real.',
     defaultEnabled: true,
   },
 ] as const;

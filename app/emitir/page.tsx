@@ -174,7 +174,7 @@ function EmitirNotaContent() {
           setRascunhos((atuais) => atuais.filter((item) => item.id !== id));
           if (activeRascunhoId === id) setActiveRascunhoId(null);
       } catch (error: any) {
-          if (!silencioso) dialog.showAlert({ type: 'danger', title: 'Falha', description: error.message });
+          if (!silencioso) dialog.showAlert({ type: 'danger', title: 'Não foi possível carregar o rascunho', description: error.message });
       }
   };
 
@@ -213,7 +213,7 @@ function EmitirNotaContent() {
           }
 
           if (actionText.includes("Certificado Digital") || actionText.includes("Cadastro incompleto")) {
-              const irConfig = await dialog.showConfirm({ type: 'danger', title: 'Atenção ao Cadastro', description: actionText, confirmText: 'Ir para Configurações', cancelText: 'Mais tarde' });
+              const irConfig = await dialog.showConfirm({ type: 'danger', title: 'Complete a configuração da empresa', description: actionText, confirmText: 'Ir para configurações', cancelText: 'Fazer depois' });
               if (irConfig) router.push('/configuracoes');
               return;
           }
@@ -236,7 +236,7 @@ function EmitirNotaContent() {
               return;
           }
 
-          await dialog.showAlert({ type: 'warning', title: 'Atenção', description: actionText });
+          await dialog.showAlert({ type: 'warning', title: 'Revise os dados da emissão', description: actionText });
           router.push('/cliente/dashboard');
           return;
       }
@@ -250,7 +250,7 @@ function EmitirNotaContent() {
           msgTecnica = respostaErro.error || "Erro desconhecido ao comunicar com a Prefeitura.";
       }
 
-      await dialog.showAlert({ type: 'danger', title: 'Falha na Emissão', description: `Houve uma rejeição na Prefeitura: ${msgTecnica}` });
+      await dialog.showAlert({ type: 'danger', title: 'Nota rejeitada pela prefeitura', description: `A emissão não foi concluída. Motivo informado: ${msgTecnica}` });
       router.push('/cliente/dashboard');
   };
 
@@ -357,7 +357,7 @@ function EmitirNotaContent() {
       }
 
       const tomadorPermiteRetencao = cliente.tipo === 'PJ';
-      const isLucro = ['LUCRO_PRESUMIDO', 'LUCRO_REAL'].includes(perfilEmpresa?.regimeTributario);
+      const isLucro = perfilEmpresa?.regimeTributario === 'LUCRO_PRESUMIDO';
       const marcarPorPadrao = cnae.modoRetencoes === 'AUTOMATICO' && tomadorPermiteRetencao;
       const next = {
           inss: { aliquota: '0.00', valor: '0.00' },
@@ -412,7 +412,7 @@ function EmitirNotaContent() {
 
       if (!cliente || !cnae) return;
       const tomadorPermiteRetencao = cliente.tipo === 'PJ';
-      const isLucro = ['LUCRO_PRESUMIDO', 'LUCRO_REAL'].includes(perfilEmpresa?.regimeTributario);
+      const isLucro = perfilEmpresa?.regimeTributario === 'LUCRO_PRESUMIDO';
 
       if (tomadorPermiteRetencao && isLucro && cnae.retemCrsf && isAbove !== wasAboveThreshold) {
           setWasAboveThreshold(isAbove);
@@ -757,7 +757,7 @@ function EmitirNotaContent() {
                 'x-empresa-id': contextId || ''
             });
             await sleep(500);
-            await dialog.showAlert({ type: 'success', title: 'Sucesso Total!', description: 'Nota emitida, autorizada e disponivel para download.' });
+            await dialog.showAlert({ type: 'success', title: 'Nota fiscal emitida', description: 'A nota foi autorizada e já está disponível para download.' });
             router.push('/cliente/dashboard');
         } else if (resposta.isHomologation) {
             setProgressPercent(100);
@@ -775,7 +775,7 @@ function EmitirNotaContent() {
                 'x-empresa-id': contextId || ''
             });
             await sleep(500);
-            await dialog.showAlert({ type: 'success', title: 'Sucesso Total!', description: 'Nota emitida, autorizada e disponível para download.' });
+            await dialog.showAlert({ type: 'success', title: 'Nota fiscal emitida', description: 'A nota foi autorizada e já está disponível para download.' });
             router.push('/cliente/dashboard');
         }
       } else {
@@ -798,7 +798,7 @@ function EmitirNotaContent() {
   const isPJ = clienteSel?.tipo === 'PJ';
   const clientePfEnderecoPendente = !!clienteSel && isPF && !hasCompleteNationalAddress(clienteSel);
   const cnaeSelecionadoObj = meusCnaes.find(c => c.codigo === nfData.codigoCnae);
-  const regimePermiteCrsfIr = ['LUCRO_PRESUMIDO', 'LUCRO_REAL'].includes(perfilEmpresa?.regimeTributario);
+  const regimePermiteCrsfIr = perfilEmpresa?.regimeTributario === 'LUCRO_PRESUMIDO';
   const tomadorPermiteRetencoes = isPJ && !isPF && !isExterior;
   const mostraRetencoesFederais = regimePermiteCrsfIr && Boolean(cnaeSelecionadoObj?.retemCrsf || cnaeSelecionadoObj?.retemIr);
   const retencoesMarcadasPorPadrao = cnaeSelecionadoObj?.modoRetencoes === 'AUTOMATICO';

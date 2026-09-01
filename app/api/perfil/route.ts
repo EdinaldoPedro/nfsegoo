@@ -7,6 +7,7 @@ import { hasEmpresaAccess, isAdminRole, resolveEmpresaContexto } from '@/app/uti
 import { validarCertificadoA1 } from '@/app/utils/certificadoA1Validation';
 import { renovarUsoMensalSeNecessario } from '@/app/services/planService';
 import { listDpsSequences, normalizeDpsEnvironment, normalizeDpsSeries, setUserDpsSequence } from '@/app/services/dpsSequenceService';
+import { normalizarRegimeTributario } from '@/app/utils/regime-tributario';
 
 export const dynamic = 'force-dynamic';
 
@@ -298,9 +299,15 @@ export async function PUT(request: Request) {
 
     if (body.documento) {
       const cnpjLimpo = body.documento.replace(/\D/g, '');
+      const regimeTributario = normalizarRegimeTributario(body.regimeTributario);
 
       if (cnpjLimpo.length !== 14) {
           return NextResponse.json({ error: 'CNPJ invalido.' }, { status: 400 });
+      }
+      if (!regimeTributario) {
+          return NextResponse.json({
+              error: 'Selecione um Regime Tributario atendido: MEI, Simples Nacional ou Lucro Presumido.'
+          }, { status: 400 });
       }
       
       if (body.cep && (!body.codigoIbge || body.codigoIbge.length < 7)) {
@@ -310,7 +317,7 @@ export async function PUT(request: Request) {
 
       const dadosEmpresa: any = {
           razaoSocial: body.razaoSocial, nomeFantasia: body.nomeFantasia, inscricaoMunicipal: body.inscricaoMunicipal,
-          regimeTributario: body.regimeTributario, cep: body.cep, logradouro: body.logradouro,
+          regimeTributario, cep: body.cep, logradouro: body.logradouro,
           numero: body.numero, bairro: body.bairro, cidade: body.cidade, uf: body.uf,
           codigoIbge: body.codigoIbge, email: body.emailComercial || body.email,
           cadastroCompleto: true, serieDPS: body.serieDPS,

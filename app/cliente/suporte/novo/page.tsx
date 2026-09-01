@@ -88,7 +88,7 @@ export default function NovoTicketPage() {
                   // Sucesso: Prompt bonito
                   await dialog.showAlert({ 
                       type: 'success', 
-                      title: 'Sucesso', 
+                      title: 'Chamado aberto', 
                       description: `Chamado #${data.protocolo} aberto com sucesso!` 
                   });
                   router.push('/cliente/suporte');

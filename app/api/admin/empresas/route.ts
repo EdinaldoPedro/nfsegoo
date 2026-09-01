@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 import { stripEmpresaSecrets } from '@/app/utils/safe-data';
+import { normalizarRegimeTributario } from '@/app/utils/regime-tributario';
 
 const prisma = new PrismaClient();
 
@@ -157,6 +158,13 @@ export async function PUT(request: Request) {
         });
         return NextResponse.json(updated);
     } else {
+        if (dados.regimeTributario !== undefined) {
+            const regimeTributario = normalizarRegimeTributario(dados.regimeTributario);
+            if (!regimeTributario) {
+                return NextResponse.json({ error: 'Regime tributario obrigatorio ou nao atendido pelo SaaS.' }, { status: 400 });
+            }
+            dados.regimeTributario = regimeTributario;
+        }
         const cleanData = pick(dados, [
             'documento', 'ambiente', 'cadastroCompleto', 'serieDPS', 'ultimoDPS',
             'email', 'razaoSocial', 'nomeFantasia', 'cep', 'logradouro',

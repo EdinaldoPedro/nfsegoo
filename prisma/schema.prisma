@@ -94,7 +94,7 @@ model Empresa {
   tipoTributacaoPadrao     String?           @default("1")
   regimeEspecialTributacao String?           @default("0")
   inscricaoMunicipal       String?
-  regimeTributario         String?           @default("MEI")
+  regimeTributario         String?
   certificadoA1            String?
   senhaCertificado         String?
   certificadoVencimento    DateTime?
@@ -333,7 +333,6 @@ model ConfiguracaoSistema {
   ibsCbsMeiAtivo            Boolean   @default(false)
   ibsCbsSimplesAtivo        Boolean   @default(false)
   ibsCbsLucroPresumidoAtivo Boolean   @default(true)
-  ibsCbsLucroRealAtivo      Boolean   @default(true)
   manutencaoAtiva           Boolean   @default(false)
   manutencaoTitulo          String?   @default("Estamos realizando uma atualização")
   manutencaoMensagem        String?   @db.Text

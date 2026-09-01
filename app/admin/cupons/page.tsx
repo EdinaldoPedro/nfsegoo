@@ -7,10 +7,12 @@ import {
     List as ListIcon, ArrowRight, ArrowLeftRight, ShieldAlert,
     Eye, Receipt, X // <--- Adicione estes 3 aqui!
 } from 'lucide-react';
+import { useDialog } from '@/app/contexts/DialogContext';
 
 interface Plano { id: string; name: string; tipo: string; }
 
 export default function AdminCuponsPage() {
+    const dialog = useDialog();
     const [activeTab, setActiveTab] = useState<'CREATE' | 'CONSULT'>('CREATE');
     // Estado para o Modal de Raio-X
     const [cupomDetalhe, setCupomDetalhe] = useState<any | null>(null);
@@ -84,34 +86,34 @@ export default function AdminCuponsPage() {
             });
             
             if (res.ok) {
-                alert("Cupom criado com sucesso!");
+                await dialog.showAlert({ type: 'success', title: 'Cupom criado', description: 'O cupom já está disponível conforme as regras configuradas.' });
                 setFormData({ codigo: '', parceiroNome: '', tipoDesconto: 'PORCENTAGEM', valorDesconto: '', maxCiclos: '', limiteUsos: '', validade: '', apenasPrimeiraCompra: false });
                 setSelectedPlanIds([]);
                 carregarDados();
                 setActiveTab('CONSULT');
             } else {
                 const data = await res.json();
-                alert(data.error || "Erro ao criar cupom.");
+                await dialog.showAlert({ type: 'danger', title: 'Falha ao criar cupom', description: data.error || 'A API não concluiu a operação.' });
             }
         } catch (error) {
-            alert("Erro de conexão.");
+            await dialog.showAlert({ type: 'danger', title: 'Falha de conexão', description: 'Não foi possível alcançar a API de cupons.' });
         } finally {
             setSaving(false);
         }
     };
 
     const handleDelete = async (id: string) => {
-        if (!window.confirm("Tem certeza que deseja apagar este cupom? Esta ação não pode ser desfeita.")) return;
+        if (!await dialog.showConfirm({ type: 'danger', title: 'Excluir cupom?', description: 'A exclusão é permanente. Contratações futuras não poderão mais usar este código.', confirmText: 'Excluir cupom', cancelText: 'Cancelar' })) return;
         
         try {
             const res = await fetch(`/api/admin/cupons?id=${id}`, { method: 'DELETE' });
             if (res.ok) {
                 carregarDados(); // Recarrega a tabela automaticamente
             } else {
-                alert("Erro ao apagar o cupom.");
+                await dialog.showAlert({ type: 'danger', title: 'Falha ao excluir cupom', description: 'A API recusou a exclusão do registro.' });
             }
         } catch (error) {
-            alert("Erro de conexão ao tentar apagar.");
+            await dialog.showAlert({ type: 'danger', title: 'Falha de conexão', description: 'Não foi possível alcançar a API para excluir o cupom.' });
         }
     };
 

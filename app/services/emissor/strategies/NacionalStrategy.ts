@@ -10,6 +10,7 @@ import { MeiHandler } from '../handlers/MeiHandler';
 import { SimplesNacionalHandler } from '../handlers/SimplesNacionalHandler';
 import { assertValidDpsXml } from '../validation/DpsPreflightValidator';
 import { validateNationalAddress } from '@/app/utils/customer-address';
+import { assertRegimeTributarioSuportado } from '@/app/utils/regime-tributario';
 
 export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
     
@@ -61,7 +62,7 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
             this.validarTomador(tomador);
 
             // 2. SELEÇÃO DO HANDLER
-            const regime = String(prestador.regimeTributario).toUpperCase();
+            const regime = assertRegimeTributarioSuportado(prestador.regimeTributario);
             let handler;
 
             if (regime === 'MEI') {
@@ -99,7 +100,7 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
                     id: prestador.id,
                     documento: prestador.documento,
                     inscricaoMunicipal: prestador.inscricaoMunicipal,
-                    regimeTributario: prestador.regimeTributario as any,
+                    regimeTributario: regime,
                     telefone: prestador.telefone,
                     email: prestador.email,
                     endereco: {

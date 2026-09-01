@@ -7,9 +7,11 @@ import { User, Save, ArrowLeft, Mail, CreditCard, Settings, Monitor, X, Calendar
 import PlanSelector from '@/components/PlanSelector';
 import { useAppConfig } from '@/app/contexts/AppConfigContext';
 import AppHeader from '@/components/AppHeader';
+import { useDialog } from '@/app/contexts/DialogContext';
 
 export default function MinhaContaPage() {
   const router = useRouter();
+  const dialog = useDialog();
   const { darkMode, toggleDarkMode, language, changeLanguage } = useAppConfig();
 
   const [loading, setLoading] = useState(true);
@@ -107,9 +109,9 @@ export default function MinhaContaPage() {
             setMsg('✅ Plano atualizado! Recarregando...');
             setTimeout(() => window.location.reload(), 1500);
         } else {
-            alert("Erro ao alterar plano.");
+            await dialog.showAlert({ type: 'danger', title: 'Não foi possível alterar o plano', description: 'A alteração não foi concluída. Confira os dados e tente novamente.' });
         }
-    } catch(e) { alert("Erro de conexão."); }
+    } catch(e) { await dialog.showAlert({ type: 'danger', title: 'Falha de conexão', description: 'Não foi possível alterar o plano. Verifique sua internet e tente novamente.' }); }
   };
 
   const handleSalvar = async (e: React.FormEvent) => {
@@ -134,10 +136,10 @@ export default function MinhaContaPage() {
             setMsg('✅ Salvo!'); setTimeout(() => setMsg(''), 3000); 
         } else {
             const err = await res.json();
-            alert("Erro ao salvar: " + (err.error || err.message));
+            await dialog.showAlert({ type: 'danger', title: 'Não foi possível salvar seus dados', description: err.error || err.message || 'Revise as informações e tente novamente.' });
         }
       } catch(e) {
-          alert("Erro de conexão."); 
+          await dialog.showAlert({ type: 'danger', title: 'Falha de conexão', description: 'Seus dados não foram salvos. Verifique sua internet e tente novamente.' }); 
       } finally { setSaving(false); }
   };
   
@@ -251,14 +253,14 @@ export default function MinhaContaPage() {
               body: JSON.stringify(newPJ)
           });
           if(res.ok) {
-              alert("Empresa adicionada com sucesso!");
+              await dialog.showAlert({ type: 'success', title: 'Empresa adicionada', description: 'A nova empresa foi vinculada à sua conta.' });
               window.location.reload();
           } else {
               const err = await res.json();
-              alert(err.error || "Erro ao adicionar empresa.");
+              await dialog.showAlert({ type: 'danger', title: 'Não foi possível adicionar a empresa', description: err.error || 'Revise os dados informados e tente novamente.' });
           }
       } catch(e) {
-          alert("Erro de conexão.");
+          await dialog.showAlert({ type: 'danger', title: 'Falha de conexão', description: 'A empresa não foi adicionada. Verifique sua internet e tente novamente.' });
       } finally {
           setAddingPJ(false);
       }

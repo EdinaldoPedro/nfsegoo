@@ -451,7 +451,7 @@ export default function MeusClientes() {
  };
 
   const handleExcluir = async (id: string) => {
-    if (!await dialog.showConfirm({ type: 'danger', title: 'Excluir?', description: 'Confirmar exclusão?' })) return;
+    if (!await dialog.showConfirm({ type: 'danger', title: 'Excluir este registro?', description: 'Esta exclusão é permanente e não poderá ser desfeita.', confirmText: 'Excluir registro', cancelText: 'Manter registro' })) return;
     const userId = localStorage.getItem('userId');
     const contextId = localStorage.getItem('empresaContextId');
 

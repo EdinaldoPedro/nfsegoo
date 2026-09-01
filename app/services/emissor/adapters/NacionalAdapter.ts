@@ -26,8 +26,7 @@ export class NacionalAdapter {
         switch(String(regime || '').toUpperCase()) {
             case 'MEI': return '2'; 
             case 'SIMPLES': return '3';
-            case 'LUCRO_PRESUMIDO': 
-            case 'LUCRO_REAL': return '1';
+            case 'LUCRO_PRESUMIDO': return '1';
             default: throw new Error(`Regime tributario nao suportado para a DPS: ${regime || 'nao informado'}.`);
         }
     }
@@ -313,7 +312,7 @@ export class NacionalAdapter {
             tribXml += `<totTrib><pTotTribSN>${pSn.toFixed(2)}</pTotTribSN></totTrib>`;
             
         } else if (opSimpNac === '1') {
-            // 2. REGRA DO LUCRO PRESUMIDO / LUCRO REAL
+            // 2. REGRA DO LUCRO PRESUMIDO
             let pFed = Number(s.aliquotaTotTribFederal || 0);
             if (!pFed && hasFederalDue) {
                 pFed = Number(federaisDevidos?.pis?.aliquota || 0) + Number(federaisDevidos?.cofins?.aliquota || 0);

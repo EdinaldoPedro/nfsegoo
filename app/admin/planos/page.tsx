@@ -121,7 +121,7 @@ export default function AdminPlanos() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!await dialog.showConfirm({ title: 'Excluir', description: 'Tem certeza?', type: 'danger', confirmText: 'Excluir' })) return;
+    if (!await dialog.showConfirm({ title: 'Excluir plano?', description: 'A exclusão é permanente e pode afetar ofertas e contratações vinculadas.', type: 'danger', confirmText: 'Excluir plano', cancelText: 'Cancelar' })) return;
     const token = localStorage.getItem('token');
     try {
       const res = await fetch(`/api/plans?id=${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });

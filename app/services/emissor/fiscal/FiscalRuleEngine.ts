@@ -1,5 +1,6 @@
 import { prisma } from '@/app/utils/prisma';
 import { getFederalRetentionEligibility, getIbsCbsMandatoryDate, getIbsCbsPilotControl, getPisCofinsDueDefaults, isIbsCbsMandatory, meetsFederalRetentionMinimum, roundHalfEven, shouldEnableIbsCbs } from './FiscalMath';
+import { assertRegimeTributarioSuportado } from '@/app/utils/regime-tributario';
 export { getFederalRetentionEligibility, getIbsCbsMandatoryDate, getIbsCbsPilotControl, getPisCofinsDueDefaults, isIbsCbsMandatory, meetsFederalRetentionMinimum, retentionType, roundHalfEven, shouldEnableIbsCbs } from './FiscalMath';
 
 export type FiscalSeverity = 'WARN' | 'ERROR';
@@ -119,7 +120,7 @@ function isSpecialOperation(itemLc?: string) {
 
 export async function resolveFiscalDecision(input: ResolveInput): Promise<FiscalDecision> {
   const cnae = onlyDigits(input.cnae);
-  const normalizedRegime = String(input.regimeTributario || '').toUpperCase();
+  const normalizedRegime = assertRegimeTributarioSuportado(input.regimeTributario);
   const isMei = normalizedRegime === 'MEI';
   const retentionEligibility = getFederalRetentionEligibility(normalizedRegime, input.tomadorTipo, input.tomadorPais);
   const competenceText = input.dataCompetencia || new Date().toISOString().slice(0, 10);

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { useDialog } from '@/app/contexts/DialogContext';
 import {
   Activity,
   AlertTriangle,
@@ -85,6 +86,7 @@ function metricCard(label: string, value: any, tone = 'slate') {
 export default function DetalheEmissor() {
   const { id } = useParams();
   const router = useRouter();
+  const dialog = useDialog();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -126,7 +128,13 @@ export default function DetalheEmissor() {
   };
 
   const handleMudarAmbiente = async (novoAmbiente: string) => {
-    if (!confirm(`Deseja alterar o ambiente para ${novoAmbiente}?`)) return;
+    if (!await dialog.showConfirm({
+      type: 'warning',
+      title: 'Alterar ambiente de emissão?',
+      description: `O emissor passará a operar em ${novoAmbiente}. Confirme somente após revisar a configuração da empresa.`,
+      confirmText: 'Alterar ambiente',
+      cancelText: 'Cancelar',
+    })) return;
 
     const ambienteAnterior = ambienteAtual;
     setAmbienteAtual(novoAmbiente);
@@ -138,14 +146,14 @@ export default function DetalheEmissor() {
         body: JSON.stringify({ id, ambiente: novoAmbiente }),
       });
 
-      if (res.ok) alert('Ambiente atualizado com sucesso!');
+      if (res.ok) await dialog.showAlert({ type: 'success', title: 'Ambiente atualizado', description: `A empresa agora está configurada para ${novoAmbiente}.` });
       else {
         setAmbienteAtual(ambienteAnterior);
-        alert('Erro ao salvar ambiente no banco.');
+        await dialog.showAlert({ type: 'danger', title: 'Falha ao persistir ambiente', description: 'A API recusou a alteração; o valor anterior foi restaurado na tela.' });
       }
     } catch {
       setAmbienteAtual(ambienteAnterior);
-      alert('Erro de conexão.');
+      await dialog.showAlert({ type: 'danger', title: 'Falha de conexão', description: 'A alteração não chegou à API; o valor anterior foi restaurado.' });
     }
   };
 

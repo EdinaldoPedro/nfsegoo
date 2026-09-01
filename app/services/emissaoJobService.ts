@@ -11,6 +11,7 @@ import { isPercentualFiscalValido, parseDecimalInput } from '@/app/utils/number-
 import { assertFiscalDecision, resolveFiscalDecision } from '@/app/services/emissor/fiscal/FiscalRuleEngine';
 import { getPfAddressRequiredMessage, PF_ADDRESS_REQUIRED_CODE } from '@/app/utils/customer-address';
 import { confirmDpsNumber, getDpsSequence, normalizeDpsEnvironment } from '@/app/services/dpsSequenceService';
+import { assertRegimeTributarioSuportado } from '@/app/utils/regime-tributario';
 
 const prisma = new PrismaClient();
 const emissaoJobModel = (prisma as any).emissaoJob;
@@ -285,6 +286,8 @@ export async function criarEmissaoJob(params: CriarEmissaoJobParams): Promise<Cr
       userAction: 'Voce ainda nao concluiu o cadastro da sua Empresa. Acesse as Configuracoes para preencher seus dados basicos.',
     });
   }
+
+  assertRegimeTributarioSuportado(prestador.regimeTributario);
 
   if (!prestador.certificadoA1) {
     throw Object.assign(new Error('Certificado nao encontrado.'), {
@@ -714,6 +717,7 @@ async function executarEmissao(job: any) {
   if (!user || !prestador || !tomador || !venda) {
     throw new Error('Job de emissao sem usuario, empresa, tomador ou venda vinculado.');
   }
+  const regimePrestador = assertRegimeTributarioSuportado(prestador.regimeTributario);
   // Protege jobs antigos que tenham sido enfileirados antes da obrigatoriedade.
   assertTomadorPfComEndereco(tomador);
 
@@ -805,7 +809,7 @@ async function executarEmissao(job: any) {
     cnae: cnaeFinal,
     itemLc,
     codigoIbge: optionalString(firstDefined(payload.localPrestacaoIbge, prestador.codigoIbge)) || '',
-    regimeTributario: prestador.regimeTributario || 'MEI',
+    regimeTributario: regimePrestador,
     dataCompetencia: payload.dataCompetencia,
     valor: valorFloat,
     codigoNbs,
@@ -818,7 +822,6 @@ async function executarEmissao(job: any) {
   });
   assertFiscalDecision(fiscalDecision);
   codigoNbs = fiscalDecision.codigoNbs || codigoNbs;
-  const regimePrestador = String(prestador.regimeTributario || '').toUpperCase();
   codigoTributacaoMunicipal = regimePrestador === 'MEI'
     ? undefined
     : fiscalDecision.codigoTributacaoMunicipal || codigoTributacaoMunicipal;

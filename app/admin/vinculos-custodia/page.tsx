@@ -56,7 +56,7 @@ export default function VinculosCustodiaAdminPage() {
       const data = await res.json();
       setItems(Array.isArray(data.data) ? data.data : []);
     } catch {
-      dialog.showAlert({ type: 'danger', title: 'Falha', description: 'Nao foi possivel carregar a fila de custodia.' });
+      dialog.showAlert({ type: 'danger', title: 'Falha ao carregar fila de custódia', description: 'A API não retornou as solicitações pendentes.' });
     } finally {
       setLoading(false);
     }
@@ -115,7 +115,7 @@ export default function VinculosCustodiaAdminPage() {
       });
       setItems((atual) => atual.filter((vinculo) => vinculo.id !== item.id));
     } catch (error: any) {
-      dialog.showAlert({ type: 'danger', title: 'Falha', description: error.message || 'Erro interno.' });
+      dialog.showAlert({ type: 'danger', title: 'Falha ao resolver solicitação de custódia', description: error.message || 'A API retornou um erro sem detalhes.' });
     } finally {
       setProcessandoId(null);
     }

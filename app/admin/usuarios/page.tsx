@@ -136,10 +136,10 @@ export default function GestaoClientes() {
               setAdminPassword('');
               carregarUsuarios();
               carregarSolicitacoes();
-              dialog.showAlert({ type: 'success', title: 'Sucesso', description: pendingContractAction === 'pacote' ? "Pacote adicionado e registrado." : "Plano atualizado e registrado." });
+              dialog.showAlert({ type: 'success', title: pendingContractAction === 'pacote' ? 'Pacote adicionado' : 'Plano atualizado', description: pendingContractAction === 'pacote' ? 'O pacote foi adicionado e registrado no histórico.' : 'O plano foi atualizado e registrado no histórico.' });
           } else {
               const err = await res.json();
-              dialog.showAlert({ type: 'danger', title: 'Erro', description: err.error || "Erro ao salvar." });
+              dialog.showAlert({ type: 'danger', title: 'Falha ao atualizar contrato', description: err.error || 'A API não concluiu a gravação.' });
           }
       } catch (error) { 
           dialog.showAlert("Erro de conexão."); 
@@ -201,10 +201,10 @@ export default function GestaoClientes() {
 
           const data = await res.json();
           if (!res.ok) {
-              return dialog.showAlert({ type: 'danger', title: 'Erro', description: data.error || 'Nao foi possivel atualizar a solicitacao.' });
+              return dialog.showAlert({ type: 'danger', title: 'Falha ao atualizar solicitação', description: data.error || 'A API não concluiu a operação.' });
           }
 
-          dialog.showAlert({ type: 'success', title: 'Sucesso', description: 'Solicitacao marcada como atendida.' });
+          dialog.showAlert({ type: 'success', title: 'Solicitação atendida', description: 'O status foi atualizado e registrado no histórico.' });
           carregarSolicitacoes();
       } catch (error) {
           dialog.showAlert("Erro de conexao.");
@@ -221,7 +221,7 @@ export default function GestaoClientes() {
 
           const data = await res.json().catch(() => ({}));
           if (!res.ok) {
-              return dialog.showAlert({ type: 'danger', title: 'Erro', description: data.error || 'Nao foi possivel atualizar a solicitacao.' });
+              return dialog.showAlert({ type: 'danger', title: 'Falha ao atualizar solicitação', description: data.error || 'A API não concluiu a operação.' });
           }
 
           dialog.showAlert({ type: 'success', title: 'Atualizado', description: 'Solicitacao atualizada com sucesso.' });
@@ -292,7 +292,7 @@ export default function GestaoClientes() {
         });
 
         if (res.status === 401) {
-            alert("Sessão expirada. Faça login novamente.");
+            await dialog.showAlert({ type: 'warning', title: 'Sessão administrativa expirada', description: 'Autentique-se novamente antes de iniciar a impersonação.' });
             router.push('/login');
             return;
         }
@@ -309,10 +309,10 @@ export default function GestaoClientes() {
 
             router.push('/cliente/dashboard'); 
         } else {
-            alert(data.error || "Erro ao acessar conta.");
+            await dialog.showAlert({ type: 'danger', title: 'Falha ao acessar conta', description: data.error || 'A impersonação não foi iniciada.' });
         }
     } catch (e) {
-        alert("Erro de conexão.");
+        await dialog.showAlert({ type: 'danger', title: 'Falha de conexão', description: 'Não foi possível alcançar a API de impersonação.' });
     }
   };
 

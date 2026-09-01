@@ -388,6 +388,7 @@ export default function DetalheVendaCompleto() {
   const [inspecionando, setInspecionando] = useState(false);
   const [reprocessandoPdf, setReprocessandoPdf] = useState(false);
   const [sincronizandoRetorno, setSincronizandoRetorno] = useState(false);
+  const [baixandoArquivo, setBaixandoArquivo] = useState<'xml' | 'pdf' | null>(null);
   const [inspecao, setInspecao] = useState<any>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>('resumo');
@@ -583,7 +584,7 @@ export default function DetalheVendaCompleto() {
         fetchVenda();
       }
     } catch (error: any) {
-      dialog.showAlert({ type: 'danger', title: 'Erro', description: error.message });
+      dialog.showAlert({ type: 'danger', title: 'Falha na operação da venda', description: error.message });
       setTimeout(() => fetchVenda(true), 1000);
     } finally {
       setProcessing(false);
@@ -689,6 +690,68 @@ export default function DetalheVendaCompleto() {
       fetchVenda(true);
     } finally {
       setSincronizandoRetorno(false);
+    }
+  };
+
+  const baixarBlob = (blob: Blob, nomeArquivo: string) => {
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = nomeArquivo;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  };
+
+  const baixarXmlOficial = async () => {
+    setBaixandoArquivo('xml');
+    try {
+      const res = await fetch(`/api/admin/vendas/${vendaId}/arquivos`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Não foi possível baixar o XML oficial.');
+      }
+
+      const blob = await res.blob();
+      const identificador = notaAtual?.numero || vendaId.slice(0, 8);
+      const nomeArquivo = integridadePdf.notaCancelada && integridadePdf.eventoCancelamentoOk
+        ? `NFSe-${identificador}-XMLs-cancelamento.zip`
+        : `NFSe-${identificador}.xml`;
+      baixarBlob(blob, nomeArquivo);
+    } catch (error: any) {
+      dialog.showAlert({ type: 'danger', title: 'Falha no XML', description: error.message });
+    } finally {
+      setBaixandoArquivo(null);
+    }
+  };
+
+  const baixarPdfOficial = async () => {
+    if (!notaAtual?.id) return;
+
+    setBaixandoArquivo('pdf');
+    try {
+      const res = await fetch('/api/notas/pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notaId: notaAtual.id }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Não foi possível baixar o PDF.');
+      }
+
+      const blob = await res.blob();
+      const identificador = notaAtual.numero || vendaId.slice(0, 8);
+      const nomeArquivo = integridadePdf.notaCancelada
+        ? `NFSe-CANCELADA-${identificador}.pdf`
+        : `NFSe-${identificador}.pdf`;
+      baixarBlob(blob, nomeArquivo);
+      if (!integridadePdf.pdfOk) fetchVenda(true);
+    } catch (error: any) {
+      dialog.showAlert({ type: 'danger', title: 'Falha no PDF', description: error.message });
+    } finally {
+      setBaixandoArquivo(null);
     }
   };
 
@@ -943,8 +1006,24 @@ export default function DetalheVendaCompleto() {
                     {integridadePdf.notaCancelada && <InfoItem label="Evento de cancelamento" value={integridadePdf.eventoCancelamentoOk ? 'Disponível' : 'Pendente'} />}
                     <InfoItem label={integridadePdf.notaCancelada ? 'PDF cancelado' : 'PDF'} value={integridadePdf.pdfOk ? 'Disponível' : 'Ausente'} />
                   </div>
-                  {(podeSincronizarRetorno || podeReprocessarPdf) && (
+                  {(integridadePdf.xmlOk || podeSincronizarRetorno || podeReprocessarPdf) && (
                     <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
+                      {integridadePdf.xmlOk && (
+                        <button onClick={baixarXmlOficial} disabled={baixandoArquivo !== null} className="rounded-xl border border-purple-200 bg-purple-50 px-4 py-2.5 text-sm font-bold text-purple-700 hover:bg-purple-100 disabled:opacity-60 inline-flex items-center gap-2">
+                          {baixandoArquivo === 'xml' ? <Loader2 size={16} className="animate-spin" /> : <Code size={16} />}
+                          {baixandoArquivo === 'xml'
+                            ? 'Preparando XML...'
+                            : integridadePdf.notaCancelada && integridadePdf.eventoCancelamentoOk
+                              ? 'Baixar XMLs (ZIP)'
+                              : 'Baixar XML oficial'}
+                        </button>
+                      )}
+                      {notaAtual?.id && integridadePdf.xmlOk && (
+                        <button onClick={baixarPdfOficial} disabled={baixandoArquivo !== null} className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-bold text-red-700 hover:bg-red-100 disabled:opacity-60 inline-flex items-center gap-2">
+                          {baixandoArquivo === 'pdf' ? <Loader2 size={16} className="animate-spin" /> : <FileText size={16} />}
+                          {baixandoArquivo === 'pdf' ? 'Preparando PDF...' : integridadePdf.notaCancelada ? 'Baixar PDF cancelado' : 'Baixar PDF'}
+                        </button>
+                      )}
                       {podeSincronizarRetorno && (
                         <button onClick={sincronizarRetorno} disabled={sincronizandoRetorno} className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-60 inline-flex items-center gap-2">
                           {sincronizandoRetorno ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
@@ -1234,7 +1313,7 @@ export default function DetalheVendaCompleto() {
                   </span>
                   {xmlData.xmlDownload && (
                     <button onClick={() => downloadFile(xmlData.xmlDownload, `nota-${venda.id}.xml`)} className="text-[10px] font-bold text-blue-600 hover:underline uppercase">
-                      Baixar XML
+                      Baixar DPS gerada
                     </button>
                   )}
                 </div>

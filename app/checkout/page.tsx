@@ -6,6 +6,7 @@ import {
     ArrowLeft, ShoppingCart, ShieldCheck, 
     Loader2, Calendar, Ticket, PackagePlus, ChevronDown, Tag, FileUp, CheckCircle2, Headphones
 } from 'lucide-react';
+import { useDialog } from '@/app/contexts/DialogContext';
 
 interface Plan {
     id: string;
@@ -45,6 +46,7 @@ interface PedidoContratacao {
 function CheckoutContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
+    const dialog = useDialog();
 
     const planSlug = searchParams.get('plan');
     const cycleParam = searchParams.get('cycle'); 
@@ -294,7 +296,11 @@ function CheckoutContent() {
             const data = await res.json();
 
             if (!res.ok) {
-                alert(data.error || 'Erro ao registrar a solicitacao.');
+                await dialog.showAlert({
+                    type: 'danger',
+                    title: 'Não foi possível enviar a solicitação',
+                    description: data.error || 'Revise os dados da contratação e tente novamente.',
+                });
                 setLoadingText('Solicitar Contratacao');
                 setProcessing(false);
                 return;
@@ -306,7 +312,11 @@ function CheckoutContent() {
             setProcessing(false);
         } catch (error) {
             console.error(error);
-            alert('Erro de conexao ao registrar a solicitacao.');
+            await dialog.showAlert({
+                type: 'danger',
+                title: 'Falha de conexão',
+                description: 'Não foi possível enviar a solicitação. Verifique sua internet e tente novamente.',
+            });
             setLoadingText('Solicitar Contratacao');
             setProcessing(false);
         }
@@ -401,13 +411,21 @@ function CheckoutContent() {
                 await new Promise(r => setTimeout(r, 400));
                 setStep(2); 
             } else {
-                alert(data.error || 'Erro ao gerar o pedido.');
+                await dialog.showAlert({
+                    type: 'danger',
+                    title: 'Não foi possível gerar o pedido',
+                    description: data.error || 'Revise os dados de pagamento e tente novamente.',
+                });
                 setLoadingText('Finalizar Pedido');
                 setProcessing(false);
             }
         } catch (error) {
             console.error(error);
-            alert('Erro de conexão ao gerar o PIX.');
+            await dialog.showAlert({
+                type: 'danger',
+                title: 'Falha ao gerar o PIX',
+                description: 'Não foi possível conectar ao serviço de pagamento. Tente novamente em alguns instantes.',
+            });
             setLoadingText('Finalizar Pedido');
             setProcessing(false);
         }

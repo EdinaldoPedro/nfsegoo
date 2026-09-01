@@ -3,9 +3,11 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Mail, KeyRound, CheckCircle, ArrowRight, LogOut, Loader2 } from 'lucide-react';
 import { logoutAndRedirect } from '@/app/utils/client-session';
+import { useDialog } from '@/app/contexts/DialogContext';
 
 export default function VerificarEmailPage() {
     const router = useRouter();
+    const dialog = useDialog();
     const [step, setStep] = useState(1);
     const [loading, setLoading] = useState(false);
     
@@ -19,8 +21,8 @@ export default function VerificarEmailPage() {
 
     const handleSendCode = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (newEmail !== confirmEmail) return alert("Os e-mails não coincidem.");
-        if (!password) return alert("Digite sua senha para confirmar.");
+        if (newEmail !== confirmEmail) return void dialog.showAlert({ type: 'warning', title: 'E-mails diferentes', description: 'Os dois endereços de e-mail precisam ser iguais.' });
+        if (!password) return void dialog.showAlert({ type: 'warning', title: 'Senha obrigatória', description: 'Digite sua senha atual para confirmar a alteração.' });
 
         setLoading(true);
 
@@ -35,9 +37,9 @@ export default function VerificarEmailPage() {
             if (res.ok) {
                 setStep(2);
             } else {
-                alert(data.error || "Erro ao enviar código.");
+                await dialog.showAlert({ type: 'danger', title: 'Não foi possível enviar o código', description: data.error || 'Tente novamente em alguns instantes.' });
             }
-        } catch (e) { alert("Erro de conexão."); }
+        } catch (e) { await dialog.showAlert({ type: 'danger', title: 'Falha de conexão', description: 'Verifique sua internet e tente novamente.' }); }
         finally { setLoading(false); }
     };
 
@@ -54,12 +56,12 @@ export default function VerificarEmailPage() {
             const data = await res.json();
 
             if (res.ok) {
-                alert("E-mail atualizado com sucesso!");
+                await dialog.showAlert({ type: 'success', title: 'E-mail atualizado', description: 'Seu novo endereço de e-mail foi confirmado.' });
                 router.push('/cliente/dashboard'); // Ou rota correta baseado no role
             } else {
-                alert(data.error || "Código inválido.");
+                await dialog.showAlert({ type: 'warning', title: 'Código não confirmado', description: data.error || 'Confira o código informado e tente novamente.' });
             }
-        } catch (e) { alert("Erro de conexão."); }
+        } catch (e) { await dialog.showAlert({ type: 'danger', title: 'Falha de conexão', description: 'Verifique sua internet e tente novamente.' }); }
         finally { setLoading(false); }
     };
 

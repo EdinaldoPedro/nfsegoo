@@ -3,7 +3,7 @@ export interface ICanonicalRps {
         id: string;
         documento: string;
         inscricaoMunicipal?: string;
-        regimeTributario: 'MEI' | 'SIMPLES' | 'LUCRO_PRESUMIDO' | 'LUCRO_REAL';
+        regimeTributario: 'MEI' | 'SIMPLES' | 'LUCRO_PRESUMIDO';
         telefone?: string; // <--- ADICIONADO AQUI
         email?: string;    // <--- ADICIONADO AQUI
         endereco: {

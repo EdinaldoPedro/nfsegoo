@@ -3,9 +3,11 @@ import { useEffect, useState } from 'react';
 import { Plus, MessageSquare, Clock, CheckCircle, UserCheck, Check, X, AlertTriangle, ArrowLeft, Search, Filter, BadgeHelp, ArrowRight } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useDialog } from '@/app/contexts/DialogContext';
 
 export default function MeusChamados() {
   const router = useRouter();
+  const dialog = useDialog();
   const [tickets, setTickets] = useState<any[]>([]); 
   const [filteredTickets, setFilteredTickets] = useState<any[]>([]);
   const [solicitacoes, setSolicitacoes] = useState<any[]>([]); 
@@ -79,7 +81,7 @@ export default function MeusChamados() {
         ? `ATENÇÃO: Ao aprovar, você confirma que conhece o contador(a) "${nomeContador}" e AUTORIZA o acesso dele(a) aos dados fiscais e cadastrais da sua empresa nesta plataforma.\n\nDeseja confirmar o acesso?`
         : `Deseja recusar o acesso de "${nomeContador}"?`;
 
-      if(!confirm(termo)) return;
+      if (!await dialog.showConfirm({ type: acao === 'APROVAR' ? 'warning' : 'danger', title: acao === 'APROVAR' ? 'Autorizar acesso ao suporte?' : 'Recusar solicitação?', description: termo, confirmText: acao === 'APROVAR' ? 'Autorizar acesso' : 'Recusar', cancelText: 'Voltar' })) return;
 
       const userId = localStorage.getItem('userId');
 
@@ -94,12 +96,12 @@ export default function MeusChamados() {
           });
           
           if(res.ok) {
-              alert(acao === 'APROVAR' ? "Acesso concedido com sucesso!" : "Solicitação recusada.");
+              await dialog.showAlert({ type: 'success', title: acao === 'APROVAR' ? 'Acesso autorizado' : 'Solicitação recusada', description: acao === 'APROVAR' ? 'A equipe de suporte já pode acessar sua conta pelo período informado.' : 'O acesso à sua conta não foi autorizado.' });
               setSolicitacoes(prev => prev.filter(s => s.id !== vinculoId));
           } else {
-              alert("Erro ao processar solicitação.");
+              await dialog.showAlert({ type: 'danger', title: 'Não foi possível concluir', description: 'Tente novamente. Se o problema continuar, fale com o suporte.' });
           }
-      } catch (e) { alert("Erro de conexão."); }
+      } catch (e) { await dialog.showAlert({ type: 'danger', title: 'Falha de conexão', description: 'Verifique sua internet e tente novamente.' }); }
   };
 
   const getStatusInfo = (s: string) => {
