@@ -16,16 +16,17 @@ interface LogParams {
   vendaId?: string;
 }
 
-const CHAVES_SENSIVEIS = [
+const TRECHOS_SENSIVEIS = [
   'senha',
   'password',
   'senhaCertificado',
   'certificadoA1',
-  'Authorization',
+  'authorization',
   'token',
-  'key',
   'pfx',
   'certificado',
+  'secret',
+  'cookie',
   'xmlBase64',
   'pdfBase64',
   'qrCodePix',
@@ -40,7 +41,17 @@ const CHAVES_SENSIVEIS = [
   'privateKey',
   'SignatureValue',
   'X509Certificate',
-];
+].map(key => key.toLowerCase());
+
+const CHAVES_PESSOAIS = new Set([
+  'email', 'to', 'from', 'accepted', 'rejected', 'nome', 'cpf', 'cnpj',
+  'telefone', 'phone', 'documento', 'recipient', 'recipients',
+]);
+const HASHES_PESSOAIS_PERMITIDOS = new Set(['emailhash', 'previousemailhash', 'nextemailhash']);
+const OMITIDO = '*** DADO SENSIVEL OMITIDO ***';
+const MAX_STRING = 4_000;
+const MAX_DEPTH = 8;
+const MAX_NODES = 1_000;
 
 function sanitizarString(valor: string) {
   let seguro = valor
@@ -48,33 +59,47 @@ function sanitizarString(valor: string) {
     .replace(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/gi, '*** CERTIFICADO OMITIDO ***')
     .replace(/<X509Certificate>[\s\S]*?<\/X509Certificate>/gi, '<X509Certificate>*** OMITIDO ***</X509Certificate>')
     .replace(/<SignatureValue>[\s\S]*?<\/SignatureValue>/gi, '<SignatureValue>*** OMITIDO ***</SignatureValue>')
-    .replace(/(Authorization["']?\s*[:=]\s*["']?Basic\s+)[A-Za-z0-9+/=]+/gi, '$1***');
+    .replace(/(Authorization["']?\s*[:=]\s*["']?(?:Basic|Bearer)\s+)[A-Za-z0-9._~+/=-]+/gi, '$1***')
+    .replace(/([?#&](?:token|code|codigo|senha|password)=)[^&#\s]+/gi, '$1***')
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '*** EMAIL OMITIDO ***')
+    .replace(/\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g, '*** CPF OMITIDO ***');
 
   if (/^[A-Za-z0-9+/=\s]{1000,}$/.test(seguro)) {
     seguro = '*** CONTEUDO BASE64 OMITIDO ***';
   }
 
-  return seguro;
+  return seguro.length > MAX_STRING ? `${seguro.slice(0, MAX_STRING)}…[truncado]` : seguro;
 }
 
-function sanitizarObjeto(obj: any): any {
+function chaveSensivel(key: string) {
+  const normalized = key.toLowerCase();
+  if (HASHES_PESSOAIS_PERMITIDOS.has(normalized)) return false;
+  return CHAVES_PESSOAIS.has(normalized) || TRECHOS_SENSIVEIS.some(fragment => normalized.includes(fragment));
+}
+
+function sanitizarObjeto(obj: any, state = { nodes: 0, seen: new WeakSet<object>() }, depth = 0): any {
   if (!obj) return obj;
   if (typeof obj === 'string') return sanitizarString(obj);
-
+  if (typeof obj === 'bigint') return obj.toString();
+  if (typeof obj !== 'object') return obj;
+  if (++state.nodes > MAX_NODES) return '*** ESTRUTURA OMITIDA POR LIMITE ***';
+  if (depth >= MAX_DEPTH) return '*** ESTRUTURA OMITIDA POR PROFUNDIDADE ***';
+  if (state.seen.has(obj)) return '*** REFERENCIA CIRCULAR OMITIDA ***';
+  if (obj instanceof Date) return obj.toISOString();
+  state.seen.add(obj);
   if (Array.isArray(obj)) {
-    return obj.map((item) => sanitizarObjeto(item));
+    return obj.slice(0, 200).map((item) => sanitizarObjeto(item, state, depth + 1));
   }
 
-  if (typeof obj === 'object') {
-    const novoObj: any = {};
-    for (const key in obj) {
-      const ehSensivel = CHAVES_SENSIVEIS.some((k) => key.toLowerCase().includes(k.toLowerCase()));
-      novoObj[key] = ehSensivel ? '*** DADO SENSIVEL OMITIDO ***' : sanitizarObjeto(obj[key]);
-    }
-    return novoObj;
+  if (obj instanceof Error) {
+    return { name: obj.name, message: sanitizarString(obj.message) };
   }
 
-  return obj;
+  const novoObj: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj).slice(0, 200)) {
+    novoObj[key] = chaveSensivel(key) ? OMITIDO : sanitizarObjeto(value, state, depth + 1);
+  }
+  return novoObj;
 }
 
 export function sanitizeLogValue(value: any): any {
@@ -87,16 +112,19 @@ export function createTraceId(prefix = 'trace') {
 }
 
 export function getErrorDiagnostics(error: any) {
-  const message = String(error?.message || error || 'Erro desconhecido');
+  const message = sanitizarString(String(error?.message || error || 'Erro desconhecido'));
   const response = error?.response;
-  const code = error?.code || response?.status || response?.statusCode;
+  const rawCode = error?.code || response?.status || response?.statusCode;
+  const code = typeof rawCode === 'string' || typeof rawCode === 'number' ? rawCode : undefined;
 
   return {
+    name: typeof error?.name === 'string' ? sanitizarString(error.name) : undefined,
     code,
     message,
-    responseStatus: response?.status,
-    responseText: response?.data || response?.statusText,
-    stack: error?.stack,
+    responseStatus: typeof response?.status === 'number' ? response.status : undefined,
+    responseText: sanitizarObjeto(response?.data || response?.statusText),
+    ...(process.env.NODE_ENV === 'development' && typeof error?.stack === 'string'
+      ? { stack: sanitizarString(error.stack) } : {}),
   };
 }
 
@@ -147,6 +175,7 @@ export async function createLog({
       } else {
         detailsStr = JSON.stringify(dadosSeguros, null, 2);
       }
+      if (detailsStr.length > 32_000) detailsStr = `${detailsStr.slice(0, 32_000)}\n*** LOG TRUNCADO ***`;
     }
 
     await prisma.systemLog.create({

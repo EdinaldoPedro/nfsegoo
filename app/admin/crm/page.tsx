@@ -43,7 +43,7 @@ function getPlanoAtivo(cliente: any) {
 }
 
 function getMrr(cliente: any) {
-  return Number(getPlanoAtivo(cliente)?.plan?.priceMonthly || 0);
+  return Number(getPlanoAtivo(cliente)?.monthlyValue || 0);
 }
 
 function Kpi({ icon: Icon, label, value, hint, tone = 'blue' }: any) {
@@ -103,31 +103,38 @@ export default function CrmDashboard() {
   const [loading, setLoading] = useState(true);
   const [filtroBusca, setFiltroBusca] = useState('');
   const [filtroAtivo, setFiltroAtivo] = useState('todos');
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [listError, setListError] = useState('');
 
   useEffect(() => {
-    const carregarClientes = async () => {
+    const timer = setTimeout(async () => {
       try {
+        const segments: Record<string, string> = { ativos: 'ACTIVE', pagantes: 'PAYING', trial: 'TRIAL', contadores: 'ACCOUNTANT', 'sem-plano': 'NO_PLAN' };
+        const query = new URLSearchParams({ roles: 'COMUM,CONTADOR', limit: '25', page: String(page), segment: segments[filtroAtivo] || 'ALL' });
+        if (filtroBusca.trim()) query.set('search', filtroBusca.trim());
         const [usersRes, metricsRes] = await Promise.all([
-          fetch('/api/admin/users', { cache: 'no-store' }),
+          fetch('/api/admin/users?' + query.toString(), { cache: 'no-store' }),
           fetch('/api/crm/metrics', { cache: 'no-store' })
         ]);
 
         if (usersRes.ok) {
           const data = await usersRes.json();
-          setClientes(data.filter((u: any) => !STAFF_ROLES.includes(u.role)));
-        }
+          setClientes(Array.isArray(data?.data) ? data.data.filter((u: any) => !STAFF_ROLES.includes(u.role)) : []);
+          setTotalPages(data.meta?.totalPages || 1); setListError('');
+        } else { const data = await usersRes.json(); throw new Error(data.error || 'Não foi possível carregar as contas.'); }
 
         if (metricsRes.ok) {
           setMetrics(await metricsRes.json());
         }
       } catch (error) {
-        dialog.showAlert('Erro ao carregar clientes do CRM.');
+        setClientes([]); setListError(error instanceof Error ? error.message : 'Erro ao carregar clientes do CRM.');
       } finally {
         setLoading(false);
       }
-    };
-    carregarClientes();
-  }, [dialog]);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [dialog, filtroAtivo, filtroBusca, page]);
 
   const indicadores = useMemo(() => {
     const clientesAtivos = clientes.filter((c) => c.planoStatus === 'active');
@@ -144,20 +151,11 @@ export default function CrmDashboard() {
   const clientesFiltrados = useMemo(() => {
     const termo = filtroBusca.trim().toLowerCase();
     return clientes.filter((cliente) => {
-      const plano = getPlanoAtivo(cliente);
-      const mrr = getMrr(cliente);
       const texto = `${cliente.nome || ''} ${cliente.email || ''} ${cliente.empresa?.razaoSocial || ''} ${cliente.empresa?.documento || ''}`.toLowerCase();
       const passouBusca = !termo || texto.includes(termo);
-      if (!passouBusca) return false;
-
-      if (filtroAtivo === 'ativos') return cliente.planoStatus === 'active';
-      if (filtroAtivo === 'pagantes') return mrr > 0;
-      if (filtroAtivo === 'trial') return plano && mrr === 0;
-      if (filtroAtivo === 'contadores') return cliente.role === 'CONTADOR';
-      if (filtroAtivo === 'sem-plano') return !plano;
-      return true;
+      return passouBusca;
     });
-  }, [clientes, filtroAtivo, filtroBusca]);
+  }, [clientes, filtroBusca]);
 
   const topClientes = useMemo(() => {
     return [...clientes]
@@ -182,7 +180,7 @@ export default function CrmDashboard() {
       </div>
 
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
-        <Kpi icon={Users} label="Total na carteira" value={numero(clientes.length)} hint={`${numero(indicadores.clientesAtivos.length)} contas ativas`} />
+        <Kpi icon={Users} label="Total na carteira" value={numero(metrics?.totalClientes ?? clientes.length)} hint={`${numero(indicadores.clientesAtivos.length)} contas ativas nesta página`} />
         <Kpi icon={DollarSign} label="MRR estimado" value={moeda(metrics?.mrrTotal ?? indicadores.mrr)} hint={`ARR ${moeda(metrics?.arrTotal ?? indicadores.mrr * 12)}`} tone="emerald" />
         <Kpi icon={Activity} label="Clientes pagantes" value={numero(metrics?.clientesPagantes ?? indicadores.pagantes.length)} hint={`Ticket médio ${moeda(indicadores.ticketMedio)}`} tone="purple" />
         <Kpi icon={TrendingDown} label="Churn 30 dias" value={`${metrics?.churnRate ?? 0}%`} hint={`${numero(metrics?.cancelamentos30d || 0)} cancelamentos recentes`} tone="amber" />
@@ -203,7 +201,7 @@ export default function CrmDashboard() {
                   placeholder="Buscar por nome, e-mail, empresa ou CNPJ..."
                   className="w-full rounded-xl border border-slate-200 bg-white py-3 pl-10 pr-4 text-sm outline-none transition focus:border-purple-300 focus:ring-2 focus:ring-purple-100"
                   value={filtroBusca}
-                  onChange={(e) => setFiltroBusca(e.target.value)}
+                  onChange={(e) => { setFiltroBusca(e.target.value); setPage(1); }}
                 />
               </div>
             </div>
@@ -212,7 +210,7 @@ export default function CrmDashboard() {
               {filtros.map((filtro) => (
                 <button
                   key={filtro.id}
-                  onClick={() => setFiltroAtivo(filtro.id)}
+                  onClick={() => { setFiltroAtivo(filtro.id); setPage(1); }}
                   className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-black transition ${
                     filtroAtivo === filtro.id
                       ? 'bg-purple-600 text-white shadow-sm'
@@ -225,7 +223,8 @@ export default function CrmDashboard() {
             </div>
           </div>
 
-          <div className="overflow-x-auto">
+              {listError && <p role="alert" className="m-4 rounded-xl border border-red-300 bg-red-50 p-3 text-red-800">{listError}</p>}
+              <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead className="border-b border-slate-100 bg-slate-50 text-xs font-black uppercase text-slate-400">
                 <tr>
@@ -295,6 +294,11 @@ export default function CrmDashboard() {
               </tbody>
             </table>
           </div>
+          <div className="flex items-center justify-end gap-3 border-t p-4 text-sm">
+            <button disabled={page <= 1} onClick={() => setPage(value => value - 1)} className="rounded border px-3 py-2 disabled:opacity-40">Anterior</button>
+            <span>Página {page} de {totalPages}</span>
+            <button disabled={page >= totalPages} onClick={() => setPage(value => value + 1)} className="rounded border px-3 py-2 disabled:opacity-40">Próxima</button>
+          </div>
         </div>
 
         <div className="space-y-6">
@@ -309,10 +313,10 @@ export default function CrmDashboard() {
               </div>
             </div>
             <div className="space-y-5">
-              <ProgressRow label="Pagantes" value={indicatorsSafe(indicadores.pagantes.length)} total={clientes.length} tone="emerald" />
-              <ProgressRow label="Trial/Gratuitos" value={indicatorsSafe(indicadores.trials.length)} total={clientes.length} tone="blue" />
-              <ProgressRow label="Contadores" value={indicatorsSafe(indicadores.contadores.length)} total={clientes.length} tone="purple" />
-              <ProgressRow label="Sem plano" value={indicatorsSafe(indicadores.semPlano.length)} total={clientes.length} tone="amber" />
+              <ProgressRow label="Pagantes" value={indicatorsSafe(metrics?.clientesPagantes ?? indicadores.pagantes.length)} total={metrics?.totalClientes ?? clientes.length} tone="emerald" />
+              <ProgressRow label="Trial/Gratuitos" value={indicatorsSafe(metrics?.clientesTrial ?? indicadores.trials.length)} total={metrics?.totalClientes ?? clientes.length} tone="blue" />
+              <ProgressRow label="Contadores" value={indicatorsSafe(metrics?.contadores ?? indicadores.contadores.length)} total={metrics?.totalClientes ?? clientes.length} tone="purple" />
+              <ProgressRow label="Sem plano" value={indicatorsSafe(metrics?.semPlano ?? indicadores.semPlano.length)} total={metrics?.totalClientes ?? clientes.length} tone="amber" />
             </div>
           </div>
 

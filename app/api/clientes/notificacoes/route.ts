@@ -1,10 +1,10 @@
+import { withApiGuard } from '@/app/utils/api-route';
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '@/app/utils/prisma';
 import { validateRequest } from '@/app/utils/api-security';
 
-const prisma = new PrismaClient();
 
-export async function GET(request: Request) {
+export const GET = withApiGuard(async function GET(request: Request) {
   // SEGURANÇA
   const { targetId, errorResponse } = await validateRequest(request);
   if (errorResponse) return errorResponse; // Se falhar, retorna erro (não 0)
@@ -20,4 +20,4 @@ export async function GET(request: Request) {
   } catch (error) {
     return NextResponse.json({ count: 0 });
   }
-}
+});

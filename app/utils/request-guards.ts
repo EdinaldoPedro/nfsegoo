@@ -6,7 +6,10 @@ const DEFAULT_MAX_JSON_BODY_BYTES = 1_000_000;
 export const MAX_SUPPORT_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 
 const ALLOWED_ATTACHMENT_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.pdf', '.xml']);
-const ALLOWED_ATTACHMENT_MIME_TYPES = new Set(['application/pdf', 'application/xml', 'text/xml']);
+const EXTENSION_MIMES: Record<string, string> = {
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
+  '.webp': 'image/webp', '.pdf': 'application/pdf', '.xml': 'application/xml',
+};
 
 export function validateSameOrigin(request: Request) {
   if (!MUTATING_METHODS.has(request.method.toUpperCase())) return null;
@@ -17,17 +20,34 @@ export function validateSameOrigin(request: Request) {
   }
 
   const origin = normalizeOrigin(request.headers.get('origin'));
-  if (!origin) return null;
+  if (!origin && secFetchSite !== 'same-origin') {
+    return NextResponse.json({ error: 'Origem da requisicao obrigatoria.' }, { status: 403 });
+  }
+  if (!origin && secFetchSite === 'same-origin') return null;
 
   const allowedOrigins = new Set(
     [
-      getRequestOrigin(request),
+      process.env.NODE_ENV !== 'production' ? getRequestOrigin(request) : null,
       normalizeOrigin(process.env.NEXT_PUBLIC_APP_URL),
-      normalizeOrigin(process.env.URL_API_LOCAL),
+      ...(process.env.CSRF_ALLOWED_ORIGINS || '').split(',').map((value) => normalizeOrigin(value.trim())),
     ].filter(Boolean) as string[],
   );
 
-  if (!allowedOrigins.has(origin)) {
+  // Next normalizes its development request URL to localhost even when opened
+  // through 127.0.0.1. Accept only loopback aliases on the SAME port in development.
+  if (process.env.NODE_ENV !== 'production') {
+    const serverOrigin = getRequestOrigin(request);
+    if (serverOrigin) {
+      const localUrl = new URL(serverOrigin);
+      if (['localhost', '127.0.0.1', '[::1]'].includes(localUrl.hostname)) {
+        for (const host of ['localhost', '127.0.0.1', '[::1]']) {
+          allowedOrigins.add(`${localUrl.protocol}//${host}${localUrl.port ? `:${localUrl.port}` : ''}`);
+        }
+      }
+    }
+  }
+
+  if (!origin || !allowedOrigins.has(origin)) {
     return NextResponse.json({ error: 'Origem da requisicao nao autorizada.' }, { status: 403 });
   }
 
@@ -39,7 +59,7 @@ export function validateJsonContentLength(request: Request, maxBytes = DEFAULT_M
   if (!rawLength) return null;
 
   const contentLength = Number(rawLength);
-  if (!Number.isFinite(contentLength)) {
+  if (!Number.isSafeInteger(contentLength) || contentLength < 0) {
     return NextResponse.json({ error: 'Tamanho da requisicao invalido.' }, { status: 400 });
   }
 
@@ -58,6 +78,19 @@ function sanitizeAttachmentName(fileName: unknown) {
 function fileExtension(fileName: string) {
   const dotIndex = fileName.lastIndexOf('.');
   return dotIndex >= 0 ? fileName.slice(dotIndex).toLowerCase() : '';
+}
+
+export function detectAttachmentMime(buffer: Buffer) {
+  if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return 'image/png';
+  if (buffer.length >= 3 && buffer[0] === 255 && buffer[1] === 216 && buffer[2] === 255) return 'image/jpeg';
+  if (buffer.length >= 6 && ['GIF87a', 'GIF89a'].includes(buffer.subarray(0, 6).toString('ascii'))) return 'image/gif';
+  if (buffer.length >= 12 && buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP') return 'image/webp';
+  if (buffer.length >= 5 && buffer.subarray(0, 5).toString('ascii') === '%PDF-') return 'application/pdf';
+  const text = buffer.toString('utf8').replace(/^\uFEFF/, '').trim();
+  // eslint-disable-next-line no-control-regex -- XML rejects these control bytes; this is an intentional security check.
+  if (text.startsWith('<') && text.endsWith('>') && !/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(text)
+    && !/<!DOCTYPE|<!ENTITY|<script\b|<html\b|<svg\b|<\?xml-stylesheet/i.test(text)) return 'application/xml';
+  return null;
 }
 
 export function normalizeBase64Attachment(
@@ -95,6 +128,9 @@ export function normalizeBase64Attachment(
   }
 
   const buffer = Buffer.from(compactBase64, 'base64');
+  if (!buffer.length || buffer.toString('base64').replace(/=+$/, '') !== compactBase64.replace(/=+$/, '')) {
+    return { value: null, fileName: null, errorResponse: NextResponse.json({ error: 'Anexo em formato invalido.' }, { status: 400 }) };
+  }
   if (buffer.length > maxBytes) {
     return {
       value: null,
@@ -104,10 +140,12 @@ export function normalizeBase64Attachment(
   }
 
   const fileName = sanitizeAttachmentName(anexoNome);
-  const extensionAllowed = ALLOWED_ATTACHMENT_EXTENSIONS.has(fileExtension(fileName));
-  const mimeAllowed = !!mimeType && (ALLOWED_ATTACHMENT_MIME_TYPES.has(mimeType) || mimeType.startsWith('image/'));
+  const extension = fileExtension(fileName);
+  const extensionAllowed = ALLOWED_ATTACHMENT_EXTENSIONS.has(extension);
+  const detectedMime = detectAttachmentMime(buffer);
+  const declaredMime = mimeType === 'text/xml' ? 'application/xml' : mimeType;
 
-  if (!extensionAllowed && !mimeAllowed) {
+  if (!extensionAllowed || !detectedMime || EXTENSION_MIMES[extension] !== detectedMime || (declaredMime && declaredMime !== detectedMime)) {
     return {
       value: null,
       fileName: null,

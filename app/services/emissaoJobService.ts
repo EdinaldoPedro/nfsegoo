@@ -1,20 +1,17 @@
-import { PrismaClient } from '@prisma/client';
-import { createLog } from '@/app/services/logger';
+import { prisma } from '@/app/utils/prisma';
 import { EmissorFactory } from '@/app/services/emissor/factories/EmissorFactory';
 import { getTributacaoPorCnae } from '@/app/utils/tributacao';
-import { processarRetornoNota } from '@/app/services/notaProcessor';
-import { checkPlanLimits, incrementUsage, releaseEmissionCredit, reserveEmissionCredit, resolveBillingUserId } from '@/app/services/planService';
-import { resolveEmpresaContexto } from '@/app/utils/access-control';
-import { notifyFiscalEvent } from '@/app/services/notificationService';
-import { getMensagemErroFiscalCliente } from '@/app/utils/fiscal-error-messages';
+import { checkPlanLimits, reserveEmissionCreditInTransaction, resolveBillingUserId } from '@/app/services/planService';
+import { commercialTransaction } from '@/app/services/commercialService';
+import { hasCustomerCompanyAccess, resolveEmpresaContexto } from '@/app/utils/access-control';
+import { findTenantCustomer } from '@/app/services/tenantCustomerService';
 import { isPercentualFiscalValido, parseDecimalInput } from '@/app/utils/number-format';
 import { assertFiscalDecision, resolveFiscalDecision } from '@/app/services/emissor/fiscal/FiscalRuleEngine';
 import { getPfAddressRequiredMessage, PF_ADDRESS_REQUIRED_CODE } from '@/app/utils/customer-address';
-import { confirmDpsNumber, getDpsSequence, normalizeDpsEnvironment } from '@/app/services/dpsSequenceService';
 import { assertRegimeTributarioSuportado } from '@/app/utils/regime-tributario';
-
-const prisma = new PrismaClient();
-const emissaoJobModel = (prisma as any).emissaoJob;
+import { normalizeDpsNumber, normalizeDpsSeries } from '@/app/utils/dps-identity';
+import { readEmissionConfirmation, assertEmissionConfirmation } from '@/app/utils/emission-confirmation';
+import type { Prisma } from '@prisma/client';
 
 type CriarEmissaoJobParams = {
   userId: string;
@@ -30,13 +27,9 @@ type CriarEmissaoJobResult = {
   existing: boolean;
 };
 
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function getIntEnv(name: string, fallback: number) {
   const valor = Number(process.env[name]);
-  return Number.isFinite(valor) && valor > 0 ? valor : fallback;
+  return Number.isSafeInteger(valor) && valor > 0 && valor <= 100 ? valor : fallback;
 }
 
 function hashString(value: string) {
@@ -50,32 +43,6 @@ function hashString(value: string) {
 function getPartitionKey(empresaId: string) {
   const partitions = getIntEnv('EMISSION_QUEUE_PARTITIONS', 16);
   return hashString(empresaId) % partitions;
-}
-
-function textoErroFiscal(resultado: any) {
-  return JSON.stringify({
-    motivo: resultado?.motivo,
-    erros: resultado?.erros,
-  }).toLowerCase();
-}
-
-function isErroTemporarioPortal(resultado: any) {
-  const errorStr = textoErroFiscal(resultado);
-  return [
-    'e999',
-    'e0008',
-    '503',
-    '502',
-    '504',
-    'service unavailable',
-    'bad gateway',
-    'gateway timeout',
-    'econnreset',
-    'timeout',
-    'timed out',
-    'socket',
-    'network',
-  ].some((sinal) => errorStr.includes(sinal));
 }
 
 function parsePayloadSeguro(payloadJson?: string | null) {
@@ -111,7 +78,136 @@ function parseBoolean(value: any, fallback = false) {
   return fallback;
 }
 
+type FiscalResolutionDb = Prisma.TransactionClient;
+
+export async function resolveEmissionFiscalContext(params: {
+  payload: any;
+  prestador: any;
+  tomador: any;
+  valorFloat: number;
+}, db: FiscalResolutionDb = prisma) {
+  const { payload, prestador, tomador, valorFloat } = params;
+  const regimePrestador = assertRegimeTributarioSuportado(prestador.regimeTributario);
+
+  let cnaeFinal = payload.codigoCnae ? String(payload.codigoCnae).replace(/\D/g, '') : '';
+  if (!cnaeFinal) {
+    const cnaeBanco = await db.cnae.findFirst({ where: { empresaId: prestador.id, principal: true } });
+    if (cnaeBanco) cnaeFinal = cnaeBanco.codigo.replace(/\D/g, '');
+  }
+  if (!cnaeFinal) throw Object.assign(new Error('CNAE e obrigatorio para emissao.'), { status: 400 });
+
+  let codigoTribNacional = '000000';
+  let itemLc = '00.00';
+  let nbsEncontrado = '';
+  let codigoNbs = '';
+
+  const infoEstatica = getTributacaoPorCnae(cnaeFinal);
+  if (infoEstatica) {
+    itemLc = infoEstatica.itemLC;
+    codigoTribNacional = infoEstatica.codigoTributacaoNacional.replace(/\D/g, '');
+    if ((infoEstatica as any).codigoNbs) nbsEncontrado = (infoEstatica as any).codigoNbs;
+  }
+
+  const dataCompetenciaRegra = new Date(`${String(payload.dataCompetencia || new Date().toISOString().slice(0, 10)).slice(0, 10)}T12:00:00.000Z`);
+  const regraGlobal = await db.globalCnae.findFirst({
+    where: {
+      codigo: cnaeFinal,
+      AND: [
+        { OR: [{ inicioVigencia: null }, { inicioVigencia: { lte: dataCompetenciaRegra } }] },
+        { OR: [{ fimVigencia: null }, { fimVigencia: { gte: dataCompetenciaRegra } }] },
+      ],
+    },
+  });
+  if (regraGlobal) {
+    if (regraGlobal.itemLc) itemLc = regraGlobal.itemLc;
+    if (regraGlobal.codigoTributacaoNacional) codigoTribNacional = regraGlobal.codigoTributacaoNacional.replace(/\D/g, '');
+    if ((regraGlobal as any).codigoNbs) nbsEncontrado = (regraGlobal as any).codigoNbs;
+  }
+
+  const regraMunicipal = await db.tributacaoMunicipal.findFirst({
+    where: {
+      cnae: cnaeFinal,
+      codigoIbge: prestador.codigoIbge || '',
+      ativo: true,
+      AND: [
+        { OR: [{ inicioVigencia: null }, { inicioVigencia: { lte: dataCompetenciaRegra } }] },
+        { OR: [{ fimVigencia: null }, { fimVigencia: { gte: dataCompetenciaRegra } }] },
+      ],
+    },
+    orderBy: [{ prioridade: 'desc' }, { updatedAt: 'desc' }],
+  });
+
+  if (regraMunicipal?.exigeNbs && nbsEncontrado) codigoNbs = nbsEncontrado;
+
+  codigoTribNacional = optionalString(firstDefined(payload.codigoTributacaoNacional, payload.codigoTribNacional, codigoTribNacional))?.replace(/\D/g, '') || codigoTribNacional;
+  itemLc = optionalString(firstDefined(payload.itemLc, itemLc)) || itemLc;
+  codigoNbs = optionalString(firstDefined(payload.codigoNbs, codigoNbs)) || '';
+  const codigoMunicipalInformado = optionalString(payload.codigoTributacaoMunicipal);
+  const cadastroPf = String(tomador.tipo || '').toUpperCase() === 'PF';
+  const tomadorTipo = cadastroPf ? 'PF' : optionalString(firstDefined(payload.tomadorTipo, tomador.tipo)) || tomador.tipo;
+  const tomadorPais = optionalString(firstDefined(payload.tomadorPais, tomador.pais)) || tomador.pais;
+  const fiscalDecision = await resolveFiscalDecision({
+    cnae: cnaeFinal,
+    itemLc,
+    codigoIbge: optionalString(firstDefined(payload.localPrestacaoIbge, prestador.codigoIbge)) || '',
+    regimeTributario: regimePrestador,
+    ambiente: prestador.ambiente,
+    dataCompetencia: payload.dataCompetencia,
+    valor: valorFloat,
+    codigoNbs,
+    codigoTributacaoMunicipal: codigoMunicipalInformado,
+    tomadorTipo,
+    tomadorPais: tomadorPais || undefined,
+    retencoes: payload.retencoes,
+    tributosFederaisDevidos: payload.tributosFederaisDevidos,
+    ibscbs: payload.ibscbs,
+  }, db);
+  assertFiscalDecision(fiscalDecision);
+
+  codigoNbs = fiscalDecision.codigoNbs || codigoNbs;
+  const codigoTributacaoMunicipal = regimePrestador === 'MEI'
+    ? undefined
+    : fiscalDecision.codigoTributacaoMunicipal;
+  const aliquotaMunicipio = regimePrestador === 'MEI'
+    ? undefined
+    : firstDefined(payload.aliquotaMunicipio, fiscalDecision.aliquotaIssMunicipal, regraMunicipal?.aliquotaIss);
+  const aliquotaIss = payload.aliquota ? parseNumero(payload.aliquota) : 0;
+  const aliquotaIssEfetiva = aliquotaIss || parseNumero(prestador.aliquotaPadrao) || 0;
+  const aliquotaMunicipioNumero = aliquotaMunicipio ? parseNumero(aliquotaMunicipio) : null;
+  if (!isPercentualFiscalValido(aliquotaIssEfetiva, { allowZero: true })) {
+    throw Object.assign(new Error('Aliquota ISS invalida. Informe um percentual entre 0 e 100, por exemplo 2,01 ou 2.01.'), {
+      status: 400,
+      userAction: 'Revise a aliquota ISS antes de reenviar. Use percentual entre 0 e 100, como 2,01 ou 2.01.',
+      code: 'ALIQUOTA_ISS_INVALIDA',
+    });
+  }
+  if (aliquotaMunicipioNumero !== null && !isPercentualFiscalValido(aliquotaMunicipioNumero, { allowZero: true })) {
+    throw Object.assign(new Error('Aliquota municipal invalida. Informe um percentual entre 0 e 100.'), {
+      status: 400,
+      userAction: 'Revise a aliquota municipal antes de reenviar. Use percentual entre 0 e 100.',
+      code: 'ALIQUOTA_MUNICIPAL_INVALIDA',
+    });
+  }
+
+  return {
+    regimePrestador,
+    cnaeFinal,
+    codigoTribNacional,
+    itemLc,
+    codigoNbs,
+    codigoTributacaoMunicipal,
+    cadastroPf,
+    tomadorTipo,
+    tomadorPais,
+    fiscalDecision,
+    aliquotaIss,
+    aliquotaMunicipioNumero,
+    tipoTributacao: optionalString(firstDefined(payload.tipoTributacao, prestador.tipoTributacaoPadrao)),
+  };
+}
+
 function normalizarPayload(body: any) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw Object.assign(new Error('Dados da emissão inválidos.'), { status: 400 });
   const {
     clienteId,
     valor,
@@ -119,6 +215,9 @@ function normalizarPayload(body: any) {
     codigoCnae,
     cnae,
     vendaId,
+    copiaDeVendaId,
+    empresaConfirmadaId,
+    ambienteConfirmado,
     aliquota,
     aliquotaMunicipio,
     issRetido,
@@ -163,12 +262,15 @@ function normalizarPayload(body: any) {
     codigoCnae: codigoCnae || cnae,
     cnae,
     vendaId,
+    copiaDeVendaId,
+    empresaConfirmadaId,
+    ambienteConfirmado,
     aliquota,
     aliquotaMunicipio,
     issRetido,
     retencoes,
-    numeroDPS,
-    serieDPS,
+    numeroDPS: numeroDPS === undefined || numeroDPS === null || numeroDPS === '' ? undefined : normalizeDpsNumber(numeroDPS),
+    serieDPS: serieDPS === undefined || serieDPS === null || serieDPS === '' ? undefined : normalizeDpsSeries(serieDPS),
     valorMoedaEstrangeira,
     dataCompetencia,
     codigoTributacaoNacional,
@@ -202,6 +304,14 @@ function normalizarPayload(body: any) {
   };
 }
 
+function frozenCustomerSnapshot(tomador: any) {
+  return Object.fromEntries([
+    'id', 'empresaId', 'entidadeFiscalId', 'tipo', 'documento', 'nome', 'nomeFantasia', 'email', 'telefone',
+    'inscricaoMunicipal', 'inscricaoEstadual', 'cep', 'logradouro', 'numero', 'complemento', 'bairro',
+    'cidade', 'uf', 'pais', 'codigoIbge', 'semEndereco', 'moeda', 'nif',
+  ].map(key => [key, tomador[key] ?? null]));
+}
+
 function assertTomadorPfComEndereco(tomador: any) {
   if (String(tomador?.tipo || '').toUpperCase() !== 'PF') return;
   const message = getPfAddressRequiredMessage(tomador);
@@ -214,69 +324,22 @@ function assertTomadorPfComEndereco(tomador: any) {
   });
 }
 
-function montarErroFinal(resultado: any, dpsFinal: number, tentativasEmissao: number) {
-  let customUserAction = null;
-  let draftEligible = false;
-  let draftReasonType = null;
-  let discardVenda = false;
-  const errorStr = textoErroFiscal(resultado);
-  const erroFiscalCliente = getMensagemErroFiscalCliente(resultado);
-
-  if (isErroTemporarioPortal(resultado)) {
-    customUserAction = `Portal Nacional indisponivel no momento. Tentamos ${tentativasEmissao} vez(es) usando a mesma DPS ${dpsFinal}, mas o servico nao respondeu corretamente. Aguarde alguns minutos e tente reenviar.`;
-  } else if (erroFiscalCliente) {
-    customUserAction = erroFiscalCliente.message;
-    draftReasonType = erroFiscalCliente.reasonType;
-    draftEligible = erroFiscalCliente.needsSupport !== true;
-  } else if (errorStr.includes('inscrição municipal') || errorStr.includes('inscriÃ§Ã£o municipal') || errorStr.includes('im ') || errorStr.includes('e0180') || errorStr.includes('e0183') || errorStr.includes('e0184')) {
-    customUserAction = 'Sua Inscricao Municipal esta ausente ou incorreta. Por favor, acesse as Configuracoes da Empresa e atualize o numero da sua I.M.';
-    draftEligible = true;
-    draftReasonType = 'INSCRICAO_MUNICIPAL';
-    discardVenda = true;
-  } else if (errorStr.includes('e0116')) {
-    customUserAction = 'Sua Inscricao Municipal esta ausente ou incorreta. Por favor, acesse as Configuracoes da Empresa e atualize o numero da sua I.M.';
-    draftEligible = true;
-    draftReasonType = 'INSCRICAO_MUNICIPAL';
-    discardVenda = true;
-  } else if (errorStr.includes('e0160') || (errorStr.includes('simples nacional') && errorStr.includes('cadastro simples nacional'))) {
-    customUserAction = 'O regime tributario salvo no SaaS nao confere com o cadastro do prestador no Portal Nacional para este mes de competencia. Acesse as Configuracoes da Empresa e ajuste o Regime Tributario conforme o cadastro oficial antes de reenviar.';
-    draftEligible = true;
-    draftReasonType = 'REGIME_TRIBUTARIO';
-    discardVenda = true;
-  } else if (errorStr.includes('já utilizado') || errorStr.includes('jÃ¡ utilizado') || errorStr.includes('já existe') || errorStr.includes('jÃ¡ existe') || errorStr.includes('duplicado') || errorStr.includes('e0171') || errorStr.includes('e0041')) {
-    customUserAction = `O numero de DPS ${dpsFinal} ja foi utilizado. Por favor, altere o numero do DPS para o proximo sequencial disponivel.`;
-    draftEligible = true;
-    draftReasonType = 'DPS_DUPLICADO';
-    discardVenda = true;
-  }
-
-  return {
-    error: 'Emissao falhou.',
-    details: resultado?.erros,
-    motivo: resultado?.motivo || 'Rejeicao Sefaz',
-    userAction: customUserAction,
-    draftEligible,
-    draftReasonType,
-    discardVenda,
-    temporario: isErroTemporarioPortal(resultado),
-  };
-}
-
 export async function criarEmissaoJob(params: CriarEmissaoJobParams): Promise<CriarEmissaoJobResult> {
   const user = await prisma.user.findUnique({ where: { id: params.userId } });
   if (!user) throw Object.assign(new Error('Usuario nao autenticado.'), { status: 401 });
 
   const payload = normalizarPayload(params.body);
+  const confirmation = readEmissionConfirmation(payload);
+  if (payload.copiaDeVendaId !== undefined && payload.copiaDeVendaId !== null &&
+      (typeof payload.copiaDeVendaId !== 'string' || !payload.copiaDeVendaId || payload.copiaDeVendaId.length > 100 || payload.vendaId)) {
+    throw Object.assign(new Error('Origem da cópia inválida. Uma cópia sempre cria uma nova venda.'), { status: 400 });
+  }
   const empresaIdAlvo = await resolveEmpresaContexto(user, params.contextId);
   if (!empresaIdAlvo) throw Object.assign(new Error('Acesso negado a empresa selecionada.'), { status: 403 });
 
-  const idempotencyKey = params.idempotencyKey || payload.idempotencyKey || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const existing = await emissaoJobModel.findUnique({
-    where: { empresaId_idempotencyKey: { empresaId: empresaIdAlvo, idempotencyKey } },
-  });
-  if (existing) {
-    const vendaExistente = existing.vendaId ? await prisma.venda.findUnique({ where: { id: existing.vendaId } }) : null;
-    return { job: existing, venda: vendaExistente, existing: true };
+  const idempotencyKey = params.idempotencyKey || payload.idempotencyKey;
+  if (typeof idempotencyKey !== 'string' || !/^[a-z0-9:_-]{8,160}$/i.test(idempotencyKey)) {
+    throw Object.assign(new Error('Chave de idempotência inválida.'), { status: 400 });
   }
 
   const prestador = await prisma.empresa.findUnique({ where: { id: empresaIdAlvo } });
@@ -296,563 +359,178 @@ export async function criarEmissaoJob(params: CriarEmissaoJobParams): Promise<Cr
     });
   }
 
-  const tomador = await prisma.cliente.findUnique({ where: { id: payload.clienteId } });
+  const tomador = await findTenantCustomer(payload.clienteId, empresaIdAlvo);
   if (!tomador) throw Object.assign(new Error('Tomador (Cliente) nao encontrado.'), { status: 400 });
-  // Valida antes da reserva do credito do plano: cadastro incompleto nao consome emissao.
-  assertTomadorPfComEndereco(tomador);
-
-  let billingUserId = await resolveBillingUserId({
-    empresaId: empresaIdAlvo,
-    actorUserId: user.id,
-    acao: 'EMITIR',
-  });
-
-  if (!billingUserId) {
-    const donoEmpresa = await prisma.user.findFirst({
-      where: { empresaId: empresaIdAlvo, role: { notIn: ['CONTADOR', 'SUPORTE', 'SUPORTE_TI'] } },
-      orderBy: { createdAt: 'asc' },
-    });
-    if (donoEmpresa) billingUserId = donoEmpresa.id;
-  }
-
-  let planHistoryId: string | null = null;
-  let creditReserved = false;
-  if (billingUserId) {
-    const planCheck = prestador.ambiente === 'PRODUCAO'
-      ? await reserveEmissionCredit(billingUserId)
-      : await checkPlanLimits(billingUserId, 'EMITIR');
-
-    if (!planCheck.allowed) {
-      throw Object.assign(new Error('Limite de emissao atingido.'), {
-        status: 403,
-        userAction: 'A carteira de consumo responsavel por este CNPJ atingiu o limite ou o plano expirou.',
-        code: planCheck.status,
-      });
-    }
-    planHistoryId = planCheck.historyId || null;
-    creditReserved = prestador.ambiente === 'PRODUCAO' && (planCheck as any).reserved === true;
-  }
-
+  payload.clienteId = tomador.id;
   const valorFloat = parseFloat(payload.valor);
   if (!Number.isFinite(valorFloat) || valorFloat <= 0) {
     throw Object.assign(new Error('Valor da nota invalido.'), { status: 400 });
   }
+  // Valida antes da reserva do credito do plano: cadastro incompleto nao consome emissao.
+  assertTomadorPfComEndereco(tomador);
 
-  let venda: any;
-  let job: any;
+  const billingUserId = await resolveBillingUserId({ empresaId: empresaIdAlvo, actorUserId: user.id, acao: 'EMITIR' });
 
-  try {
-    venda = payload.vendaId
-      ? await prisma.venda.update({
-          where: { id: payload.vendaId },
-          data: { valor: valorFloat, descricao: payload.descricao, status: 'PROCESSANDO' },
-        })
-      : await prisma.venda.create({
-          data: {
-            empresaId: prestador.id,
-            clienteId: tomador.id,
-            valor: valorFloat,
-            descricao: payload.descricao,
-            status: 'PROCESSANDO',
-          },
-        });
-
-    job = await emissaoJobModel.create({
-      data: {
-        empresaId: prestador.id,
-        clienteId: tomador.id,
-        vendaId: venda.id,
-        actorUserId: user.id,
-        billingUserId,
-        payloadJson: JSON.stringify({ ...payload, _creditReserved: creditReserved }),
-        status: 'PENDENTE',
-        statusMessage: 'Emissao registrada. Aguardando processamento.',
-        maxAttempts: getIntEnv('EMISSION_MAX_ATTEMPTS', 5),
-        partitionKey: getPartitionKey(prestador.id),
-        idempotencyKey,
-        reservedPlanHistoryId: planHistoryId,
-        serieDPS: payload.serieDPS || prestador.serieDPS || '900',
-        source: params.source || 'WEB',
-      },
-    });
-  } catch (error) {
-    if (creditReserved) await releaseEmissionCredit(planHistoryId);
-    throw error;
-  }
-
-  await createLog({
-    level: 'INFO',
-    action: 'EMISSAO_JOB_CRIADO',
-    message: 'Pedido de emissao registrado na fila.',
-    empresaId: prestador.id,
-    vendaId: venda.id,
-    details: { jobId: job.id, partitionKey: job.partitionKey, idempotencyKey, billingUserId, planHistoryId, creditReserved },
-  });
-
-  return { job, venda, existing: false };
-}
-
-async function adquirirLockEmpresa(empresaId: string) {
-  const rows = await prisma.$queryRaw<Array<{ locked: boolean }>>`
-    SELECT pg_try_advisory_lock(hashtext(${empresaId})) AS locked
-  `;
-  return rows?.[0]?.locked === true;
-}
-
-async function liberarLockEmpresa(empresaId: string) {
-  await prisma.$queryRaw`
-    SELECT pg_advisory_unlock(hashtext(${empresaId}))
-  `;
-}
-
-async function agendarNovaTentativa(jobId: string, delayMs: number) {
-  setTimeout(() => {
-    processarEmissaoJob(jobId).catch((error) => console.error('[EMISSAO_JOB] retry falhou:', error));
-  }, delayMs);
-}
-
-export function dispararProcessamentoEmissaoJob(jobId: string) {
-  setTimeout(() => {
-    processarEmissaoJob(jobId).catch((error) => console.error('[EMISSAO_JOB] processamento falhou:', error));
-  }, 50);
-}
-
-export async function retomarEmissoesPendentes(options: { limit?: number; recuperarTravados?: boolean } = {}) {
-  const limit = Math.min(Math.max(options.limit || getIntEnv('EMISSION_RESUME_LIMIT', 25), 1), 100);
-  const recuperarTravados = options.recuperarTravados !== false;
-  const agora = new Date();
-  const staleMinutes = getIntEnv('EMISSION_STALE_PROCESSING_MINUTES', 15);
-  const staleBefore = new Date(Date.now() - staleMinutes * 60 * 1000);
-  let travadosRecuperados = 0;
-
-  if (recuperarTravados) {
-    const jobsTravados = await emissaoJobModel.findMany({
-      where: {
-        status: 'PROCESSANDO',
-        OR: [{ lockedAt: null }, { lockedAt: { lt: staleBefore } }],
-      },
-      orderBy: { lockedAt: 'asc' },
-      take: limit,
-    });
-
-    for (const job of jobsTravados) {
-      const attempts = job.attempts || 1;
-      const maxAttempts = job.maxAttempts || 5;
-      const podeTentar = attempts < maxAttempts;
-
-      await emissaoJobModel.update({
-        where: { id: job.id },
-        data: {
-          status: podeTentar ? 'ERRO_TEMPORARIO' : 'ERRO_FINAL',
-          statusMessage: podeTentar
-            ? 'Processamento anterior ficou sem conclusao. Job retomado para nova tentativa.'
-            : 'Processamento anterior ficou sem conclusao e atingiu o limite de tentativas.',
-          lastError: JSON.stringify({
-            error: 'Job ficou travado em PROCESSANDO.',
-            motivo: `Sem atualizacao ha mais de ${staleMinutes} minutos.`,
-            temporario: podeTentar,
-            userAction: podeTentar
-              ? 'O sistema retomara a emissao automaticamente preservando a fila da empresa.'
-              : 'Acione o suporte para revisar a emissao antes de tentar novamente.',
-          }),
-          nextAttemptAt: podeTentar ? agora : null,
-          finishedAt: podeTentar ? null : agora,
-          lockedAt: null,
-          lockedBy: null,
-        },
-      });
-
-      if (job.vendaId && !podeTentar) {
-        await prisma.venda.update({ where: { id: job.vendaId }, data: { status: 'ERRO_EMISSAO' } });
-      }
-
-      if (!podeTentar) {
-        const payload = parsePayloadSeguro(job.payloadJson);
-        if (payload._creditReserved === true && !job.reservedDpsNumero) {
-          await releaseEmissionCredit(job.reservedPlanHistoryId);
-        }
-      }
-
-      travadosRecuperados++;
-
-      await createLog({
-        level: podeTentar ? 'ALERTA' : 'ERRO',
-        action: podeTentar ? 'EMISSAO_JOB_TRAVADO_RETOMADO' : 'EMISSAO_JOB_TRAVADO_FINAL',
-        message: podeTentar
-          ? 'Job travado em processamento foi devolvido para retry.'
-          : 'Job travado em processamento foi finalizado por limite de tentativas.',
-        empresaId: job.empresaId,
-        vendaId: job.vendaId,
-        details: { jobId: job.id, attempts, maxAttempts, staleMinutes, reservedDpsNumero: job.reservedDpsNumero },
-      });
+  return commercialTransaction(billingUserId, async (tx) => {
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { id: true, role: true, empresaId: true } });
+    if (!actor || !await hasCustomerCompanyAccess(actor, empresaIdAlvo, tx)) throw Object.assign(new Error('Perfil sem permissão para emitir por esta empresa.'), { status: 403 });
+    await tx.$queryRaw`SELECT "id" FROM "Empresa" WHERE "id" = ${empresaIdAlvo} FOR UPDATE`;
+    const cancelledRequest = await tx.emissionRequestBlock.findUnique({ where: { empresaId_idempotencyKey: { empresaId: empresaIdAlvo, idempotencyKey } } });
+    if (cancelledRequest) throw Object.assign(new Error('Solicitação descartada antes do registro. Inicie uma nova solicitação.'), { status: 409 });
+    const currentCompany = await tx.empresa.findFirst({ where: { id: empresaIdAlvo, arquivadoEm: null, OR: [
+      { id: actor.empresaId || '' }, { proprietarioUserId: actor.id }, { vinculadoA: { some: { userId: actor.id, revokedAt: null } } },
+      { contadoresLink: { some: { contadorId: actor.id, status: 'APROVADO', arquivadoEm: null } } },
+    ] } });
+    if (!currentCompany) throw Object.assign(new Error('Vínculo com a empresa revogado.'), { status: 403 });
+    const primaryOwner = await tx.user.findUnique({ where: { empresaId: empresaIdAlvo }, select: { id: true, role: true } });
+    const currentBillingOwner = currentCompany.modoCobranca === 'POR_OPERADOR' ? actor.id
+      : currentCompany.donoFaturamentoId || currentCompany.proprietarioUserId
+        || primaryOwner?.id || currentCompany.contadorCustodianteId;
+    if (currentBillingOwner !== billingUserId) throw Object.assign(new Error('Responsável financeiro alterado. Confira a operação novamente.'), { status: 409 });
+    const existing = await tx.emissaoJob.findUnique({ where: { empresaId_idempotencyKey: { empresaId: empresaIdAlvo, idempotencyKey } } });
+    if (existing) {
+      const stored = parsePayloadSeguro(existing.payloadJson);
+      const original = stored._requestPayload && typeof stored._requestPayload === 'object'
+        ? normalizarPayload(stored._requestPayload) : normalizarPayload(stored);
+      if (JSON.stringify(original) !== JSON.stringify(payload)) throw Object.assign(new Error('Chave já usada com outros dados. Atualize a solicitação.'), { status: 409 });
+      return { job: existing, venda: existing.vendaId ? await tx.venda.findUnique({ where: { id: existing.vendaId } }) : null, existing: true };
     }
-  }
-
-  const jobsDevidos = await emissaoJobModel.findMany({
-    where: {
-      status: { in: ['PENDENTE', 'ERRO_TEMPORARIO'] },
-      OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: agora } }],
-    },
-    orderBy: [{ createdAt: 'asc' }],
-    take: limit,
-  });
-
-  const empresasAcionadas = new Set<string>();
-  for (const job of jobsDevidos) {
-    if (empresasAcionadas.has(job.empresaId)) continue;
-    empresasAcionadas.add(job.empresaId);
-    await processarProximoDaEmpresa(job.empresaId);
-  }
-
-  return {
-    travadosRecuperados,
-    jobsDevidos: jobsDevidos.length,
-    empresasAcionadas: empresasAcionadas.size,
-  };
-}
-
-async function processarProximoDaEmpresa(empresaId: string) {
-  const retryPendente = await emissaoJobModel.findFirst({
-    where: {
-      empresaId,
-      status: 'ERRO_TEMPORARIO',
-    },
-    orderBy: { createdAt: 'asc' },
-  });
-
-  if (retryPendente) {
-    const retryDue = !retryPendente.nextAttemptAt || new Date(retryPendente.nextAttemptAt) <= new Date();
-    if (retryDue) {
-      dispararProcessamentoEmissaoJob(retryPendente.id);
-    }
-    return;
-  }
-
-  const nextJob = await emissaoJobModel.findFirst({
-    where: {
-      empresaId,
-      status: 'PENDENTE',
-      OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: new Date() } }],
-    },
-    orderBy: { createdAt: 'asc' },
-  });
-  if (nextJob) dispararProcessamentoEmissaoJob(nextJob.id);
-}
-
-export async function processarEmissaoJob(jobId: string) {
-  const job = await emissaoJobModel.findUnique({ where: { id: jobId } });
-  if (!job || !['PENDENTE', 'ERRO_TEMPORARIO'].includes(job.status)) return;
-
-  const locked = await adquirirLockEmpresa(job.empresaId);
-  if (!locked) return;
-
-  try {
-    let lockedJob = job;
-
-    if (job.status === 'PENDENTE') {
-      const bloqueioAnterior = await emissaoJobModel.findFirst({
-        where: {
-          empresaId: job.empresaId,
-          status: 'ERRO_TEMPORARIO',
-          createdAt: { lt: job.createdAt },
-        },
-        orderBy: { createdAt: 'asc' },
-      });
-
-      if (bloqueioAnterior) {
-        await createLog({
-          level: 'ALERTA',
-          action: 'EMISSAO_JOB_BLOQUEADO_POR_RETRY',
-          message: 'Job pendente bloqueado por emissao anterior com erro temporario.',
-          empresaId: job.empresaId,
-          vendaId: job.vendaId,
-          details: {
-            jobId: job.id,
-            jobBloqueadorId: bloqueioAnterior.id,
-            reservedDpsNumero: bloqueioAnterior.reservedDpsNumero,
-            nextAttemptAt: bloqueioAnterior.nextAttemptAt,
-          },
-        });
-        return;
+    // A web request must not promise processing when no emission process can
+    // claim it. Other worker types are not evidence of emission capacity.
+    const heartbeat = await tx.workerHeartbeat.findFirst({ where: {
+      id: { startsWith: 'emission-' },
+      updatedAt: { gt: new Date(Date.now() - 45_000) },
+      ...(currentCompany.ambiente === 'PRODUCAO' ? { productionEnabled: true } : {}),
+    }, select: { id: true } });
+    if (!heartbeat) throw Object.assign(new Error('Processador de emissões indisponível. Nenhuma nova nota foi registrada. Tente novamente quando o serviço voltar.'), {
+      status: 409, code: 'EMISSION_PROCESSOR_UNAVAILABLE',
+    });
+    // An idempotent replay returns only the original job; a NEW request must
+    // match the company/environment actually reviewed, under the company lock.
+    assertEmissionConfirmation(confirmation, currentCompany);
+    if (currentCompany.ambiente !== prestador.ambiente) throw Object.assign(new Error('Ambiente alterado. Confira a emissão novamente.'), { status: 409 });
+    // Administrative archiving and edits use the same company mutex. A customer
+    // resolved before waiting for it must not authorize a new, stale submission.
+    const currentCustomer = await findTenantCustomer(tomador.id, empresaIdAlvo, tx);
+    if (!currentCustomer || currentCustomer.updatedAt.getTime() !== tomador.updatedAt.getTime()) throw Object.assign(new Error('Tomador alterado ou arquivado. Recarregue e confira os dados antes de emitir.'), { status: 409 });
+    assertTomadorPfComEndereco(currentCustomer);
+    const outstanding = await tx.emissaoJob.findFirst({ where: { empresaId: empresaIdAlvo, actorUserId: actor.id, acknowledgedAt: null }, select: { id: true } });
+    if (outstanding) throw Object.assign(new Error('Existe uma solicitação anterior ainda não conferida. Abra a tela de emissão para acompanhar seu resultado.'), { status: 409 });
+    if (payload.copiaDeVendaId) {
+      const source = await tx.venda.findFirst({ where: { id: payload.copiaDeVendaId, empresaId: empresaIdAlvo, clienteId: tomador.id, arquivadoEm: null },
+        include: { notas: { select: { ambiente: true, status: true, chaveAcesso: true } } } });
+      if (!source) throw Object.assign(new Error('Venda de origem indisponível para esta empresa e tomador.'), { status: 403 });
+      const originalJob = await tx.emissaoJob.findFirst({ where: { vendaId: source.id }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        select: { ambiente: true, status: true, authorizedXmlBase64: true } });
+      const hasHomologation = source.notas.some((note) => note.ambiente === 'HOMOLOGACAO' && ['AUTORIZADA', 'CANCELADA'].includes(note.status)) ||
+        (originalJob?.ambiente === 'HOMOLOGACAO' && originalJob.status === 'AUTORIZADA' && !!originalJob.authorizedXmlBase64);
+      const unsafeNote = source.notas.some((note) => note.ambiente !== 'HOMOLOGACAO' && (note.chaveAcesso || ['AUTORIZADA', 'CANCELADA'].includes(note.status)));
+      if (!hasHomologation || unsafeNote || (originalJob && (originalJob.status !== 'AUTORIZADA' || originalJob.ambiente !== 'HOMOLOGACAO'))) {
+        throw Object.assign(new Error('Esta origem não é uma emissão de homologação concluída, ou tem outra tentativa pendente. Confira o histórico.'), { status: 409 });
       }
     }
-
-    lockedJob = await emissaoJobModel.update({
-      where: { id: job.id },
-      data: {
-        status: 'PROCESSANDO',
-        statusMessage: 'Processando emissao no Portal Nacional.',
-        attempts: { increment: 1 },
-        startedAt: job.startedAt || new Date(),
-        lockedAt: new Date(),
-        lockedBy: `next-${process.pid}`,
-        lastError: null,
-      },
-    });
-
-    try {
-      await executarEmissao(lockedJob);
-    } catch (error: any) {
-      await registrarFalhaInesperadaJob(lockedJob.id, error);
+    if (payload.vendaId) {
+      const sale = await tx.venda.findFirst({ where: { id: payload.vendaId, empresaId: prestador.id, arquivadoEm: null } });
+      if (!sale || sale.clienteId !== tomador.id) throw Object.assign(new Error('Venda não pertence ao tomador e à empresa selecionados.'), { status: 403 });
+      const previousJob = await tx.emissaoJob.findFirst({ where: { vendaId: sale.id }, orderBy: { createdAt: 'desc' } });
+      const authorized = await tx.notaFiscal.findFirst({ where: { vendaId: sale.id, status: { in: ['AUTORIZADA', 'CANCELADA'] } }, select: { id: true } });
+      if (authorized || (previousJob && previousJob.status !== 'ERRO_FINAL') || sale.status === 'HOMOLOGACAO_VALIDADA') {
+        throw Object.assign(new Error('Venda já autorizada ou com emissão em andamento. Consulte o resultado antes de reenviar.'), { status: 409 });
+      }
+      if (previousJob?.creditReservationId) {
+        const oldCredit = await tx.emissionCreditReservation.findUnique({ where: { id: previousJob.creditReservationId }, select: { status: true } });
+        if (oldCredit?.status === 'RESERVED') throw Object.assign(new Error('Retorno fiscal ainda não conciliado. Não é seguro reenviar.'), { status: 409 });
+      }
+      if (previousJob?.status === 'ERRO_FINAL' && !previousJob.creditReservationId && previousJob.transmissionStartedAt) {
+        throw Object.assign(new Error('Emissão legada com transmissão registrada. Concilie o retorno antes de criar outra tentativa.'), { status: 409 });
+      }
     }
-  } finally {
-    await liberarLockEmpresa(job.empresaId);
-    await processarProximoDaEmpresa(job.empresaId);
-  }
+    // A nova solicitação só pode alcançar qualquer reserva ou gravação
+    // comercial depois de passar pela mesma decisão fiscal usada pelo worker.
+    // O worker repete a validação para proteger contra alterações concorrentes
+    // nas regras entre o agendamento e a transmissão.
+    await resolveEmissionFiscalContext({
+      payload,
+      prestador: currentCompany,
+      tomador: currentCustomer,
+      valorFloat,
+    }, tx);
+    const frozenSeries = normalizeDpsSeries(payload.serieDPS ?? currentCompany.serieDPS);
+    const reservation = prestador.ambiente === 'PRODUCAO'
+      ? await reserveEmissionCreditInTransaction(tx, billingUserId, `${empresaIdAlvo}:${idempotencyKey}`)
+      : { ...await checkPlanLimits(billingUserId, 'EMITIR', tx), reserved: false, reservationId: null };
+    if (!reservation.allowed) throw Object.assign(new Error(reservation.reason || 'Plano sem créditos de emissão.'), { status: 403, code: reservation.status });
+    const venda = payload.vendaId
+      ? await tx.venda.update({ where: { id: payload.vendaId }, data: { valor: valorFloat, descricao: payload.descricao, status: 'PROCESSANDO' } })
+      : await tx.venda.create({ data: { empresaId: prestador.id, clienteId: tomador.id, valor: valorFloat, descricao: payload.descricao, status: 'PROCESSANDO' } });
+    const job = await tx.emissaoJob.create({ data: {
+      empresaId: prestador.id, clienteId: tomador.id, vendaId: venda.id, actorUserId: user.id, billingUserId,
+      ambiente: prestador.ambiente,
+      payloadJson: JSON.stringify({ ...payload, _requestPayload: payload, _tomadorSnapshot: frozenCustomerSnapshot(currentCustomer),
+        _creditReserved: reservation.reserved }), status: 'PENDENTE',
+      statusMessage: 'Emissão registrada. Aguardando processamento.', maxAttempts: getIntEnv('EMISSION_MAX_ATTEMPTS', 5),
+      partitionKey: getPartitionKey(prestador.id), idempotencyKey, reservedPlanHistoryId: reservation.historyId || null,
+      creditReservationId: reservation.reservationId, billingUnlimited: reservation.unlimited === true,
+      serieDPS: frozenSeries, source: params.source || 'WEB',
+    } });
+    await tx.systemLog.create({ data: { level: 'INFO', action: 'EMISSAO_JOB_CRIADO', message: 'Emissão e reserva registradas atomicamente.',
+      empresaId: prestador.id, vendaId: venda.id, userId: user.id,
+      details: JSON.stringify({ jobId: job.id, billingUserId, reservationId: reservation.reservationId, copiaDeVendaId: payload.copiaDeVendaId || null }) } });
+    return { job, venda, existing: false };
+  });
 }
 
-async function registrarFalhaInesperadaJob(jobId: string, error: any) {
-  const jobAtual = await emissaoJobModel.findUnique({ where: { id: jobId } });
-  if (!jobAtual) return;
-
-  const payload = parsePayloadSeguro(jobAtual.payloadJson);
-  const creditReserved = payload._creditReserved === true;
-  const attempts = jobAtual.attempts || 1;
-  const maxAttempts = jobAtual.maxAttempts || 5;
-  const erroDeterministico = Number(error?.status) === 400 || [
-    'NBS_OBRIGATORIO', 'CODIGO_MUNICIPAL_OBRIGATORIO', 'IBSCBS_CLASSIFICACAO_PENDENTE',
-    'IBSCBS_CLASSE_INCOMPATIVEL', 'DPS_PREFLIGHT_INVALIDA',
-  ].includes(String(error?.code || '')) || String(error?.code || '').startsWith('RETENCAO_');
-  const erroTemporario = !erroDeterministico && isErroTemporarioPortal({ motivo: error?.message, erros: [error?.message, error?.code] });
-  const erroPayload = {
-    error: 'Falha inesperada no processamento da emissao.',
-    motivo: error?.message || 'Erro interno no motor de emissao.',
-    code: error?.code,
-    fiscalIssues: error?.fiscalIssues || error?.validationIssues,
-    stack: process.env.NODE_ENV === 'production' ? undefined : error?.stack,
-    temporario: erroTemporario,
-    userAction: error?.userAction || (erroTemporario
-      ? 'A emissao teve uma falha tecnica ou retorno incerto do Portal. O sistema fara nova tentativa preservando a mesma DPS.'
-      : 'A emissao falhou antes da transmissao fiscal. Revise os dados e tente novamente.'),
-  };
-
-  if (erroTemporario && attempts < maxAttempts) {
-    const delayMs = getIntEnv('EMISSION_RETRY_BACKOFF_MS', 5000) * attempts;
-    await emissaoJobModel.update({
-      where: { id: jobAtual.id },
-      data: {
-        status: 'ERRO_TEMPORARIO',
-        statusMessage: 'Falha tecnica temporaria. Nova tentativa sera feita automaticamente.',
-        lastError: JSON.stringify(erroPayload),
-        nextAttemptAt: new Date(Date.now() + delayMs),
-      },
-    });
-
-    await createLog({
-      level: 'ERRO',
-      action: 'EMISSAO_JOB_EXCEPTION_RETRY',
-      message: error?.message || 'Falha inesperada no job de emissao.',
-      empresaId: jobAtual.empresaId,
-      vendaId: jobAtual.vendaId,
-      details: { jobId: jobAtual.id, attempts, maxAttempts, delayMs, reservedDpsNumero: jobAtual.reservedDpsNumero, erro: erroPayload },
-    });
-
-    if (jobAtual.vendaId) {
-      await notifyFiscalEvent({
-        type: 'NOTA_RETRY',
-        vendaId: jobAtual.vendaId,
-        actorUserId: jobAtual.actorUserId,
-        title: 'Nota em nova tentativa',
-        message: erroPayload.userAction,
-        priority: 'NORMAL',
-        eventKeySuffix: `job-${jobAtual.id}-exception-retry-${attempts}`,
-        payload: { jobId: jobAtual.id, attempts, nextAttemptAt: new Date(Date.now() + delayMs), erro: erroPayload },
-      });
-    }
-
-    await agendarNovaTentativa(jobAtual.id, delayMs);
-    return;
-  }
-
-  if (jobAtual.vendaId) {
-    await prisma.venda.update({
-      where: { id: jobAtual.vendaId },
-      data: { status: 'ERRO_EMISSAO' },
-    });
-  }
-
-  await emissaoJobModel.update({
-    where: { id: jobAtual.id },
-    data: {
-      status: 'ERRO_FINAL',
-      statusMessage: erroPayload.userAction,
-      lastError: JSON.stringify(erroPayload),
-      finishedAt: new Date(),
-    },
-  });
-
-  if (creditReserved && !erroTemporario) await releaseEmissionCredit(jobAtual.reservedPlanHistoryId);
-
-  await createLog({
-    level: 'ERRO',
-    action: 'EMISSAO_JOB_EXCEPTION_FINAL',
-    message: error?.message || 'Falha final inesperada no job de emissao.',
-    empresaId: jobAtual.empresaId,
-    vendaId: jobAtual.vendaId,
-    details: { jobId: jobAtual.id, attempts, maxAttempts, reservedDpsNumero: jobAtual.reservedDpsNumero, erro: erroPayload },
-  });
-
-  if (jobAtual.vendaId) {
-    await notifyFiscalEvent({
-      type: 'NOTA_FALHA',
-      vendaId: jobAtual.vendaId,
-      actorUserId: jobAtual.actorUserId,
-      title: 'Nota nao autorizada',
-      message: erroPayload.userAction,
-      priority: 'HIGH',
-      eventKeySuffix: `job-${jobAtual.id}-exception-final`,
-      payload: { jobId: jobAtual.id, attempts, erro: erroPayload },
-    });
-  }
-}
-
-async function executarEmissao(job: any) {
+export async function prepararEmissaoJob(job: any) {
   const payload = JSON.parse(job.payloadJson || '{}');
-  const creditReserved = payload._creditReserved === true;
   const user = await prisma.user.findUnique({ where: { id: job.actorUserId } });
   const prestador = await prisma.empresa.findUnique({ where: { id: job.empresaId } });
-  const tomador = await prisma.cliente.findUnique({ where: { id: job.clienteId } });
+  const currentCustomer = await findTenantCustomer(job.clienteId, job.empresaId);
+  const tomador = currentCustomer && payload._tomadorSnapshot && typeof payload._tomadorSnapshot === 'object' && !Array.isArray(payload._tomadorSnapshot)
+    ? { ...currentCustomer, ...payload._tomadorSnapshot } : currentCustomer;
   const venda = job.vendaId ? await prisma.venda.findUnique({ where: { id: job.vendaId } }) : null;
 
   if (!user || !prestador || !tomador || !venda) {
     throw new Error('Job de emissao sem usuario, empresa, tomador ou venda vinculado.');
   }
-  const regimePrestador = assertRegimeTributarioSuportado(prestador.regimeTributario);
+  if (prestador.ambiente !== job.ambiente) throw Object.assign(new Error('Ambiente alterado após o agendamento. Revise a solicitação.'), { status: 400 });
+  if (job.ambiente === 'PRODUCAO') {
+    const reservation = job.creditReservationId ? await prisma.emissionCreditReservation.findUnique({ where: { id: job.creditReservationId } }) : null;
+    if (!reservation || reservation.status !== 'RESERVED' || reservation.userId !== job.billingUserId) {
+      throw Object.assign(new Error('Reserva de crédito ausente ou encerrada. Concilie o pedido antes de transmitir.'), { status: 400 });
+    }
+  }
   // Protege jobs antigos que tenham sido enfileirados antes da obrigatoriedade.
   assertTomadorPfComEndereco(tomador);
 
   const valorFloat = parseNumero(payload.valor);
-  const serieFinal = payload.serieDPS || prestador.serieDPS || '900';
-  const ambienteDps = normalizeDpsEnvironment(prestador.ambiente);
-  const ultimoDpsConhecido = await getDpsSequence({
-    empresaId: prestador.id,
-    ambiente: ambienteDps,
-    serie: serieFinal,
-    fallback: ambienteDps === 'PRODUCAO' ? prestador.ultimoDPS : 0,
-  });
-  const dpsFinal = job.reservedDpsNumero
-    ? Number(job.reservedDpsNumero)
-    : payload.numeroDPS
-      ? parseInt(payload.numeroDPS)
-      : ultimoDpsConhecido + 1;
+  // The sequence reservation freezes the series. A later settings change must
+  // never produce XML for another series with the same reserved number.
+  const serieFinal = normalizeDpsSeries(job.serieDPS);
+  const dpsFinal = job.reservedDpsNumero;
+  if (!Number.isSafeInteger(dpsFinal) || dpsFinal < 1) throw new Error('DPS não reservada pelo worker.');
 
-  await emissaoJobModel.update({
-    where: { id: job.id },
-    data: {
-      statusMessage: `Transmitindo DPS ${dpsFinal} ao Portal Nacional.`,
-      reservedDpsNumero: dpsFinal,
-      serieDPS: serieFinal,
-    },
-  });
-
-  let cnaeFinal = payload.codigoCnae ? String(payload.codigoCnae).replace(/\D/g, '') : '';
-  if (!cnaeFinal) {
-    const cnaeBanco = await prisma.cnae.findFirst({ where: { empresaId: prestador.id, principal: true } });
-    if (cnaeBanco) cnaeFinal = cnaeBanco.codigo.replace(/\D/g, '');
-  }
-  if (!cnaeFinal) throw new Error('CNAE e obrigatorio para emissao.');
-
-  let codigoTribNacional = '000000';
-  let itemLc = '00.00';
-  let nbsEncontrado = '';
-  let codigoNbs = '';
-
-  const infoEstatica = getTributacaoPorCnae(cnaeFinal);
-  if (infoEstatica) {
-    itemLc = infoEstatica.itemLC;
-    codigoTribNacional = infoEstatica.codigoTributacaoNacional.replace(/\D/g, '');
-    if ((infoEstatica as any).codigoNbs) nbsEncontrado = (infoEstatica as any).codigoNbs;
-  }
-
-  const dataCompetenciaRegra = new Date(`${String(payload.dataCompetencia || new Date().toISOString().slice(0, 10)).slice(0, 10)}T12:00:00.000Z`);
-  const regraGlobal = await prisma.globalCnae.findFirst({
-    where: {
-      codigo: cnaeFinal,
-      AND: [
-        { OR: [{ inicioVigencia: null }, { inicioVigencia: { lte: dataCompetenciaRegra } }] },
-        { OR: [{ fimVigencia: null }, { fimVigencia: { gte: dataCompetenciaRegra } }] },
-      ],
-    },
-  });
-  if (regraGlobal) {
-    if (regraGlobal.itemLc) itemLc = regraGlobal.itemLc;
-    if (regraGlobal.codigoTributacaoNacional) codigoTribNacional = regraGlobal.codigoTributacaoNacional.replace(/\D/g, '');
-    if ((regraGlobal as any).codigoNbs) nbsEncontrado = (regraGlobal as any).codigoNbs;
-  }
-
-  const regraMunicipal = await prisma.tributacaoMunicipal.findFirst({
-    where: {
-      cnae: cnaeFinal,
-      codigoIbge: prestador.codigoIbge || '',
-      ativo: true,
-      AND: [
-        { OR: [{ inicioVigencia: null }, { inicioVigencia: { lte: dataCompetenciaRegra } }] },
-        { OR: [{ fimVigencia: null }, { fimVigencia: { gte: dataCompetenciaRegra } }] },
-      ],
-    },
-    orderBy: [{ prioridade: 'desc' }, { updatedAt: 'desc' }],
-  });
-
-  if (regraMunicipal?.exigeNbs && nbsEncontrado) {
-    codigoNbs = nbsEncontrado;
-  }
-
-  codigoTribNacional = optionalString(firstDefined(payload.codigoTributacaoNacional, payload.codigoTribNacional, codigoTribNacional))?.replace(/\D/g, '') || codigoTribNacional;
-  itemLc = optionalString(firstDefined(payload.itemLc, itemLc)) || itemLc;
-  codigoNbs = optionalString(firstDefined(payload.codigoNbs, codigoNbs)) || '';
-  let codigoTributacaoMunicipal = optionalString(firstDefined(payload.codigoTributacaoMunicipal, regraMunicipal?.codigoTributacaoMunicipal));
-  let aliquotaMunicipio = firstDefined(payload.aliquotaMunicipio, regraMunicipal?.aliquotaIss);
-  const cadastroPf = String(tomador.tipo || '').toUpperCase() === 'PF';
-  const tomadorTipo = cadastroPf ? 'PF' : optionalString(firstDefined(payload.tomadorTipo, tomador.tipo)) || tomador.tipo;
-  const tomadorPais = optionalString(firstDefined(payload.tomadorPais, tomador.pais)) || tomador.pais;
-  const fiscalDecision = await resolveFiscalDecision({
-    cnae: cnaeFinal,
+  const {
+    cnaeFinal,
+    codigoTribNacional,
     itemLc,
-    codigoIbge: optionalString(firstDefined(payload.localPrestacaoIbge, prestador.codigoIbge)) || '',
-    regimeTributario: regimePrestador,
-    dataCompetencia: payload.dataCompetencia,
-    valor: valorFloat,
     codigoNbs,
     codigoTributacaoMunicipal,
+    cadastroPf,
     tomadorTipo,
-    tomadorPais: tomadorPais || undefined,
-    retencoes: payload.retencoes,
-    tributosFederaisDevidos: payload.tributosFederaisDevidos,
-    ibscbs: payload.ibscbs,
-  });
-  assertFiscalDecision(fiscalDecision);
-  codigoNbs = fiscalDecision.codigoNbs || codigoNbs;
-  codigoTributacaoMunicipal = regimePrestador === 'MEI'
-    ? undefined
-    : fiscalDecision.codigoTributacaoMunicipal || codigoTributacaoMunicipal;
-  aliquotaMunicipio = regimePrestador === 'MEI'
-    ? undefined
-    : firstDefined(payload.aliquotaMunicipio, fiscalDecision.aliquotaIssMunicipal, regraMunicipal?.aliquotaIss);
-  const aliquotaIss = payload.aliquota ? parseNumero(payload.aliquota) : 0;
-  const aliquotaIssEfetiva = aliquotaIss || parseNumero(prestador.aliquotaPadrao) || 0;
-  const aliquotaMunicipioNumero = aliquotaMunicipio ? parseNumero(aliquotaMunicipio) : null;
-  if (!isPercentualFiscalValido(aliquotaIssEfetiva, { allowZero: true })) {
-    throw Object.assign(new Error('Aliquota ISS invalida. Informe um percentual entre 0 e 100, por exemplo 2,01 ou 2.01.'), {
-      status: 400,
-      userAction: 'Revise a aliquota ISS antes de reenviar. Use percentual entre 0 e 100, como 2,01 ou 2.01.',
-      code: 'ALIQUOTA_ISS_INVALIDA',
-    });
-  }
-  if (aliquotaMunicipioNumero !== null && !isPercentualFiscalValido(aliquotaMunicipioNumero, { allowZero: true })) {
-    throw Object.assign(new Error('Aliquota municipal invalida. Informe um percentual entre 0 e 100.'), {
-      status: 400,
-      userAction: 'Revise a aliquota municipal antes de reenviar. Use percentual entre 0 e 100.',
-      code: 'ALIQUOTA_MUNICIPAL_INVALIDA',
-    });
-  }
-  const tipoTributacao = optionalString(firstDefined(payload.tipoTributacao, prestador.tipoTributacaoPadrao));
+    tomadorPais,
+    fiscalDecision,
+    aliquotaIss,
+    aliquotaMunicipioNumero,
+    tipoTributacao,
+  } = await resolveEmissionFiscalContext({ payload, prestador, tomador, valorFloat });
 
   const prestadorEmissao = {
     ...prestador,
     inscricaoMunicipal: optionalString(firstDefined(payload.inscricaoMunicipalPrestador, prestador.inscricaoMunicipal)),
     regimeEspecialTributacao: optionalString(firstDefined(payload.regimeEspecialTributacao, prestador.regimeEspecialTributacao)),
     tipoTributacaoPadrao: tipoTributacao || prestador.tipoTributacaoPadrao,
-    codigoIbge: optionalString(firstDefined(payload.localPrestacaoIbge, prestador.codigoIbge)) || prestador.codigoIbge,
+    // The service location cannot change the issuer identity or DPS identifier.
+    codigoIbge: prestador.codigoIbge,
   };
 
   const enderecoCadastroOuOverride = (override: any, cadastro: any) => cadastroPf
@@ -897,6 +575,7 @@ async function executarEmissao(job: any) {
     venda,
     servico: {
       valor: valorFloat,
+      localPrestacaoIbge: optionalString(firstDefined(payload.localPrestacaoIbge, prestador.codigoIbge)),
       valorMoedaEstrangeira: firstDefined(payload.valorMoedaEstrangeira) ? parseNumero(payload.valorMoedaEstrangeira) : undefined,
       codigoNbs,
       codigoTributacaoMunicipal,
@@ -926,258 +605,9 @@ async function executarEmissao(job: any) {
     fiscalSnapshot: fiscalDecision,
   };
 
-  await emissaoJobModel.update({
-    where: { id: job.id },
-    data: { fiscalSnapshotJson: JSON.stringify(fiscalDecision) },
-  });
-
-  const strategy = EmissorFactory.getStrategy(prestador);
-  let resultado: any;
-  let tentativasEmissao = 0;
-  const tentativasPortal = getIntEnv('EMISSION_PORTAL_ATTEMPTS', 5);
-
-  for (let tentativa = 1; tentativa <= tentativasPortal; tentativa++) {
-    tentativasEmissao = tentativa;
-    resultado = await strategy.executar(dadosParaEstrategia);
-
-    if (!resultado.sucesso && isErroTemporarioPortal(resultado) && tentativa < tentativasPortal) {
-      await sleep(getIntEnv('EMISSION_RETRY_BACKOFF_MS', 3000) + tentativa * 1500);
-      continue;
-    }
-    break;
-  }
-
-  await createLog({
-    level: 'INFO',
-    action: 'EMISSAO_INICIADA',
-    message: `Iniciando transmissao DPS ${dpsFinal} (Serie ${serieFinal}) - Ambiente: ${prestador.ambiente}.`,
-    empresaId: prestador.id,
-    vendaId: venda.id,
-    details: { payloadOriginal: dadosParaEstrategia, xmlGerado: resultado?.xmlGerado, jobId: job.id },
-  });
-
-  if (!resultado?.sucesso) {
-    const erro = montarErroFinal(resultado, dpsFinal, tentativasEmissao);
-    const attempts = job.attempts || 1;
-
-    if (erro.temporario && attempts < (job.maxAttempts || 5)) {
-      const delayMs = getIntEnv('EMISSION_RETRY_BACKOFF_MS', 5000) * attempts;
-      await emissaoJobModel.update({
-        where: { id: job.id },
-        data: {
-          status: 'ERRO_TEMPORARIO',
-          statusMessage: 'Portal Nacional instavel. Nova tentativa sera feita automaticamente.',
-          lastError: JSON.stringify(erro),
-          nextAttemptAt: new Date(Date.now() + delayMs),
-        },
-      });
-      await createLog({
-        level: 'ALERTA',
-        action: 'EMISSAO_JOB_RETRY',
-        message: 'Falha temporaria na emissao. Job reagendado.',
-        empresaId: prestador.id,
-        vendaId: venda.id,
-        details: { jobId: job.id, attempts, delayMs, erro },
-      });
-      await notifyFiscalEvent({
-        type: 'NOTA_RETRY',
-        vendaId: venda.id,
-        actorUserId: job.actorUserId,
-        title: 'Nota em nova tentativa',
-        message: 'O Portal Nacional ficou instavel. Vamos tentar novamente preservando a mesma DPS.',
-        priority: 'NORMAL',
-        eventKeySuffix: `job-${job.id}-retry-${attempts}`,
-        payload: { jobId: job.id, attempts, nextAttemptAt: new Date(Date.now() + delayMs), dps: dpsFinal },
-      });
-      await agendarNovaTentativa(job.id, delayMs);
-      return;
-    }
-
-    if (erro.discardVenda && !payload.vendaId) {
-      await prisma.venda.update({
-        where: { id: venda.id },
-        data: {
-          status: 'DESCARTADA',
-          arquivadoEm: new Date(),
-          arquivadoPor: user.id,
-          motivoArquivamento: 'Emissao descartada apos falha validada.',
-        } as any,
-      });
-    } else {
-      await prisma.venda.update({ where: { id: venda.id }, data: { status: 'ERRO_EMISSAO' } });
-    }
-
-    await createLog({
-      level: 'ERRO',
-      action: 'FALHA_EMISSAO',
-      message: erro.userAction || erro.motivo || 'Rejeicao Sefaz',
-      empresaId: prestador.id,
-      vendaId: venda.id,
-      details: {
-        erros: resultado.erros,
-        motivoFiscal: erro.motivo,
-        userAction: erro.userAction,
-        draftEligible: erro.draftEligible,
-        draftReasonType: erro.draftReasonType,
-        tentativas: tentativasEmissao,
-        dpsPreservada: isErroTemporarioPortal(resultado),
-        numeroDPS: dpsFinal,
-        serieDPS: serieFinal,
-        jobId: job.id,
-      },
-    });
-
-    await emissaoJobModel.update({
-      where: { id: job.id },
-      data: {
-        status: 'ERRO_FINAL',
-        statusMessage: erro.userAction || erro.motivo || 'A emissao falhou.',
-        lastError: JSON.stringify(erro),
-        finishedAt: new Date(),
-      },
-    });
-
-    await notifyFiscalEvent({
-      type: 'NOTA_FALHA',
-      vendaId: venda.id,
-      actorUserId: job.actorUserId,
-      title: erro.temporario ? 'Nota com falha temporaria' : 'Nota nao autorizada',
-      message: erro.userAction || erro.motivo || 'A emissao nao foi autorizada. Acesse o historico para revisar.',
-      priority: erro.temporario ? 'NORMAL' : 'HIGH',
-      eventKeySuffix: `job-${job.id}-final`,
-      payload: { jobId: job.id, dps: dpsFinal, erro },
-    });
-
-    if (creditReserved && !erro.temporario) await releaseEmissionCredit(job.reservedPlanHistoryId);
-    return;
-  }
-
-  if (prestador.ambiente === 'HOMOLOGACAO') {
-    if (creditReserved) await releaseEmissionCredit(job.reservedPlanHistoryId);
-
-    await confirmDpsNumber({
-      empresaId: prestador.id,
-      ambiente: 'HOMOLOGACAO',
-      serie: serieFinal,
-      numero: dpsFinal,
-      origem: 'VALIDACAO_HOMOLOGACAO',
-      userId: job.actorUserId,
-    });
-
-    await prisma.venda.update({
-      where: { id: venda.id },
-      data: {
-        status: 'HOMOLOGACAO_VALIDADA',
-        arquivadoEm: null,
-        arquivadoPor: null,
-        motivoArquivamento: null,
-      } as any,
-    });
-
-    await createLog({
-      level: 'INFO',
-      action: 'HOMOLOGACAO_VALIDADA',
-      message: 'DPS validada em homologacao. Altere o ambiente para producao antes da emissao oficial.',
-      empresaId: prestador.id,
-      vendaId: venda.id,
-      details: {
-        numeroDPS: dpsFinal,
-        serieDPS: serieFinal,
-        tentativas: tentativasEmissao,
-        jobId: job.id,
-        proximaAcao: 'Alterar o ambiente para PRODUCAO e reenviar a venda.',
-      },
-    });
-
-    await emissaoJobModel.update({
-      where: { id: job.id },
-      data: {
-        status: 'AUTORIZADA',
-        statusMessage: 'DPS validada em homologacao. Altere o ambiente para producao e reenvie para emitir oficialmente.',
-        finishedAt: new Date(),
-      },
-    });
-    return;
-  }
-
-  if (!creditReserved && job.reservedPlanHistoryId) await incrementUsage(job.reservedPlanHistoryId);
-
-  if (prestador.ambiente === 'PRODUCAO') {
-    await confirmDpsNumber({
-      empresaId: prestador.id,
-      ambiente: 'PRODUCAO',
-      serie: serieFinal,
-      numero: dpsFinal,
-      origem: 'EMISSAO_PRODUCAO',
-      userId: job.actorUserId,
-    });
-    if (dpsFinal > (prestador.ultimoDPS || 0)) {
-      await prisma.empresa.update({ where: { id: prestador.id }, data: { ultimoDPS: dpsFinal } });
-    }
-  }
-
-  const nota = await prisma.notaFiscal.create({
-    data: {
-      vendaId: venda.id,
-      empresaId: prestador.id,
-      clienteId: tomador.id,
-      numero: parseInt(resultado.notaGov!.numero) || 0,
-      valor: valorFloat,
-      descricao: payload.descricao,
-      prestadorCnpj: prestador.documento.replace(/\D/g, ''),
-      tomadorCnpj: tomador.documento ? tomador.documento.replace(/\D/g, '') : 'EXTERIOR',
-      status: 'AUTORIZADA',
-      chaveAcesso: resultado.notaGov!.chave,
-      protocolo: resultado.notaGov!.protocolo,
-      xmlBase64: resultado.notaGov!.xml,
-      xmlAutorizadoBase64: resultado.notaGov!.xml,
-      fiscalSnapshotJson: JSON.stringify(fiscalDecision),
-      cnae: cnaeFinal,
-      dataEmissao: new Date(),
-    } as any,
-  });
-
-  await createLog({
-    level: 'INFO',
-    action: 'NOTA_AUTORIZADA',
-    message: nota.numero && nota.numero > 0 ? `Nota ${nota.numero} autorizada!` : 'Nota autorizada. Aguardando numero oficial do XML de distribuicao.',
-    empresaId: prestador.id,
-    vendaId: venda.id,
-    details: {
-      numeroDPS: dpsFinal,
-      serieDPS: serieFinal,
-      tentativas: tentativasEmissao,
-      chaveAcesso: resultado.notaGov!.chave,
-      jobId: job.id,
-    },
-  });
-
-  await notifyFiscalEvent({
-    type: 'NOTA_AUTORIZADA',
-    vendaId: venda.id,
-    notaId: nota.id,
-    actorUserId: job.actorUserId,
-    title: 'Nota autorizada',
-    message: nota.numero && nota.numero > 0 ? `NFS-e ${nota.numero} autorizada com sucesso.` : 'NFS-e autorizada com sucesso.',
-    priority: 'NORMAL',
-    eventKeySuffix: `job-${job.id}-autorizada`,
-    payload: {
-      jobId: job.id,
-      numero: nota.numero,
-      chaveAcesso: nota.chaveAcesso,
-      dps: dpsFinal,
-    },
-  });
-
-  await emissaoJobModel.update({
-    where: { id: job.id },
-    data: {
-      status: 'AUTORIZADA',
-      statusMessage: 'Nota autorizada. Sincronizando XML e PDF oficiais.',
-      resultNotaId: nota.id,
-      finishedAt: new Date(),
-    },
-  });
-
-  processarRetornoNota(nota.id, prestador.id, venda.id).catch(console.error);
+  const signedXml = await EmissorFactory.getStrategy(prestador).preparar(dadosParaEstrategia);
+  return { signedXml, fiscalSnapshotJson: JSON.stringify(fiscalDecision), metadata: {
+    valor: valorFloat, descricao: payload.descricao, cnae: cnaeFinal,
+    prestadorDocumento: prestador.documento, tomadorDocumento: tomadorAdaptado.documento || 'EXTERIOR',
+  } };
 }

@@ -1,7 +1,8 @@
 'use client';
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, ReactNode } from 'react';
 import { usePathname } from 'next/navigation'; // <--- Importante para detectar navegação
 import { redirectToLogin } from '@/app/utils/client-session';
+import { profileAuthRedirect, shouldSyncProfile } from '@/app/utils/profile-session-gate';
 
 const dictionary: any = {
   'pt-BR': {
@@ -58,12 +59,23 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
     }
 
     // 2. SE tiver usuário logado, busca a verdade no banco e SOBRESCREVE o local
-    if(userId) {
+    // O perfil fica indisponivel enquanto MFA ou aceite legal estao pendentes.
+    // Essas paginas devem permanecer acessiveis para concluir os respectivos gates.
+    if(userId && shouldSyncProfile(userId, pathname)) {
         fetch('/api/perfil', { headers: { 'x-user-id': userId } })
-            .then(r => {
+            .then(async r => {
                 if (r.status === 401) {
-                    redirectToLogin('expired');
-                    throw new Error('Sessao expirada');
+                    const status = await fetch('/api/system/status', { cache: 'no-store' }).then((response) => response.ok ? response.json() : null).catch(() => null);
+                    if (!status || status.available === false) throw new Error('Servico indisponivel');
+                    const destination = profileAuthRedirect(status);
+                    if (destination === '/login?motivo=sessao-expirada') {
+                        redirectToLogin('expired');
+                        throw new Error('Sessao expirada');
+                    }
+                    if (destination) window.location.replace(destination);
+                    // Um 401 de perfil tambem pode ser um gate da rota.
+                    // Somente o status sem autenticacao prova sessao expirada.
+                    throw new Error('Perfil indisponivel para esta sessao.');
                 }
                 return r.json();
             })
@@ -93,7 +105,7 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
     }
   }, [pathname]); // <--- A MÁGICA: Recarrega sempre que navega
 
-  const toggleDarkMode = (isDark: boolean) => {
+  const toggleDarkMode = useCallback((isDark: boolean) => {
     setDarkMode(isDark);
     if (isDark) {
       document.documentElement.classList.add('dark');
@@ -102,19 +114,22 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
       document.documentElement.classList.remove('dark');
       localStorage.setItem('theme', 'light');
     }
-  };
+  }, []);
 
-  const changeLanguage = (lang: Language) => {
+  const changeLanguage = useCallback((lang: Language) => {
     setLanguage(lang);
     localStorage.setItem('lang', lang);
-  };
+  }, []);
 
-  const t = (section: string, key: string) => {
+  const t = useCallback((section: string, key: string) => {
     return dictionary[language]?.[section]?.[key] || key;
-  };
+  }, [language]);
+
+  const value = useMemo(() => ({ darkMode, toggleDarkMode, language, changeLanguage, t }),
+    [changeLanguage, darkMode, language, t, toggleDarkMode]);
 
   return (
-    <AppConfigContext.Provider value={{ darkMode, toggleDarkMode, language, changeLanguage, t }}>
+    <AppConfigContext.Provider value={value}>
       {children}
     </AppConfigContext.Provider>
   );

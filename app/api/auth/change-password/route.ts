@@ -1,15 +1,19 @@
+import { withApiGuard } from '@/app/utils/api-route';
 import { NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { getAuthenticatedUser, unauthorized } from '@/app/utils/api-middleware';
 import { prisma } from '@/app/utils/prisma';
 import { checkRateLimit } from '@/app/utils/rate-limit';
 import { validateJsonContentLength, validateSameOrigin } from '@/app/utils/request-guards';
+import { clearAuthCookie } from '@/app/utils/auth-session';
+import { createLog } from '@/app/services/logger';
+import { revokeTrustedDevices } from '@/app/services/mfaLoginService';
 
 function senhaForte(senha: string) {
   return senha.length >= 8 && /[A-Z]/.test(senha) && /[0-9]/.test(senha) && /[^A-Za-z0-9]/.test(senha);
 }
 
-export async function POST(request: Request) {
+export const POST = withApiGuard(async function POST(request: Request) {
   const originError = validateSameOrigin(request);
   if (originError) return originError;
 
@@ -22,7 +26,7 @@ export async function POST(request: Request) {
 
     const { currentPassword, newPassword, confirmPassword } = await request.json();
 
-    if (!currentPassword || !newPassword || !confirmPassword) {
+    if (typeof currentPassword !== 'string' || typeof newPassword !== 'string' || typeof confirmPassword !== 'string' || !currentPassword || !newPassword || !confirmPassword || Buffer.byteLength(newPassword, 'utf8') > 72) {
       return NextResponse.json({ error: 'Preencha todos os campos.' }, { status: 400 });
     }
 
@@ -56,28 +60,23 @@ export async function POST(request: Request) {
     }
 
     const hashedPassword = await bcrypt.hash(newPassword, 10);
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        senha: hashedPassword,
-        resetToken: null,
-        resetExpires: null,
-      },
-    });
-
-    try {
-      await prisma.systemLog.create({
-        data: {
-          level: 'INFO',
-          action: 'PASSWORD_CHANGED',
-          message: `Senha alterada pelo usuario: ${user.email}`,
-        },
+    await prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: user.id },
+        data: { senha: hashedPassword, resetToken: null, resetExpires: null, sessionVersion: { increment: 1 } },
       });
-    } catch {}
-
-    return NextResponse.json({ success: true, message: 'Senha alterada com sucesso.' });
+      await tx.authSession.updateMany({ where: { userId: user.id, revokedAt: null }, data: { revokedAt: new Date() } });
+      await tx.impersonationSession.updateMany({
+        where: { OR: [{ actorUserId: user.id }, { targetUserId: user.id }], revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+    });
+    await revokeTrustedDevices(user.id);
+    await clearAuthCookie();
+    await createLog({ level: 'INFO', action: 'PASSWORD_CHANGED', module: 'AUTH', userId: user.id, message: 'Senha alterada; todas as sessoes foram revogadas.' });
+    return NextResponse.json({ success: true, requiresLogin: true, message: 'Senha alterada. Entre novamente com a nova senha.' });
   } catch (error) {
     console.error(error);
     return NextResponse.json({ error: 'Erro interno ao alterar a senha.' }, { status: 500 });
   }
-}
+});

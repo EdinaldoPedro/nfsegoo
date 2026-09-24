@@ -1,37 +1,17 @@
+import { withApiGuard } from '@/app/utils/api-route';
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
-import { syncCnaesGlobalmente } from '@/app/services/syncService'; 
+import { prisma } from '@/app/utils/prisma';
 import { validateRequest } from '@/app/utils/api-security';
-import { encrypt } from '@/app/utils/crypto';
-import { hasEmpresaAccess, isAdminRole, resolveEmpresaContexto } from '@/app/utils/access-control';
-import { validarCertificadoA1 } from '@/app/utils/certificadoA1Validation';
-import { renovarUsoMensalSeNecessario } from '@/app/services/planService';
-import { listDpsSequences, normalizeDpsEnvironment, normalizeDpsSeries, setUserDpsSequence } from '@/app/services/dpsSequenceService';
-import { normalizarRegimeTributario } from '@/app/utils/regime-tributario';
+import { getAccessibleEmpresaIds, hasInternalCustomerAccess, resolveEmpresaContexto } from '@/app/utils/access-control';
+import { getEffectivePlanLimits } from '@/app/services/planService';
+import { listDpsSequences } from '@/app/services/dpsSequenceService';
+import { ProfileError, updateProfile } from '@/app/services/profileService';
+import { checkRateLimit } from '@/app/utils/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
-const prisma = new PrismaClient();
 
-async function buscarIbgePorCep(cep: string): Promise<string | null> {
-    try {
-        const cepLimpo = cep.replace(/\D/g, '');
-        if (cepLimpo.length !== 8) return null;
-        const res = await fetch(`https://viacep.com.br/ws/${cepLimpo}/json/`, { next: { revalidate: 3600 } });
-        const data = await res.json();
-        if (!data.erro && data.ibge) return data.ibge;
-        return null;
-    } catch (e) {
-        return null;
-    }
-}
-
-function codigoIbgeValido(codigo?: string | null) {
-    return String(codigo || '').replace(/\D/g, '').length >= 7;
-}
-
-export async function GET(request: Request) {
-  try {
+export const GET = withApiGuard(async function GET(request: Request) {
       const { targetId, errorResponse } = await validateRequest(request);
       if (errorResponse) return errorResponse;
 
@@ -40,145 +20,73 @@ export async function GET(request: Request) {
 
       if (!userId) return NextResponse.json({ error: 'Proibido' }, { status: 401 });
 
-      const user = await prisma.user.findUnique({
-        where: { id: userId },
-        include: { 
-            empresa: true,
-            empresasFaturadas: true,
-            empresasProprietarias: true,
-            empresasContabeis: {
-                where: { status: 'APROVADO', arquivadoEm: null } as any,
-                include: { empresa: true },
-            },
-        }
-      });
+      const user = await prisma.user.findUnique({ where: { id: userId }, select: {
+        id: true, role: true, empresaId: true, nome: true, email: true, cpf: true, telefone: true, cargo: true,
+        tutorialStep: true, empresasAdicionais: true, createdAt: true, plano: true, planoCiclo: true,
+        darkMode: true, idioma: true, notificacoesEmail: true,
+      } });
+      if (!user) return NextResponse.json({ error: 'Usuário não encontrado.' }, { status: 404 });
+      const isStaff = !['COMUM', 'CONTADOR'].includes(user.role);
+      // Um colaborador interno pode também ser cliente do SaaS. Nesse caso,
+      // somente as PJs das quais ele é titular ficam disponíveis no portal do
+      // cliente; o cargo administrativo não concede acesso a empresas alheias.
+      const staffCustomerAllowed = !isStaff || await hasInternalCustomerAccess(user.id);
+      const accessibleIds = isStaff
+        ? (!staffCustomerAllowed ? [] : (await prisma.empresa.findMany({ where: {
+            arquivadoEm: null,
+            OR: [{ proprietarioUserId: user.id }, ...(user.empresaId ? [{ id: user.empresaId }] : [])],
+          }, select: { id: true } })).map(({ id }) => id))
+        : await getAccessibleEmpresaIds(user) || [];
+      const companies = accessibleIds.length ? await prisma.empresa.findMany({ where: { id: { in: accessibleIds }, arquivadoEm: null },
+        select: { id: true, razaoSocial: true, documento: true }, orderBy: [{ razaoSocial: 'asc' }, { id: 'asc' }] }) : [];
+      const listaEmpresas = companies.map(emp => ({ id: emp.id, razaoSocial: emp.razaoSocial, cnpj: emp.documento, isPrimary: emp.id === user.empresaId }));
+      const limits = await getEffectivePlanLimits(user.id);
+      const planoDetalhado = {
+        nome: limits.planoBase?.nome || 'Sem plano vigente', slug: limits.planoBase?.slug || 'FREE',
+        status: limits.allowedBase && !limits.unlimited && limits.notasUsadas >= limits.limiteNotas ? 'LIMITE_ATINGIDO' : limits.status,
+        dataInicio: limits.planoBase?.dataInicio, dataFim: limits.planoBase?.dataFim,
+        usoEmissoes: limits.notasUsadas, limiteEmissoes: limits.limiteNotas, diasTeste: limits.planoBase?.diasTeste || 0,
+        usoClientes: limits.clientesUsados, limiteClientes: limits.limiteClientes, unlimited: limits.unlimited,
+      };
 
-      if (!user) return NextResponse.json({ error: 'User não encontrado' }, { status: 404 });
-
-      const listaEmpresas: any[] = [];
-      if (user.empresa) {
-          listaEmpresas.push({ id: user.empresa.id, razaoSocial: user.empresa.razaoSocial || 'Minha Empresa Primária', cnpj: user.empresa.documento, isPrimary: true });
-      }
-      if (user.empresasFaturadas && user.empresasFaturadas.length > 0) {
-          user.empresasFaturadas.forEach(emp => {
-              if (emp.id !== user.empresaId) { 
-                  listaEmpresas.push({ id: emp.id, razaoSocial: emp.razaoSocial || 'Empresa Adicional', cnpj: emp.documento, isPrimary: false });
-              }
-          });
-      }
-      if ((user as any).empresasProprietarias && (user as any).empresasProprietarias.length > 0) {
-          (user as any).empresasProprietarias.forEach((emp: any) => {
-              if (!listaEmpresas.some(e => e.id === emp.id)) {
-                  listaEmpresas.push({ id: emp.id, razaoSocial: emp.razaoSocial || 'Empresa Proprietaria', cnpj: emp.documento, isPrimary: emp.id === user.empresaId });
-              }
-          });
-      }
-      if ((user as any).empresasContabeis && (user as any).empresasContabeis.length > 0) {
-          (user as any).empresasContabeis.forEach((vinculo: any) => {
-              const emp = vinculo.empresa;
-              if (emp && !listaEmpresas.some(e => e.id === emp.id)) {
-                  listaEmpresas.push({ id: emp.id, razaoSocial: emp.razaoSocial || 'Empresa Contabil', cnpj: emp.documento, isPrimary: emp.id === user.empresaId });
-              }
-          });
-      }
-
-      const isStaff = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(user.role);
-      let planoDetalhado = null;
-
-      if (isStaff) {
-          planoDetalhado = {
-              nome: 'Acesso Administrativo', slug: 'ADMIN_ACCESS', status: 'ATIVO',
-              dataInicio: user.createdAt, dataFim: null, usoEmissoes: 0, limiteEmissoes: 0, diasTeste: 0,
-              usoClientes: 0, limiteClientes: 0
-          };
-      } else {
-            // === NOVO CÉREBRO NA API DE PERFIL ===
-            await renovarUsoMensalSeNecessario(user.id);
-
-            const historicosAtivos = await prisma.planHistory.findMany({
-                where: { userId: user.id, status: 'ATIVO' },
-                include: { plan: true },
-                orderBy: { createdAt: 'asc' }
-            });
-
-            let limiteEmissoes = 0;
-            let usoEmissoes = 0;
-            let limiteClientes = 0;
-            
-            historicosAtivos.forEach((h: any) => {
-                limiteEmissoes += h.plan.maxNotasMensal;
-                usoEmissoes += h.notasEmitidas;
-                limiteClientes += (h.plan.maxClientes || 0);
-            });
-
-            // Conta os clientes reais na carteira
-            const usoClientes = await prisma.vinculoCarteira.count({
-                where: {
-                    arquivadoEm: null,
-                    empresa: {
-                        OR: [
-                            { donoFaturamentoId: user.id },
-                            { proprietarioUserId: user.id } as any,
-                            { id: user.empresaId || '' }
-                        ]
-                    }
-                }
-            });
-
-            const basePlan = historicosAtivos.find((h: any) => h.plan.tipo === 'PLANO') || historicosAtivos[0];
-
-            let statusVisual = basePlan?.status || 'INATIVO';
-            if (basePlan && limiteEmissoes > 0 && usoEmissoes >= limiteEmissoes) statusVisual = 'LIMITE_ATINGIDO';
-            if (basePlan && basePlan.dataFim && new Date() > basePlan.dataFim) statusVisual = 'EXPIRADO';
-
-            planoDetalhado = basePlan ? {
-                nome: basePlan.plan?.name || 'Pacote Avulso', 
-                slug: basePlan.plan?.slug || 'CUSTOM', 
-                status: statusVisual,
-                dataInicio: basePlan.dataInicio, 
-                dataFim: basePlan.dataFim,
-                usoEmissoes: usoEmissoes, 
-                limiteEmissoes: limiteEmissoes, 
-                diasTeste: basePlan.plan?.diasTeste || 0,
-                usoClientes: usoClientes,
-                limiteClientes: limiteClientes
-            } : { nome: 'Sem Plano Ativo', slug: 'FREE', status: 'INATIVO', usoEmissoes: 0, limiteEmissoes: 0, usoClientes: 0, limiteClientes: 0 };
-      }
-      
-      let empresaAlvoId = null;
-
-      if (contextEmpresaId && contextEmpresaId !== 'null' && contextEmpresaId !== 'undefined') {
-          empresaAlvoId = await resolveEmpresaContexto(user, contextEmpresaId);
-          if (!empresaAlvoId) {
-              return NextResponse.json({ error: 'Voce nao tem acesso aprovado a esta empresa.' }, { status: 403 });
-          }
-      }
-
-      if (!empresaAlvoId) empresaAlvoId = user.empresaId;
-
+      const hasContext = !!contextEmpresaId && !['null', 'undefined'].includes(contextEmpresaId);
+      const accountOnly = new URL(request.url).searchParams.get('escopo') === 'CONTA' && !hasContext;
+      const requestedEmpresaId = hasContext ? contextEmpresaId : (user.empresaId || accessibleIds[0] || null);
+      const empresaAlvoId = accountOnly
+        ? null
+        : isStaff
+          ? (requestedEmpresaId && accessibleIds.includes(requestedEmpresaId) ? requestedEmpresaId : null)
+          : await resolveEmpresaContexto(user, contextEmpresaId);
+      if (hasContext && !empresaAlvoId) return NextResponse.json({ error: 'Você não tem acesso aprovado a esta empresa.' }, { status: 403 });
       let dadosEmpresa: any = {};
+      let temCertificado = false;
       if (empresaAlvoId) {
-          const emp = await prisma.empresa.findUnique({ where: { id: empresaAlvoId }, include: { atividades: true } });
-          if (emp) {
-              dadosEmpresa = { ...emp, sequenciasDps: await listDpsSequences(emp.id) };
-              if (emp.cep && (!emp.codigoIbge || emp.codigoIbge.length < 7)) {
-                  const ibgeNovo = await buscarIbgePorCep(emp.cep);
-                  if (ibgeNovo) {
-                      await prisma.empresa.update({ where: { id: emp.id }, data: { codigoIbge: ibgeNovo } });
-                      dadosEmpresa.codigoIbge = ibgeNovo;
-                  }
-              }
-          }
+        const emp = await prisma.empresa.findFirst({ where: { id: empresaAlvoId, arquivadoEm: null }, select: {
+          id: true, documento: true, ambiente: true, cadastroCompleto: true, serieDPS: true, ultimoDPS: true, email: true,
+          razaoSocial: true, nomeFantasia: true, cep: true, logradouro: true, numero: true, complemento: true, bairro: true,
+          cidade: true, uf: true, codigoIbge: true, aliquotaPadrao: true, issRetidoPadrao: true, tipoTributacaoPadrao: true,
+          regimeEspecialTributacao: true, inscricaoMunicipal: true, regimeTributario: true, certificadoVencimento: true,
+          updatedAt: true, atividades: { orderBy: [{ principal: 'desc' }, { codigo: 'asc' }], take: 101 },
+        } });
+        if (!emp) return NextResponse.json({ error: 'Empresa indisponível.' }, { status: 403 });
+        if (emp.atividades.length > 100) return NextResponse.json({ error: 'Cadastro legado com mais de 100 atividades. Solicite revisão ao atendimento; não será carregada uma lista parcial para edição.' }, { status: 422 });
+        const flags = await prisma.$queryRaw<Array<{ available: boolean }>>`
+          SELECT (COALESCE(octet_length("certificadoA1"), 0) > 0) AS available FROM "Empresa" WHERE "id" = ${emp.id} AND "arquivadoEm" IS NULL
+        `;
+        temCertificado = flags[0]?.available ?? false;
+        dadosEmpresa = { ...emp, sequenciasDps: await listDpsSequences(emp.id) };
       }
 
       let atividadesEnriquecidas = dadosEmpresa.atividades || [];
       if (atividadesEnriquecidas.length > 0) {
-          // CORREÇÃO CRÍTICA DO CNAE: Traz todos para fazer o match na memória ignorando pontos e traços
-          const globais = await prisma.globalCnae.findMany();
+          const codes = atividadesEnriquecidas.map((item: any) => String(item.codigo).replace(/[./-]/g, ''));
+          const variants = [...new Set<string>(codes.flatMap((code: string) => [code, code.replace(/^(\d{4})(\d)(\d{2})$/, '$1-$2/$3')]))];
+          const globais = await prisma.globalCnae.findMany({ where: { codigo: { in: variants } } });
           const agora = new Date();
           const regrasMunicipais = await prisma.tributacaoMunicipal.findMany({ 
               where: {
                 codigoIbge: dadosEmpresa.codigoIbge || '',
+                cnae: { in: variants },
                 ativo: true,
                 AND: [
                   { OR: [{ inicioVigencia: null }, { inicioVigencia: { lte: agora } }] },
@@ -221,13 +129,14 @@ export async function GET(request: Request) {
           });
       }
 
-      // @ts-ignore
-      const { certificadoA1, senhaCertificado, email: emailEmpresa, ...restEmpresa } = dadosEmpresa;
+      const { email: emailEmpresa, ...restEmpresa } = dadosEmpresa;
 
       return NextResponse.json({
         ...restEmpresa,
         emailComercial: emailEmpresa,
-        temCertificado: !!certificadoA1,
+        temCertificado,
+        empresaContextoId: empresaAlvoId,
+        empresaAtualizadaEm: dadosEmpresa.updatedAt?.toISOString() ?? null,
         vencimentoCertificado: dadosEmpresa.certificadoVencimento,
         cadastroCompleto: dadosEmpresa.cadastroCompleto || false,
         atividades: atividadesEnriquecidas,
@@ -241,6 +150,10 @@ export async function GET(request: Request) {
         cargo: user.cargo,
         tutorialStep: user.tutorialStep, 
         empresasAdicionais: user.empresasAdicionais,
+        limiteEmpresasTotal: limits.limiteEmpresas,
+        empresasUsadas: limits.empresasUsadas,
+        podeCadastrarEmpresa: limits.allowedBase,
+        planoIlimitado: limits.unlimited,
         
         listaEmpresas,
         empresaPrimariaId: user.empresaId,
@@ -249,194 +162,21 @@ export async function GET(request: Request) {
         planoDetalhado,
         planoSlug: user.plano, 
         planoCiclo: user.planoCiclo,
-        isContextMode: empresaAlvoId !== user.empresaId
+        isContextMode: !!empresaAlvoId && empresaAlvoId !== user.empresaId
       });
-  } catch (error: any) {
-      console.error("ERRO CRÍTICO NA API DE PERFIL:", error);
-      return NextResponse.json({ error: 'Erro interno ao carregar perfil', detalhes: error.message }, { status: 500 });
-  }
-}
+});
 
-export async function PUT(request: Request) {
-  const { user: authenticatedUser, targetId, errorResponse } = await validateRequest(request);
+export const PUT = withApiGuard(async function PUT(request: Request) {
+  const { user, targetId, errorResponse } = await validateRequest(request);
   if (errorResponse) return errorResponse;
-
-  const userId = targetId;
-  const contextEmpresaId = request.headers.get('x-empresa-id');
-  const body = await request.json();
-  let primeiroCertificadoCadastrado = false;
-  let empresaSalvaId: string | null = null;
-
-  if (!userId) return NextResponse.json({ error: 'Proibido' }, { status: 401 });
-
+  if (!user || user.id !== targetId) return NextResponse.json({ error: 'Alteração de perfil exige a própria conta.' }, { status: 403 });
+  if (!await checkRateLimit(`profile_update_${user.id}`, 20, 5 * 60 * 1000)) return NextResponse.json({ error: 'Muitas alterações. Aguarde cinco minutos.' }, { status: 429 });
   try {
-    const user = await prisma.user.findUnique({ 
-        where: { id: userId },
-        include: { empresa: true }
-    });
-
-    if (!user) {
-        return NextResponse.json({ error: 'Usuario nao encontrado.' }, { status: 404 });
+    return NextResponse.json(await updateProfile(user.id, request.headers.get('x-empresa-id'), await request.json()));
+  } catch (error) {
+    if (error instanceof ProfileError || (error instanceof Error && 'status' in error && Number(error.status) < 500)) {
+      return NextResponse.json({ error: error.message }, { status: Number((error as ProfileError).status) });
     }
-
-    if (authenticatedUser?.id !== userId && !isAdminRole(authenticatedUser?.role)) {
-        return NextResponse.json({ error: 'Acesso proibido.' }, { status: 403 });
-    }
-
-    const userDataToUpdate: any = {
-        nome: body.nome,
-        telefone: body.telefone,
-        cargo: body.perfil?.cargo || body.cargo
-    };
-
-    if (body.configuracoes) {
-        userDataToUpdate.darkMode = body.configuracoes.darkMode;
-        userDataToUpdate.idioma = body.configuracoes.idioma;
-        userDataToUpdate.notificacoesEmail = body.configuracoes.notificacoesEmail;
-    }
-
-    await prisma.user.update({ where: { id: userId }, data: userDataToUpdate });
-
-    if (body.documento) {
-      const cnpjLimpo = body.documento.replace(/\D/g, '');
-      const regimeTributario = normalizarRegimeTributario(body.regimeTributario);
-
-      if (cnpjLimpo.length !== 14) {
-          return NextResponse.json({ error: 'CNPJ invalido.' }, { status: 400 });
-      }
-      if (!regimeTributario) {
-          return NextResponse.json({
-              error: 'Selecione um Regime Tributario atendido: MEI, Simples Nacional ou Lucro Presumido.'
-          }, { status: 400 });
-      }
-      
-      if (body.cep && (!body.codigoIbge || body.codigoIbge.length < 7)) {
-          const ibgeResgatado = await buscarIbgePorCep(body.cep);
-          if (ibgeResgatado) body.codigoIbge = ibgeResgatado;
-      }
-
-      const dadosEmpresa: any = {
-          razaoSocial: body.razaoSocial, nomeFantasia: body.nomeFantasia, inscricaoMunicipal: body.inscricaoMunicipal,
-          regimeTributario, cep: body.cep, logradouro: body.logradouro,
-          numero: body.numero, bairro: body.bairro, cidade: body.cidade, uf: body.uf,
-          codigoIbge: body.codigoIbge, email: body.emailComercial || body.email,
-          cadastroCompleto: true, serieDPS: body.serieDPS,
-          ultimoDPS: body.ambiente === 'PRODUCAO' && body.ultimoDPS !== undefined
-            ? Math.max(0, parseInt(String(body.ultimoDPS)) || 0)
-            : undefined,
-          ambiente: body.ambiente
-      };
-
-      if (body.deletarCertificado) {
-          dadosEmpresa.certificadoA1 = null; dadosEmpresa.senhaCertificado = null; dadosEmpresa.certificadoVencimento = null;
-      } else if (body.certificadoArquivo && body.certificadoSenha) {
-          try {
-              const certificadoValidado = validarCertificadoA1(body.certificadoArquivo, body.certificadoSenha, cnpjLimpo);
-              
-              dadosEmpresa.certificadoA1 = encrypt(body.certificadoArquivo);
-              dadosEmpresa.senhaCertificado = encrypt(body.certificadoSenha);
-              dadosEmpresa.certificadoVencimento = certificadoValidado.vencimento;
-          } catch (e: any) {
-              if (e?.message) return NextResponse.json({ error: e.message }, { status: 400 });
-              return NextResponse.json({ error: 'Senha incorreta ou arquivo inválido.' }, { status: 400 });
-          }
-      }
-
-      const empresaExistente = await prisma.empresa.findUnique({
-          where: { documento: cnpjLimpo },
-          select: { id: true }
-      });
-
-      let empresaAlvoId: string | null = null;
-
-      if (contextEmpresaId && contextEmpresaId !== 'null' && contextEmpresaId !== 'undefined') {
-          const temAcessoAoContexto = await hasEmpresaAccess(user, contextEmpresaId);
-          if (!temAcessoAoContexto) {
-              return NextResponse.json({ error: 'Voce nao tem acesso a esta empresa.' }, { status: 403 });
-          }
-
-          if (empresaExistente && empresaExistente.id !== contextEmpresaId) {
-              return NextResponse.json({ error: 'CNPJ ja cadastrado para outra empresa.' }, { status: 409 });
-          }
-
-          empresaAlvoId = contextEmpresaId;
-      } else if (user.empresaId) {
-          if (empresaExistente && empresaExistente.id !== user.empresaId) {
-              return NextResponse.json({ error: 'CNPJ ja cadastrado para outra empresa.' }, { status: 409 });
-          }
-
-          empresaAlvoId = user.empresaId;
-      } else if (empresaExistente) {
-          const temAcessoEmpresaExistente = await hasEmpresaAccess(user, empresaExistente.id);
-          if (!temAcessoEmpresaExistente) {
-              return NextResponse.json({ error: 'CNPJ ja cadastrado para outra empresa.' }, { status: 409 });
-          }
-
-          empresaAlvoId = empresaExistente.id;
-      }
-
-      if (!codigoIbgeValido(dadosEmpresa.codigoIbge) && empresaAlvoId) {
-          const empresaAtual = await prisma.empresa.findUnique({
-              where: { id: empresaAlvoId },
-              select: { codigoIbge: true }
-          });
-          if (codigoIbgeValido(empresaAtual?.codigoIbge)) {
-              dadosEmpresa.codigoIbge = empresaAtual?.codigoIbge;
-          }
-      }
-
-      const certificadoAnterior = empresaAlvoId
-        ? await prisma.empresa.findUnique({ where: { id: empresaAlvoId }, select: { certificadoA1: true } })
-        : null;
-      primeiroCertificadoCadastrado = Boolean(body.certificadoArquivo && body.certificadoSenha && !certificadoAnterior?.certificadoA1);
-
-      const empresaSalva = empresaAlvoId
-          ? await prisma.empresa.update({
-              where: { id: empresaAlvoId },
-              data: { documento: cnpjLimpo, ...dadosEmpresa }
-          })
-          : await prisma.empresa.create({
-              data: { documento: cnpjLimpo, ...dadosEmpresa }
-          });
-      empresaSalvaId = empresaSalva.id;
-
-      if (!body.deletarCertificado && body.serieDPS) {
-          const ambienteDps = normalizeDpsEnvironment(body.ambiente);
-          const serieDps = normalizeDpsSeries(body.serieDPS);
-          const ultimoInformado = Math.max(0, parseInt(String(body.ultimoDPS || 0)) || 0);
-          await setUserDpsSequence({
-              empresaId: empresaSalva.id,
-              ambiente: ambienteDps,
-              serie: serieDps,
-              ultimoConfirmado: ultimoInformado,
-              userId,
-          });
-      }
-
-      if (user?.empresaId !== empresaSalva.id && !contextEmpresaId) {
-          await prisma.user.update({ where: { id: userId }, data: { empresaId: empresaSalva.id } });
-      }
-
-      if (body.cnaes && Array.isArray(body.cnaes)) {
-          await prisma.cnae.deleteMany({ where: { empresaId: empresaSalva.id } });
-          if (body.cnaes.length > 0) {
-              await prisma.cnae.createMany({
-                  data: body.cnaes.map((c: any) => ({
-                      empresaId: empresaSalva.id, 
-                      // CORREÇÃO CRÍTICA: Mantém a formatação do CNAE igual ao Painel Admin
-                      codigo: String(c.codigo).trim(), 
-                      descricao: c.descricao, 
-                      principal: c.principal, 
-                      codigoNbs: c.codigoNbs, 
-                      temRetencaoInss: c.temRetencaoInss || false
-                  }))
-              });
-              if (empresaSalva.codigoIbge) await syncCnaesGlobalmente(body.cnaes, empresaSalva.codigoIbge);
-          }
-      }
-    }
-    return NextResponse.json({ success: true, primeiroCertificadoCadastrado, empresaId: empresaSalvaId });
-  } catch (error: any) {
-    return NextResponse.json({ error: 'Erro interno.' }, { status: 500 });
+    throw error;
   }
-}
+}, { maxBodyBytes: 2 * 1024 * 1024 });

@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useCallback, useState, useEffect, useRef, Suspense } from "react";
 import { CheckCircle, ArrowRight, ArrowLeft, Calculator, FileCheck, Briefcase, Loader2, Home, UserPlus, AlertTriangle, Send, FileSearch, FileCode2, BadgeCheck, ServerCog, FileClock, Trash2, ChevronDown } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { emissionIntentSlot, readEmissionIntent, getEmissionIntent, clearEmissionIntent } from "@/app/utils/emission-intent";
 import { useDialog } from "@/app/contexts/DialogContext";
 import Link from "next/link";
 import { getPfAddressRequiredMessage, hasCompleteNationalAddress } from "@/app/utils/customer-address";
@@ -60,15 +61,50 @@ interface NotaRascunho {
   };
 }
 
+function getIntentContext() {
+  const userId = localStorage.getItem('userId') || '';
+  const companyId = localStorage.getItem('empresaContextId') || '';
+  return { slot: emissionIntentSlot(userId, companyId), headers: { 'x-empresa-id': companyId } };
+}
+
+function getAuthHeaders() {
+  const userId = localStorage.getItem('userId');
+  const contextId = localStorage.getItem('empresaContextId');
+  return { 'Content-Type': 'application/json', 'x-user-id': userId || '', 'x-empresa-id': contextId || '' };
+}
+
 function EmitirNotaContent() {
   const router = useRouter();
   const searchParams = useSearchParams(); 
   const retryId = searchParams.get('retry');
+  const copyId = searchParams.get('copiar');
+  const sourceSaleId = retryId || copyId;
   const dialog = useDialog(); 
 
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
-  const [loadingRetry, setLoadingRetry] = useState(false);
+  const submittingRef = useRef(false);
+  const [hasPendingIntent, setHasPendingIntent] = useState(false);
+  const [pendingJobStatus, setPendingJobStatus] = useState<string | null>(null);
+  useEffect(() => {
+    try { setHasPendingIntent(!!readEmissionIntent(sessionStorage, getIntentContext().slot)); }
+    catch { setHasPendingIntent(true); }
+    const { slot, headers } = getIntentContext();
+    const abort = new AbortController();
+    void fetch('/api/notas/solicitacao', { headers, signal: abort.signal }).then(async (response) => {
+      if (!response.ok) return;
+      const data = await response.json();
+      if (data.job) {
+        const previous = readEmissionIntent(sessionStorage, slot);
+        if (previous?.key !== data.job.idempotencyKey) sessionStorage.setItem(slot, JSON.stringify({ key: data.job.idempotencyKey, fingerprint: '0'.repeat(64) }));
+        setHasPendingIntent(true);
+        setPendingJobStatus(data.job.status);
+      }
+    }).catch(() => {});
+    return () => abort.abort();
+  }, []);
+  const [loadingRetry, setLoadingRetry] = useState(true);
+  const [sourceLoadError, setSourceLoadError] = useState('');
   const [rascunhos, setRascunhos] = useState<NotaRascunho[]>([]);
   const [loadingRascunhos, setLoadingRascunhos] = useState(false);
   const [activeRascunhoId, setActiveRascunhoId] = useState<string | null>(null);
@@ -79,6 +115,10 @@ function EmitirNotaContent() {
   const [progressDetail, setProgressDetail] = useState("Conectando com o Portal Nacional.");
   
   const [clientes, setClientes] = useState<ClienteDB[]>([]);
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [customerTotal, setCustomerTotal] = useState(0);
+  const [searchingCustomers, setSearchingCustomers] = useState(false);
+  const [customerSearchError, setCustomerSearchError] = useState('');
   const [meusCnaes, setMeusCnaes] = useState<CnaeDB[]>([]);
   
   const [perfilEmpresa, setPerfilEmpresa] = useState<any>(null); 
@@ -100,6 +140,8 @@ function EmitirNotaContent() {
     numeroDPS: "",
     serieDPS: "",
   });
+  const nfValueRef = useRef(nfData.valor);
+  nfValueRef.current = nfData.valor;
 
   // Estado das retenções agora guarda os números formatados como string (sem a trava do checkbox)
   const [retencoes, setRetencoes] = useState({
@@ -110,17 +152,7 @@ function EmitirNotaContent() {
       ir: { aliquota: '0.00', valor: '0.00' }
   });
 
-  const getAuthHeaders = () => {
-      const userId = localStorage.getItem('userId');
-      const contextId = localStorage.getItem('empresaContextId');
-      return {
-          'Content-Type': 'application/json',
-          'x-user-id': userId || '',
-          'x-empresa-id': contextId || ''
-      };
-  };
-
-  const carregarRascunhos = async () => {
+  const carregarRascunhos = useCallback(async () => {
       const userId = localStorage.getItem('userId');
       if (!userId) return;
 
@@ -134,7 +166,7 @@ function EmitirNotaContent() {
       } finally {
           setLoadingRascunhos(false);
       }
-  };
+  }, []);
 
   const montarPayloadRascunho = () => ({
       nfData,
@@ -241,7 +273,7 @@ function EmitirNotaContent() {
           return;
       }
 
-      let msgTecnica = "";
+      let msgTecnica: string;
       if (Array.isArray(respostaErro.details)) {
           msgTecnica = respostaErro.details.map((d: any) => d.mensagem || JSON.stringify(d)).join('. ');
       } else if (typeof respostaErro.details === 'string') {
@@ -343,7 +375,7 @@ function EmitirNotaContent() {
   useEffect(() => {
       const cliente = clientes.find(c => c.id === nfData.clienteId);
       const cnae = meusCnaes.find(c => c.codigo === nfData.codigoCnae);
-      const valorFloat = parseFloat(nfData.valor) || 0;
+      const valorFloat = parseFloat(nfValueRef.current) || 0;
 
       if (!cliente || !cnae) {
           setRetencoes({
@@ -400,7 +432,7 @@ function EmitirNotaContent() {
 
       setRetencoes(next);
       
-  }, [nfData.codigoCnae, nfData.clienteId, perfilEmpresa?.regimeTributario]);
+  }, [clientes, meusCnaes, nfData.codigoCnae, nfData.clienteId, perfilEmpresa?.regimeTributario]);
 
   // 2. Dispara quando o Valor Bruto (R$) muda ou a trava dos 215 altera
   useEffect(() => {
@@ -446,125 +478,83 @@ function EmitirNotaContent() {
       if (tomadorPermiteRetencao && isLucro && cnae.retemIr && (!irAbove || cnae.modoRetencoes === 'AUTOMATICO')) {
           setNfData(prev => ({ ...prev, irRetido: irAbove && cnae.modoRetencoes === 'AUTOMATICO' }));
       }
-  }, [nfData.valor, wasAboveThreshold]);
+  }, [clientes, meusCnaes, nfData.clienteId, nfData.codigoCnae, nfData.valor, perfilEmpresa?.regimeTributario, wasAboveThreshold]);
 
-  // === CARREGAMENTO INICIAL ===
+  // Resolve the source, profile and customer list together. No timing assumption
+  // or stale request can replace the fields of a different sale.
   useEffect(() => {
-    const userId = localStorage.getItem('userId');
-    const contextId = localStorage.getItem('empresaContextId');
-    if(!userId) { router.push('/login'); return; }
-    carregarRascunhos();
-
-    fetch('/api/perfil', { headers: { 'x-user-id': userId, 'x-empresa-id': contextId || '' } })
-      .then(res => res.json())
-      .then(data => {
-         if(data && !data.error) {
-             setPerfilEmpresa(data);
-             if (data.atividades && Array.isArray(data.atividades)) {
-                 setMeusCnaes(data.atividades);
-                 setNfData(prev => {
-                     const updates: any = {};
-                     let cnaePrincipalObj = null;
-
-                     if (!retryId && !prev.codigoCnae && data.atividades.length > 0) {
-                         cnaePrincipalObj = data.atividades.find((c: CnaeDB) => c.principal) || data.atividades[0];
-                         updates.codigoCnae = cnaePrincipalObj.codigo;
-                     } else {
-                         cnaePrincipalObj = data.atividades.find((c: CnaeDB) => c.codigo === prev.codigoCnae);
-                     }
-
-                     let aliquotaSugerida = '0.00';
-                     if (data.regimeTributario !== 'MEI') {
-                         if (cnaePrincipalObj && cnaePrincipalObj.aliquotaIss !== null && cnaePrincipalObj.aliquotaIss !== undefined) {
-                             aliquotaSugerida = Number(cnaePrincipalObj.aliquotaIss).toFixed(2);
-                         } else if (data.aliquotaPadrao !== null && data.aliquotaPadrao !== undefined) {
-                             aliquotaSugerida = Number(data.aliquotaPadrao).toFixed(2);
-                         } else {
-                             aliquotaSugerida = '3.00'; 
-                         }
-                     }
-
-                     updates.aliquota = aliquotaSugerida;
-                     updates.issRetido = data.issRetidoPadrao || false;
-                     return { ...prev, ...updates };
-                 });
-             }
-         }
-      }).catch(console.error);
-
-    // === CORREÇÃO DA LISTA DE CLIENTES (PAGINAÇÃO) ===
-    fetch('/api/clientes', { headers: { 'x-user-id': userId, 'x-empresa-id': contextId || '' } })
-    .then(res => res.json())
-      .then(data => { 
-        if (data && data.data && Array.isArray(data.data)) {
-            setClientes(data.data);
-        } else if (Array.isArray(data)) {
-            setClientes(data);
-        } else {
-            setClientes([]);
-        }
-      }).catch(() => setClientes([]));
-
-    if (retryId) {
-        setLoadingRetry(true);
-        fetch(`/api/vendas/${retryId}`, { 
-            headers: {
-                'x-user-id': userId,
-                'x-empresa-id': contextId || ''
-            }
-        })
-        .then(async res => {
-            if (res.ok) {
-                const venda = await res.json();
-                
-                // Atraso de 800ms garante que a lista de clientes e perfil já carregaram antes de montar a tela
-                setTimeout(() => {
-                    const nota = venda.notas?.[0] || {};
-                    // Tenta encontrar o CNAE em todos os lugares possíveis onde o banco pode ter guardado
-                    const cnaeParaUsar = venda.cnaeRecuperado || nota.cnae || nota.codigoCnae || venda.codigoCnae || "";
-                    
-                    let dataFormatada = undefined;
-                    if (nota.dataCompetencia || venda.dataCompetencia) {
-                        const d = new Date(nota.dataCompetencia || venda.dataCompetencia);
-                        if (!isNaN(d.getTime())) {
-                            dataFormatada = d.toISOString().split('T')[0];
-                        }
-                    }
-
-                    setNfData(prev => ({
-                        ...prev,
-                        clienteId: venda.clienteId, 
-                        clienteNome: venda.cliente?.razaoSocial || venda.cliente?.nome || "Cliente", 
-                        valor: String(venda.valor),
-                        valorMoedaEstrangeira: venda.valorMoedaEstrangeira !== null && venda.valorMoedaEstrangeira !== undefined ? String(venda.valorMoedaEstrangeira) : "",
-                        servicoDescricao: venda.descricao || nota.servicoDescricao || "",
-                        
-                        // Restauração blindada do CNAE e Impostos
-                        codigoCnae: cnaeParaUsar || "",
-                        aliquota: nota.aliquota || venda.aliquota || prev.aliquota,
-                        issRetido: nota.issRetido !== undefined ? nota.issRetido : (venda.issRetido !== undefined ? venda.issRetido : prev.issRetido),
-                        inssRetido: nota.inssRetido !== undefined ? nota.inssRetido : prev.inssRetido,
-                        dataCompetencia: dataFormatada || prev.dataCompetencia,
-                        numeroDPS: venda.numeroDPS ? String(venda.numeroDPS) : prev.numeroDPS,
-                        serieDPS: venda.serieDPS ? String(venda.serieDPS) : prev.serieDPS,
-                    }));
-                    
-                    setStep(2); // Abre a revisão somente depois de recuperar todos os dados
-                    setLoadingRetry(false); // Remove a tela de carregamento
-                }, 800); 
-                
-            } else {
-                const erro = await res.json();
-                dialog.showAlert({ type: 'danger', description: erro.error || "Erro ao recuperar dados da venda." });
-                setLoadingRetry(false);
-            }
-        })
-        .catch(() => {
-            dialog.showAlert({ type: 'danger', description: "Erro de conexão ao recuperar dados." });
-            setLoadingRetry(false);
-        });
+    const abort = new AbortController();
+    const contextId = localStorage.getItem('empresaContextId') || '';
+    setLoadingRetry(true);
+    setSourceLoadError('');
+    if (retryId && copyId) {
+      setSourceLoadError('Escolha correção ou cópia, não ambas.');
+      setLoadingRetry(false);
+      return () => abort.abort();
     }
-  }, [router, retryId]);
+    void carregarRascunhos();
+    const read = async (url: string) => {
+      const res = await fetch(url, { headers: { 'x-empresa-id': contextId }, cache: 'no-store', signal: abort.signal });
+      const data = await res.json();
+      if (res.status === 401) router.push('/login');
+      if (!res.ok) throw new Error(data.error || 'Não foi possível recuperar os dados.');
+      return data;
+    };
+    void Promise.all([read('/api/perfil'), read('/api/clientes?limit=50'),
+      sourceSaleId ? read('/api/vendas/' + encodeURIComponent(sourceSaleId)) : Promise.resolve(null)])
+      .then(([profile, result, sale]) => {
+        if (abort.signal.aborted) return;
+        if (copyId && sale?.ambienteOrigem !== 'HOMOLOGACAO') throw new Error('A cópia é permitida somente a partir de uma emissão de homologação concluída.');
+        const activities: CnaeDB[] = Array.isArray(profile.atividades) ? profile.atividades : [];
+        const customers: ClienteDB[] = Array.isArray(result.data) ? result.data : [];
+        if (sale?.cliente && !customers.some(c => c.id === sale.cliente.id)) customers.unshift(sale.cliente);
+        setPerfilEmpresa(profile);
+        setMeusCnaes(activities);
+        setClientes(customers);
+        setCustomerTotal(result.meta?.total || customers.length);
+        const sourceActivity = sale?.cnaeRecuperado || sale?.notas?.[0]?.cnae || '';
+        const activity = sale ? activities.find(c => c.codigo === sourceActivity) : activities.find(c => c.principal) || activities[0];
+        setNfData(prev => ({ ...prev,
+          codigoCnae: sale ? sourceActivity : prev.codigoCnae || activity?.codigo || '',
+          aliquota: profile.regimeTributario === 'MEI' ? '0.00' : String(sale?.aliquota ?? activity?.aliquotaIss ?? profile.aliquotaPadrao ?? ''),
+          issRetido: sale?.issRetido ?? profile.issRetidoPadrao ?? false,
+          ...(sale ? {
+            clienteId: sale.clienteId, clienteNome: sale.cliente?.nome || 'Cliente',
+            valor: String(sale.valor), servicoDescricao: sale.descricao || '',
+            valorMoedaEstrangeira: String(sale.valorMoedaEstrangeira ?? ''),
+            // The user reviews competence and current tax rules for the new request.
+            dataCompetencia: sale.dataCompetencia ? String(sale.dataCompetencia).slice(0, 10) : prev.dataCompetencia,
+            numeroDPS: '', serieDPS: '',
+          } : {}),
+        }));
+        setStep(1);
+      }).catch((error) => { if (!abort.signal.aborted) setSourceLoadError(error.message || 'Falha ao recuperar os dados.'); })
+      .finally(() => { if (!abort.signal.aborted) setLoadingRetry(false); });
+    return () => abort.abort();
+  }, [carregarRascunhos, router, retryId, copyId, sourceSaleId]);
+
+  useEffect(() => {
+    if (loadingRetry || sourceLoadError) return;
+    const abort = new AbortController();
+    const timer = setTimeout(() => {
+      setSearchingCustomers(true);
+      setCustomerSearchError('');
+      void fetch('/api/clientes?' + new URLSearchParams({ limit: '50', search: customerSearch.trim() }), {
+        headers: { 'x-empresa-id': localStorage.getItem('empresaContextId') || '' }, signal: abort.signal,
+      }).then(async res => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Erro ao buscar tomadores.');
+        if (abort.signal.aborted) return;
+        setClientes(previous => {
+          const selected = previous.find(c => c.id === nfData.clienteId);
+          return selected && !data.data.some((c: ClienteDB) => c.id === selected.id) ? [selected, ...data.data] : data.data;
+        });
+        setCustomerTotal(data.meta.total);
+      }).catch(error => { if (!abort.signal.aborted) setCustomerSearchError(error.message); })
+        .finally(() => { if (!abort.signal.aborted) setSearchingCustomers(false); });
+    }, 300);
+    return () => { clearTimeout(timer); abort.abort(); };
+  }, [customerSearch, nfData.clienteId, loadingRetry, sourceLoadError]);
 
   const handleNext = async () => {
     if (step === 1) {
@@ -591,57 +581,23 @@ function EmitirNotaContent() {
 
   const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-  const aguardarConclusaoDaNota = async (vendaId: string, headers: HeadersInit) => {
-      const tentativas = 60;
-
-      for (let tentativa = 1; tentativa <= tentativas; tentativa++) {
-          setProgressPercent(Math.min(95, 58 + tentativa));
-
-          if (tentativa < 4) {
-              setProgressStatus("Nota autorizada. Sincronizando retorno oficial...");
-              setProgressDetail("Estamos buscando o XML de distribuição e preparando os arquivos fiscais.");
-          } else if (tentativa < 12) {
-              setProgressStatus("Baixando XML e PDF oficiais...");
-              setProgressDetail("Aguarde só mais um pouco, o sistema está finalizando os documentos da nota.");
-          } else {
-              setProgressStatus("Conferindo disponibilidade da nota...");
-              setProgressDetail("A nota já foi enviada ao processamento final. Mantemos esta tela até tudo ficar pronto.");
-          }
-
-          const vendaRes = await fetch(`/api/vendas/${vendaId}`, { headers });
-          const venda = await vendaRes.json();
-
-          if (!vendaRes.ok) {
-              throw new Error(venda.error || 'Não foi possível acompanhar a emissão.');
-          }
-
-          const nota = venda.notas?.[0];
-          if (venda.status === 'ERRO_EMISSAO') {
-              throw new Error(venda.motivoErro || 'A emissão falhou durante o processamento final.');
-          }
-
-          if (venda.status === 'CONCLUIDA' && nota?.status === 'AUTORIZADA') {
-              setProgressPercent(100);
-              setProgressStatus("Nota disponível e autorizada.");
-              setProgressDetail("Tudo pronto. Os documentos fiscais já foram sincronizados.");
-              return venda;
-          }
-
-          await sleep(2000);
-      }
-
-      throw new Error('A nota foi autorizada, mas os arquivos ainda não ficaram disponíveis. Verifique novamente em instantes.');
-  };
-
   const aguardarJobEmissao = async (jobId: string, headers: HeadersInit) => {
-      const tentativas = 120;
+      const tentativas = 30;
+      let lastJob: any;
 
       for (let tentativa = 1; tentativa <= tentativas; tentativa++) {
           const jobRes = await fetch(`/api/notas/jobs/${jobId}`, { headers });
           const job = await jobRes.json();
+          lastJob = job;
 
           if (!jobRes.ok) {
               throw new Error(job.error || 'Nao foi possivel acompanhar a fila de emissao.');
+          }
+
+          if (job.processorOffline) {
+              setProgressStatus('Processamento temporariamente atrasado');
+              setProgressDetail('Sua solicitação está salva. Não envie outra nota; o processador precisa ser verificado.');
+              return job;
           }
 
           if (job.status === 'PENDENTE') {
@@ -661,6 +617,8 @@ function EmitirNotaContent() {
               setProgressStatus(job.isHomologation ? "Validacao concluida." : "Autorizacao recebida.");
               setProgressDetail(job.statusMessage || "A nota foi autorizada e agora sera sincronizada.");
               return job;
+          } else if (job.status === 'RECONCILIACAO_MANUAL') {
+              return job;
           } else if (job.status === 'ERRO_FINAL') {
               const erro: any = new Error(job.userAction || job.error || job.statusMessage || 'A emissao falhou.');
               erro.respostaEmissao = job;
@@ -670,25 +628,112 @@ function EmitirNotaContent() {
           await sleep(2000);
       }
 
-      throw new Error('A emissao entrou na fila, mas ainda nao concluiu. Verifique suas notas novamente em instantes.');
+      return lastJob;
+  };
+
+  const followIntent = async (jobId: string, slot: string, key: string, headers: HeadersInit, stayOnPage = false) => {
+    const acknowledge = async () => {
+      const response = await fetch('/api/notas/solicitacao?key=' + encodeURIComponent(key), { method: 'PUT', headers });
+      if (!response.ok) throw new Error('Resultado fiscal preservado. Não foi possível confirmar sua leitura; consulte novamente.');
+      clearEmissionIntent(sessionStorage, slot, key);
+      setHasPendingIntent(false);
+      setPendingJobStatus(null);
+    };
+    try {
+      const job = await aguardarJobEmissao(jobId, headers);
+      if (job?.status !== 'AUTORIZADA') {
+        await dialog.showAlert({ type: 'warning', title: 'Solicitação preservada', description: job?.processorOffline
+          ? 'O processador de emissões está indisponível. Sua solicitação permanece salva; não envie outra nota. Se o atraso continuar, acione o suporte.'
+          : job?.statusMessage || 'A emissão continua na fila. Você pode sair desta tela; não é necessário reenviar.' });
+        return;
+      }
+      await acknowledge();
+      await dialog.showAlert({ type: 'success', title: job.isHomologation ? 'Homologação concluída' : 'Nota autorizada',
+        description: stayOnPage ? 'Resultado anterior conferido. Você já pode emitir uma nova nota com os dados deste formulário.'
+          : job.isHomologation ? 'DPS aceita no ambiente de testes, sem valor fiscal de produção. A validação deste cenário não certifica todas as regras fiscais.'
+          : 'XML autorizado salvo. O DANFSe é preparado separadamente e aparecerá no histórico assim que estiver disponível.' });
+      if (!stayOnPage) router.push('/cliente/dashboard');
+    } catch (error: any) {
+      if (error?.respostaEmissao?.status === 'ERRO_FINAL') {
+        await acknowledge();
+        await tratarErroEmissao(error.respostaEmissao);
+        return;
+      }
+      throw error;
+    }
+  };
+
+  const resumeIntent = async () => {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setLoading(true);
+    try {
+      const { slot, headers } = getIntentContext();
+      const intent = readEmissionIntent(sessionStorage, slot);
+      if (!intent) { setHasPendingIntent(false); return; }
+      const url = '/api/notas/solicitacao?key=' + encodeURIComponent(intent.key);
+      const response = await fetch(url, { headers });
+      const data = await response.json();
+      if (response.ok && data.job) {
+        await followIntent(data.job.id, slot, intent.key, headers, true);
+      } else if (response.status === 404) {
+        const discard = await dialog.showConfirm({ type: 'warning', title: 'Solicitação não localizada',
+          description: 'Você pode tentar novamente mantendo os mesmos dados, ou descartar esta solicitação ainda não registrada. O descarte não cancela notas já enviadas.',
+          confirmText: 'Descartar solicitação não registrada', cancelText: 'Manter para tentar novamente' });
+        if (!discard) return;
+        const discarded = await fetch(url, { method: 'DELETE', headers });
+        const result = await discarded.json();
+        if (!discarded.ok) throw new Error(result.error || 'Não foi possível verificar o descarte.');
+        if (result.discarded) {
+          clearEmissionIntent(sessionStorage, slot, intent.key);
+          setHasPendingIntent(false);
+        } else if (result.job) await followIntent(result.job.id, slot, intent.key, headers, true);
+      } else throw new Error(data.error || 'Não foi possível verificar a solicitação.');
+    } catch (error: any) {
+      await dialog.showAlert({ type: 'warning', title: 'Solicitação preservada', description: error.message || 'Verifique sua conexão antes de continuar.' });
+    } finally { submittingRef.current = false; setLoading(false); }
   };
 
   const handleEmitir = async () => {
+    if (submittingRef.current) return;
+    const contextId = localStorage.getItem('empresaContextId');
+    if (!perfilEmpresa?.empresaContextoId || !['PRODUCAO', 'HOMOLOGACAO'].includes(perfilEmpresa?.ambiente) ||
+        (contextId && contextId !== perfilEmpresa.empresaContextoId)) {
+      await dialog.showAlert({ type: 'warning', title: 'Revise a empresa e o ambiente', description: 'O contexto da empresa mudou ou não foi carregado. Atualize a tela antes de emitir.' });
+      return;
+    }
     if (!nfData.codigoCnae) { dialog.showAlert("Selecione uma Atividade (CNAE)."); return; }
     const cliente = clientes.find((item) => item.id === nfData.clienteId);
     if (cliente?.tipo === 'PF' && !hasCompleteNationalAddress(cliente)) {
       dialog.showAlert({ type: 'warning', title: 'Endereço obrigatório para PF', description: getPfAddressRequiredMessage(cliente) });
       return;
     }
-    
+    // Uma tentativa concluída pode terminar depois que o usuário sai da tela.
+    // Confira e reconheça esse resultado antes de criar outra chave/nota.
+    try {
+      const { slot, headers } = getIntentContext();
+      let previous = readEmissionIntent(sessionStorage, slot);
+      if (!previous) {
+        const response = await fetch('/api/notas/solicitacao', { headers, cache: 'no-store' });
+        if (!response.ok) throw new Error('Não foi possível verificar a solicitação anterior. Nenhuma nova nota foi enviada.');
+        const data = await response.json();
+        if (data.job) {
+          sessionStorage.setItem(slot, JSON.stringify({ key: data.job.idempotencyKey, fingerprint: '0'.repeat(64) }));
+          previous = readEmissionIntent(sessionStorage, slot);
+          setPendingJobStatus(data.job.status);
+          setHasPendingIntent(true);
+        }
+      }
+      if (previous) { await resumeIntent(); return; }
+    } catch (error) {
+      await dialog.showAlert({ type: 'warning', title: 'Verifique sua solicitação', description: error instanceof Error ? error.message : 'Não foi possível confirmar o estado da emissão anterior.' });
+      return;
+    }
+    submittingRef.current = true;
     setLoading(true);
     setProgressPercent(10);
-    setProgressStatus("Preparando envio...");
-    setProgressDetail("Validando os dados da nota antes da transmissão.");
-
-    const userId = localStorage.getItem('userId');
-    const contextId = localStorage.getItem('empresaContextId'); 
-    
+    setProgressStatus("Registrando solicitação...");
+    setProgressDetail("O processamento continuará na fila após o registro.");
     try {
       const payloadRetencoes = {
           inss: { retido: nfData.inssRetido && parseFloat(retencoes.inss.valor) > 0, valor: nfData.inssRetido ? parseFloat(retencoes.inss.valor) : 0, aliquota: parseFloat(retencoes.inss.aliquota) || 0 },
@@ -697,20 +742,11 @@ function EmitirNotaContent() {
           ir: { retido: nfData.irRetido && parseFloat(retencoes.ir.valor) > 0, valor: nfData.irRetido ? parseFloat(retencoes.ir.valor) : 0, aliquota: parseFloat(retencoes.ir.aliquota) || 0 },
           csll: { retido: nfData.crsfRetido && parseFloat(retencoes.csll.valor) > 0, valor: nfData.crsfRetido ? parseFloat(retencoes.csll.valor) : 0, aliquota: parseFloat(retencoes.csll.aliquota) || 0 },
       };
-
-      setProgressPercent(40);
-      setProgressStatus("Transmitindo para o Portal Nacional...");
-      setProgressDetail("Enviando a DPS assinada e aguardando autorização.");
-
-      const idempotencyKey = retryId
-        ? `retry-${retryId}-${Date.now()}`
-        : (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
-
-      const res = await fetch('/api/notas', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '', 'x-empresa-id': contextId || '', 'x-idempotency-key': idempotencyKey },
-        body: JSON.stringify({
-          vendaId: retryId || null, 
+      const body = JSON.stringify({
+          empresaConfirmadaId: perfilEmpresa.empresaContextoId,
+          ambienteConfirmado: perfilEmpresa.ambiente,
+          vendaId: retryId || null,
+          copiaDeVendaId: copyId || undefined,
           clienteId: nfData.clienteId,
           valor: nfData.valor,
           valorMoedaEstrangeira: nfData.valorMoedaEstrangeira,
@@ -722,74 +758,28 @@ function EmitirNotaContent() {
           numeroDPS: nfData.numeroDPS || undefined,
           serieDPS: nfData.serieDPS || undefined,
           retencoes: payloadRetencoes
-        })
-      });
-
-      const resposta = await res.json();
-      
-      if (res.ok) {
-        if (activeRascunhoId) await excluirRascunho(activeRascunhoId, true);
-        if (resposta.emissaoJobId) {
-            const jobFinal = await aguardarJobEmissao(resposta.emissaoJobId, {
-                'x-user-id': userId || '',
-                'x-empresa-id': contextId || ''
-            });
-
-            if (jobFinal.isHomologation) {
-                setProgressPercent(100);
-                setProgressStatus("Validacao concluida.");
-                setProgressDetail("A configuracao foi aceita no ambiente de homologacao.");
-                const irConfig = await dialog.showConfirm({ type: 'success', title: 'Tudo certo em Homologacao!', description: 'As configuracoes da sua nota estao perfeitas. Mude para PRODUCAO nas configuracoes.', confirmText: 'Mudar para Producao', cancelText: 'Voltar ao Inicio' });
-                if (irConfig) router.push('/configuracoes');
-                else router.push('/cliente/dashboard');
-                return;
-            }
-
-            if (!jobFinal.vendaId) {
-                throw new Error('Nota autorizada, mas a venda nao foi localizada para sincronizacao.');
-            }
-
-            setProgressPercent(68);
-            setProgressStatus("Autorizacao recebida.");
-            setProgressDetail("Agora vamos finalizar a sincronizacao antes de liberar a tela.");
-            await aguardarConclusaoDaNota(jobFinal.vendaId, {
-                'x-user-id': userId || '',
-                'x-empresa-id': contextId || ''
-            });
-            await sleep(500);
-            await dialog.showAlert({ type: 'success', title: 'Nota fiscal emitida', description: 'A nota foi autorizada e já está disponível para download.' });
-            router.push('/cliente/dashboard');
-        } else if (resposta.isHomologation) {
-            setProgressPercent(100);
-            setProgressStatus("Validação concluída.");
-            setProgressDetail("A configuração foi aceita no ambiente de homologação.");
-            const irConfig = await dialog.showConfirm({ type: 'success', title: 'Tudo certo em Homologação!', description: 'As configurações da sua nota estão perfeitas. Mude para PRODUÇÃO nas configurações.', confirmText: 'Mudar para Produção', cancelText: 'Voltar ao Início' });
-            if (irConfig) router.push('/configuracoes');
-            else router.push('/cliente/dashboard');
-        } else {
-            setProgressPercent(58);
-            setProgressStatus("Autorização recebida.");
-            setProgressDetail("Agora vamos finalizar a sincronização antes de liberar a tela.");
-            await aguardarConclusaoDaNota(resposta.nota.vendaId, {
-                'x-user-id': userId || '',
-                'x-empresa-id': contextId || ''
-            });
-            await sleep(500);
-            await dialog.showAlert({ type: 'success', title: 'Nota fiscal emitida', description: 'A nota foi autorizada e já está disponível para download.' });
-            router.push('/cliente/dashboard');
+        });
+      const { slot, headers } = getIntentContext();
+      const intent = await getEmissionIntent(sessionStorage, slot, body);
+      setHasPendingIntent(true);
+      const response = await fetch('/api/notas', { method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json', 'x-idempotency-key': intent.key }, body });
+      const data = await response.json();
+      if (!response.ok) {
+        if (data.code === 'EMISSION_PROCESSOR_UNAVAILABLE') {
+          // This response is only returned before any sale/job is committed.
+          clearEmissionIntent(sessionStorage, slot, intent.key);
+          setHasPendingIntent(false);
         }
-      } else {
-        await tratarErroEmissao(resposta);
+        throw new Error(data.error || 'Não foi possível confirmar o registro. Verifique a solicitação anterior antes de reenviar.');
       }
-    } catch (error: any) { 
-        if (error?.respostaEmissao) {
-            await tratarErroEmissao(error.respostaEmissao);
-            return;
-        }
-        await dialog.showAlert({ type: 'danger', title: 'Processamento interrompido', description: error?.message || "Erro de conexão. Verifique sua internet." }); 
-        router.push('/cliente/dashboard');
-    } 
-    finally { setLoading(false); }
+      if (!data.emissaoJobId) throw new Error('Registro sem identificador de acompanhamento. Verifique a solicitação anterior.');
+      // Draft cleanup is not allowed to interrupt tracking a committed fiscal job.
+      if (activeRascunhoId) await excluirRascunho(activeRascunhoId, true).catch(() => {});
+      await followIntent(data.emissaoJobId, slot, intent.key, headers);
+    } catch (error: any) {
+      await dialog.showAlert({ type: 'warning', title: 'Verifique sua solicitação', description: error.message || 'Falha de conexão. A solicitação foi preservada para verificação.' });
+    } finally { submittingRef.current = false; setLoading(false); }
   };
 
   const clienteSel = clientes.find(c => c.id === nfData.clienteId);
@@ -824,6 +814,7 @@ function EmitirNotaContent() {
   const totalDeducoes = valorIss + valorInss + totalRetidoFederais;
   const valorLiquido = valorNumerico - totalDeducoes;
 
+  if (sourceLoadError) return <div role="alert" className="m-6 rounded-xl border border-red-200 bg-red-50 p-6 text-red-900"><p>{sourceLoadError}</p><Link href="/cliente/dashboard" className="mt-4 inline-block underline">Voltar ao histórico</Link></div>;
   if(loadingRetry) return <div className="h-screen flex items-center justify-center text-blue-600 font-bold"><Loader2 className="animate-spin mr-2"/> Recuperando dados...</div>;
 
   // --- VALIDAÇÃO DATA DE COMPETÊNCIA ---
@@ -843,6 +834,16 @@ function EmitirNotaContent() {
 
   return (
     <div className="saas-container relative max-w-7xl py-5 md:py-8">
+      {hasPendingIntent && !loading && (
+        <div role="status" className="mb-5 rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-950">
+          <p>{pendingJobStatus === 'AUTORIZADA'
+            ? 'Sua emissão anterior foi concluída. Confira o resultado para liberar uma nova nota.'
+            : 'Existe uma solicitação anterior. Confira o resultado antes de enviar outra nota.'}</p>
+          <button type="button" onClick={resumeIntent} className="mt-2 rounded-lg border border-amber-800 px-4 py-2 font-semibold">
+            {pendingJobStatus === 'AUTORIZADA' ? 'Conferir resultado e continuar' : 'Verificar solicitação anterior'}
+          </button>
+        </div>
+      )}
       {loading && (
         <div className="fixed inset-0 z-[9999] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-xl bg-white rounded-xl shadow-2xl border border-blue-100 overflow-hidden">
@@ -898,6 +899,9 @@ function EmitirNotaContent() {
           </div>
         </div>
       )}
+      {copyId && <div role="note" className="mb-4 rounded-xl border border-violet-300 bg-violet-50 p-4 text-sm text-violet-950">
+        Esta é uma nova solicitação. A homologação original será preservada, inclusive seus documentos. Revise tomador, competência, valores, regras tributárias e o ambiente atual antes de enviar. Será reservado outro número de DPS; não há conversão automática para produção.
+      </div>}
       <header className="mb-6 rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm md:px-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
@@ -906,7 +910,7 @@ function EmitirNotaContent() {
             </button>
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-xl font-black tracking-tight text-slate-900 md:text-2xl">{retryId ? 'Corrigir venda' : 'Emitir nova NFS-e'}</h2>
+                <h2 className="text-xl font-black tracking-tight text-slate-900 md:text-2xl">{retryId ? 'Corrigir venda' : copyId ? 'Nova emissão a partir de teste' : 'Emitir nova NFS-e'}</h2>
                 {retryId && <span className="rounded-full bg-orange-100 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-orange-700">Modo correção</span>}
               </div>
               <p className="mt-1 text-sm text-slate-500">Preencha os dados essenciais e confira antes de enviar.</p>
@@ -1015,14 +1019,19 @@ function EmitirNotaContent() {
 
             <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">Selecione o Tomador (Cliente)</label>
+                    <label className="mb-2 block text-xs font-semibold text-slate-600">Buscar tomador por nome, documento ou e-mail
+                      <input type="search" value={customerSearch} onChange={e => setCustomerSearch(e.target.value)} maxLength={120} className="mt-1 w-full rounded-lg border p-2" placeholder="Busque para localizar outros tomadores" />
+                    </label>
+                    <p aria-live="polite" className="mb-2 text-xs text-slate-600">{searchingCustomers ? 'Buscando...' : customerTotal > 50 ? 'Mostrando até 50 resultados. Refine a busca para encontrar o tomador.' : `${customerTotal} tomador(es) encontrado(s).`}</p>
+                    {customerSearchError && <p role="alert" className="mb-2 text-sm text-red-700">{customerSearchError}</p>}
+
                 {clientes.length === 0 ? (
                     <div className="p-6 text-center border-2 border-dashed border-slate-200 rounded-xl bg-slate-50">
                         <p className="text-slate-500 mb-2">Nenhum cliente encontrado.</p>
                         <Link href="/cliente" className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold inline-block hover:bg-blue-700">Cadastrar Primeiro Cliente</Link>
                     </div>
                 ) : (
-                    // Para os Clientes:
-                    <select className="w-full p-3 border rounded-lg bg-slate-50 outline-blue-500 text-slate-700 font-medium" value={nfData.clienteId} onChange={(e) => { const selected = clientes.find(c => c.id === e.target.value); setNfData({ ...nfData, clienteId: e.target.value, clienteNome: selected?.nome || "" }); }}>
+                    <select aria-label="Tomador selecionado" className="w-full p-3 border rounded-lg bg-slate-50 outline-blue-500 text-slate-700 font-medium" value={nfData.clienteId} onChange={(e) => { const selected = clientes.find(c => c.id === e.target.value); setNfData({ ...nfData, clienteId: e.target.value, clienteNome: selected?.nome || "" }); }}>
                         <option value="">-- Selecione na lista --</option>
                         {clientes.map(cliente => {
                             const nomeCurto = cliente.nome.length > 60 ? cliente.nome.substring(0, 60) + '...' : cliente.nome;
@@ -1302,9 +1311,9 @@ function EmitirNotaContent() {
             </div>
 
             {perfilEmpresa?.ambiente === 'HOMOLOGACAO' ? (
-                 <div className="bg-orange-50 border border-orange-200 p-3 rounded-lg flex items-start gap-2 text-sm text-orange-800 font-medium"><AlertTriangle size={18} className="shrink-0 mt-0.5" /><p>Você está no ambiente de <strong>HOMOLOGAÇÃO</strong>. A nota será apenas validada pela prefeitura, sem valor fiscal. Se quiser emitir com valor, mude para Produção nas configurações.</p></div>
+                 <div className="bg-orange-50 border border-orange-200 p-3 rounded-lg flex items-start gap-2 text-sm text-orange-800 font-medium"><AlertTriangle size={18} className="shrink-0 mt-0.5" /><p>Você está no ambiente de <strong>HOMOLOGAÇÃO</strong>. Esta solicitação é um teste, sem valor fiscal de produção. A aceitação depende do retorno do Portal Nacional.</p></div>
             ) : (
-                <p className="text-xs text-center text-slate-400">Ao clicar em emitir, a nota será processada no ambiente nacional e possuirá valor fiscal.</p>
+                <p className="text-xs text-center text-slate-500">Você está em PRODUÇÃO. O envio solicita autorização fiscal ao Portal Nacional; aguarde o resultado antes de considerar a nota emitida.</p>
             )}
           </div>
         )}

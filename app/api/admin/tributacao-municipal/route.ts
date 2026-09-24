@@ -1,9 +1,50 @@
+import { withApiGuard } from '@/app/utils/api-route';
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '@/app/utils/prisma';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 import { validateSelectableNbs } from '@/app/utils/nbs';
+import { canReadFiscalCatalog, canWriteFiscalCatalog } from '@/app/utils/fiscal-admin-access';
+import { requireAdminReauthentication } from '@/app/utils/admin-security';
+import {
+  assertFiscalRuleVersion, changedFiscalRuleFields, FiscalRuleGovernanceError, fiscalRuleSnapshot,
+  parseFiscalRuleGovernance, validateNormativeSource,
+} from '@/app/utils/fiscal-rule-governance';
 
-const prisma = new PrismaClient();
+type Municipality = { ibge: string; cidade: string; uf: string; nome: string };
+
+function municipalityName(cidade: string, uf: string) {
+  const formatted = cidade.toLocaleLowerCase('pt-BR').replace(/(^|[\s'-])\p{L}/gu, letter => letter.toLocaleUpperCase('pt-BR'));
+  return `${formatted} - ${uf.toUpperCase()}`;
+}
+
+async function loadMunicipalities(codes?: string[]): Promise<Municipality[]> {
+  const where = { codigoIbge: { ...(codes ? { in: codes } : {}), not: null }, cidade: { not: null }, uf: { not: null } };
+  const [companies, entities, customers] = await Promise.all([
+    prisma.empresa.findMany({ where, select: { codigoIbge: true, cidade: true, uf: true }, take: 5000 }),
+    prisma.entidadeFiscal.findMany({ where, select: { codigoIbge: true, cidade: true, uf: true }, take: 5000 }),
+    prisma.cliente.findMany({ where, select: { codigoIbge: true, cidade: true, uf: true }, take: 5000 }),
+  ]);
+  const municipalities = new Map<string, Municipality>();
+  for (const row of [...companies, ...entities, ...customers]) {
+    if (!row.codigoIbge || !row.cidade || !row.uf || municipalities.has(row.codigoIbge)) continue;
+    municipalities.set(row.codigoIbge, { ibge: row.codigoIbge, cidade: row.cidade, uf: row.uf,
+      nome: municipalityName(row.cidade, row.uf) });
+  }
+  return [...municipalities.values()].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+}
+
+async function municipalityCodesForSearch(search: string) {
+  if (!search) return [];
+  const where = { OR: [{ cidade: { contains: search, mode: 'insensitive' as const } },
+    { uf: { equals: search, mode: 'insensitive' as const } }] };
+  const [companies, entities, customers] = await Promise.all([
+    prisma.empresa.findMany({ where, select: { codigoIbge: true }, take: 500 }),
+    prisma.entidadeFiscal.findMany({ where, select: { codigoIbge: true }, take: 500 }),
+    prisma.cliente.findMany({ where, select: { codigoIbge: true }, take: 500 }),
+  ]);
+  return [...new Set([...companies, ...entities, ...customers].map(row => row.codigoIbge).filter((code): code is string => !!code))];
+}
+
 
 function nullableBoolean(value: unknown) {
   if (value === null || value === undefined || value === '') return null;
@@ -75,22 +116,25 @@ function fiscalRuleData(body: any) {
   };
 }
 
-export async function GET(request: Request) {
+export const GET = withApiGuard(async function GET(request: Request) {
   const user = await getAuthenticatedUser(request);
   if (!user) return unauthorized();
-  if (!['MASTER', 'ADMIN', 'CONTADOR'].includes(user.role)) return forbidden();
+  if (!canReadFiscalCatalog(user.role)) return forbidden();
   const { searchParams } = new URL(request.url);
+  if (searchParams.get('municipios') === 'true') return NextResponse.json({ data: await loadMunicipalities() });
   const page = parseInt(searchParams.get('page') || '1');
   const limit = parseInt(searchParams.get('limit') || '10');
   const search = searchParams.get('search') || '';
   
   const skip = (page - 1) * limit;
 
+  const municipalityCodes = await municipalityCodesForSearch(search);
   const whereClause = search ? {
     OR: [
         { cnae: { contains: search } },
         { codigoIbge: { contains: search } },
-        { codigoTributacaoMunicipal: { contains: search } }
+        { codigoTributacaoMunicipal: { contains: search } },
+        ...(municipalityCodes.length ? [{ codigoIbge: { in: municipalityCodes } }] : []),
     ]
   } : {};
 
@@ -105,8 +149,10 @@ export async function GET(request: Request) {
       prisma.tributacaoMunicipal.count({ where: whereClause }) 
     ]);
 
+    const municipalities = new Map((await loadMunicipalities([...new Set(lista.map(item => item.codigoIbge))]))
+      .map(item => [item.ibge, item]));
     return NextResponse.json({
-      data: lista,
+      data: lista.map(item => ({ ...item, municipio: municipalities.get(item.codigoIbge) || null })),
       meta: {
         total,
         page,
@@ -117,14 +163,22 @@ export async function GET(request: Request) {
   } catch (error) {
     return NextResponse.json({ error: 'Erro ao buscar dados.' }, { status: 500 });
   }
-}
+});
 
 // POST: Cria Nova Regra
-export async function POST(request: Request) {
+export const POST = withApiGuard(async function POST(request: Request) {
   const user = await getAuthenticatedUser(request);
-  if (!user || !['MASTER', 'ADMIN'].includes(user.role)) return forbidden();
+  if (!user) return unauthorized();
+  if (!canWriteFiscalCatalog(user.role)) return forbidden();
   try {
     const body = await request.json();
+    const governance = parseFiscalRuleGovernance(body, false);
+    const reauthenticationError = await requireAdminReauthentication({
+      actorId: user.id, password: governance.adminPassword, justification: governance.justification,
+      action: 'MUNICIPAL_RULE_CREATE',
+    });
+    if (reauthenticationError) return reauthenticationError;
+    body.fonteNormativa = validateNormativeSource(body.fonteNormativa);
     const validationError = validateFiscalRuleBody(body);
     if (validationError) return NextResponse.json({ error: validationError }, { status: 400 });
     const nbsValidation = await validateSelectableNbs(body.nbsPadrao);
@@ -153,28 +207,44 @@ export async function POST(request: Request) {
       );
     }
 
-    const novo = await prisma.tributacaoMunicipal.create({
-      data: {
-        cnae: body.cnae,
-        codigoIbge: body.codigoIbge,
-        codigoTributacaoMunicipal: codigoMunicipal,
-        ...fiscalRuleData(body),
-      }
+    const novo = await prisma.$transaction(async (tx) => {
+      const criado = await tx.tributacaoMunicipal.create({ data: {
+          cnae: body.cnae, codigoIbge: body.codigoIbge, codigoTributacaoMunicipal: codigoMunicipal,
+          ...fiscalRuleData(body),
+        } });
+      const after = fiscalRuleSnapshot(criado);
+      await tx.systemLog.create({ data: {
+        level: 'ALERTA', module: 'REGRAS_FISCAIS', action: 'MUNICIPAL_RULE_CREATED', userId: user.id,
+        message: 'Regra municipal criada com reautenticação e justificativa.',
+        details: JSON.stringify({ ruleType: 'MUNICIPAL', ruleId: criado.id, cnae: criado.cnae,
+          codigoIbge: criado.codigoIbge, justification: governance.justification,
+          changedFields: changedFiscalRuleFields(null, after), before: null, after }),
+      } });
+      return criado;
     });
 
     return NextResponse.json(novo, { status: 201 });
 
   } catch (e) {
+    if (e instanceof FiscalRuleGovernanceError) return NextResponse.json({ error: e.message }, { status: e.status });
     console.error(e);
     return NextResponse.json({ error: 'Erro ao processar requisição.' }, { status: 500 });
   }
-}
+});
 
-export async function PUT(request: Request) {
+export const PUT = withApiGuard(async function PUT(request: Request) {
   const user = await getAuthenticatedUser(request);
-  if (!user || !['MASTER', 'ADMIN'].includes(user.role)) return forbidden();
+  if (!user) return unauthorized();
+  if (!canWriteFiscalCatalog(user.role)) return forbidden();
   try {
     const body = await request.json();
+    const governance = parseFiscalRuleGovernance(body, true);
+    const reauthenticationError = await requireAdminReauthentication({
+      actorId: user.id, password: governance.adminPassword, justification: governance.justification,
+      action: 'MUNICIPAL_RULE_UPDATE',
+    });
+    if (reauthenticationError) return reauthenticationError;
+    body.fonteNormativa = validateNormativeSource(body.fonteNormativa);
     const validationError = validateFiscalRuleBody(body);
     if (validationError) return NextResponse.json({ error: validationError }, { status: 400 });
     const nbsValidation = await validateSelectableNbs(body.nbsPadrao);
@@ -196,29 +266,70 @@ export async function PUT(request: Request) {
         }
     }
 
-    const atualizado = await prisma.tributacaoMunicipal.update({
+    const atualizado = await prisma.$transaction(async (tx) => {
+      const anterior = await tx.tributacaoMunicipal.findUnique({ where: { id: body.id } });
+      if (!anterior) throw new FiscalRuleGovernanceError('Regra municipal não encontrada.', 404);
+      assertFiscalRuleVersion(anterior.updatedAt, governance.expectedUpdatedAt);
+      const salvo = await tx.tributacaoMunicipal.update({
         where: { id: body.id },
         data: {
             codigoTributacaoMunicipal: body.codigoTributacaoMunicipal || '',
             ...fiscalRuleData(body),
-        }
+        },
+      });
+      const before = fiscalRuleSnapshot(anterior);
+      const after = fiscalRuleSnapshot(salvo);
+      await tx.systemLog.create({ data: {
+        level: 'ALERTA', module: 'REGRAS_FISCAIS', action: 'MUNICIPAL_RULE_UPDATED', userId: user.id,
+        message: 'Regra municipal atualizada com reautenticação e histórico.',
+        details: JSON.stringify({ ruleType: 'MUNICIPAL', ruleId: salvo.id, cnae: salvo.cnae,
+          codigoIbge: salvo.codigoIbge, justification: governance.justification,
+          changedFields: changedFiscalRuleFields(before, after), before, after }),
+      } });
+      return salvo;
     });
 
     return NextResponse.json(atualizado);
     
   } catch (e) {
+    if (e instanceof FiscalRuleGovernanceError) return NextResponse.json({ error: e.message }, { status: e.status });
     return NextResponse.json({ error: 'Erro ao atualizar' }, { status: 500 });
   }
-}
+});
 
-export async function DELETE(request: Request) {
+export const DELETE = withApiGuard(async function DELETE(request: Request) {
     const user = await getAuthenticatedUser(request);
-    if (!user || !['MASTER', 'ADMIN'].includes(user.role)) return forbidden();
-    const { searchParams } = new URL(request.url);
-    const id = searchParams.get('id');
-    if(id) {
-        await prisma.tributacaoMunicipal.delete({ where: { id }});
-        return NextResponse.json({success: true});
+    if (!user) return unauthorized();
+    if (!canWriteFiscalCatalog(user.role)) return forbidden();
+    try {
+      const body = await request.json();
+      const governance = parseFiscalRuleGovernance(body, true);
+      const reauthenticationError = await requireAdminReauthentication({
+        actorId: user.id, password: governance.adminPassword, justification: governance.justification,
+        action: 'MUNICIPAL_RULE_SUSPEND',
+      });
+      if (reauthenticationError) return reauthenticationError;
+      const id = typeof body.id === 'string' ? body.id : '';
+      if (!id) return NextResponse.json({ error: 'ID required' }, { status: 400 });
+      const suspensa = await prisma.$transaction(async (tx) => {
+        const anterior = await tx.tributacaoMunicipal.findUnique({ where: { id } });
+        if (!anterior) throw new FiscalRuleGovernanceError('Regra municipal não encontrada.', 404);
+        assertFiscalRuleVersion(anterior.updatedAt, governance.expectedUpdatedAt);
+        const salvo = await tx.tributacaoMunicipal.update({ where: { id }, data: { ativo: false } });
+        const before = fiscalRuleSnapshot(anterior);
+        const after = fiscalRuleSnapshot(salvo);
+        await tx.systemLog.create({ data: {
+          level: 'ALERTA', module: 'REGRAS_FISCAIS', action: 'MUNICIPAL_RULE_SUSPENDED', userId: user.id,
+          message: 'Regra municipal suspensa; histórico e notas anteriores foram preservados.',
+          details: JSON.stringify({ ruleType: 'MUNICIPAL', ruleId: salvo.id, cnae: salvo.cnae,
+            codigoIbge: salvo.codigoIbge, justification: governance.justification,
+            changedFields: changedFiscalRuleFields(before, after), before, after }),
+        } });
+        return salvo;
+      });
+      return NextResponse.json({ success: true, data: suspensa });
+    } catch (e) {
+      if (e instanceof FiscalRuleGovernanceError) return NextResponse.json({ error: e.message }, { status: e.status });
+      return NextResponse.json({ error: 'Erro ao suspender regra.' }, { status: 500 });
     }
-    return NextResponse.json({error: "ID required"}, { status: 400 });
-}
+});

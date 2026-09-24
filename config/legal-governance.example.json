@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "status": "APPROVED",
+  "environment": "PRODUCTION",
+  "approvedAt": "2026-09-24T12:00:00.000Z",
+  "reviewDueAt": "2027-03-24T12:00:00.000Z",
+  "applicationLegalSha256": "SUBSTITUIR_PELO_RESULTADO_DE_NPM_RUN_LEGAL_FINGERPRINT",
+  "documents": [
+    { "type": "TERMS", "version": "terms-2026-09-24-v1", "artifactRef": "legal/terms/2026-09-24" },
+    { "type": "PRIVACY_NOTICE", "version": "privacy-2026-09-24-v1", "artifactRef": "legal/privacy/2026-09-24" },
+    { "type": "COOKIE_NOTICE", "version": "cookies-2026-09-24-v1", "artifactRef": "legal/cookies/2026-09-24" },
+    { "type": "DATA_PROCESSING_AGREEMENT", "version": "dpa-2026-09-24-v1", "artifactRef": "legal/dpa/2026-09-24" },
+    { "type": "PROCESSING_RECORD", "version": "ropa-2026-09-24-v1", "artifactRef": "privacy/ropa/2026-09-24" },
+    { "type": "RETENTION_SCHEDULE", "version": "retention-2026-09-24-v1", "artifactRef": "privacy/retention/2026-09-24" },
+    { "type": "PRIVACY_RIGHTS_PROCEDURE", "version": "rights-2026-09-24-v1", "artifactRef": "privacy/rights/2026-09-24" },
+    { "type": "INCIDENT_RESPONSE_PLAN", "version": "incident-2026-09-24-v1", "artifactRef": "security/incidents/2026-09-24" },
+    { "type": "SUBPROCESSOR_REGISTER", "version": "processors-2026-09-24-v1", "artifactRef": "privacy/processors/2026-09-24" }
+  ],
+  "approvals": [
+    { "role": "LEGAL", "approverRef": "assessoria-juridica", "approvedAt": "2026-09-24T12:00:00.000Z", "evidenceRef": "approval/legal/2026-09-24" },
+    { "role": "PRIVACY", "approverRef": "responsavel-privacidade", "approvedAt": "2026-09-24T12:00:00.000Z", "evidenceRef": "approval/privacy/2026-09-24" },
+    { "role": "SECURITY", "approverRef": "responsavel-seguranca", "approvedAt": "2026-09-24T12:00:00.000Z", "evidenceRef": "approval/security/2026-09-24" }
+  ],
+  "subprocessors": [
+    { "category": "HOSTING", "providerRef": "provider/hosting", "countryCode": "BR", "purposeRef": "purpose/application-hosting", "contractRef": "contract/hosting-dpa", "securityReviewRef": "review/hosting-security" },
+    { "category": "DATABASE", "providerRef": "provider/database", "countryCode": "BR", "purposeRef": "purpose/database", "contractRef": "contract/database-dpa", "securityReviewRef": "review/database-security" },
+    { "category": "EMAIL", "providerRef": "provider/email", "countryCode": "BR", "purposeRef": "purpose/transactional-email", "contractRef": "contract/email-dpa", "securityReviewRef": "review/email-security" }
+  ],
+  "internationalTransfers": {
+    "occurs": false,
+    "countries": [],
+    "assessmentRef": "privacy/transfers/assessment-2026-09-24",
+    "safeguardsRef": null
+  },
+  "responsibilities": {
+    "legalOwner": "responsavel-juridico",
+    "privacyOwner": "responsavel-privacidade",
+    "securityOwner": "responsavel-seguranca",
+    "rightsQueueRef": "queue/privacy-rights",
+    "incidentQueueRef": "queue/security-incidents"
+  }
+}

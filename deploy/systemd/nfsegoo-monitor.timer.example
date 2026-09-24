@@ -1,0 +1,12 @@
+[Unit]
+Description=NFSe Goo - executar diagnóstico operacional a cada minuto
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=10s
+Persistent=true
+Unit=nfsegoo-monitor.service
+
+[Install]
+WantedBy=timers.target

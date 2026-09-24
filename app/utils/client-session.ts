@@ -6,6 +6,8 @@ const SESSION_KEYS = [
   'empresaContextId',
   'isSupportMode',
   'adminBackUpId',
+  'adminBackUpRole',
+  'supportModeExpiresAt',
 ];
 
 export function clearClientSession() {

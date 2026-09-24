@@ -1,6 +1,10 @@
+import { withApiGuard } from '@/app/utils/api-route';
 import { NextResponse } from 'next/server';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
-import { isSupportRole } from '@/app/utils/access-control';
+import { archiveSale } from '@/app/services/saleArchiveService';
+import { fiscalOperationSelect } from '@/app/services/fiscalNoteService';
+import { requireAdminReauthentication } from '@/app/utils/admin-security';
+import { isAdminRole, isSupportRole } from '@/app/utils/access-control';
 import { prisma } from '@/app/utils/prisma';
 import { validateSelectableNbs } from '@/app/utils/nbs';
 import { createLog, sanitizeLogValue } from '@/app/services/logger';
@@ -198,7 +202,8 @@ async function montarPayloadRecuperado(venda: any, logsSeguros: any[]) {
   return payloadRecuperado;
 }
 
-export async function GET(request: Request, { params }: { params: { id: string } }) {
+export const GET = withApiGuard(async function GET(request: Request, { params: routeParams }: { params: Promise<{ id: string }> }) {
+  const params = await routeParams;
   const authError = await ensureSupport(request);
   if (authError) return authError;
 
@@ -210,6 +215,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
         cliente: true,
         notas: {
           orderBy: { createdAt: 'desc' },
+          include: { fiscalOperations: { orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1, select: fiscalOperationSelect }, documentTask: { select: { status: true, completedAt: true } } },
         },
         logs: {
           orderBy: { createdAt: 'desc' },
@@ -238,9 +244,10 @@ export async function GET(request: Request, { params }: { params: { id: string }
   } catch {
     return NextResponse.json({ error: 'Erro interno' }, { status: 500 });
   }
-}
+});
 
-export async function PUT(request: Request, { params }: { params: { id: string } }) {
+export const PUT = withApiGuard(async function PUT(request: Request, { params: routeParams }: { params: Promise<{ id: string }> }) {
+  const params = await routeParams;
   const authError = await ensureSupport(request);
   if (authError) return authError;
 
@@ -249,67 +256,36 @@ export async function PUT(request: Request, { params }: { params: { id: string }
     const nbsValidation = await validateSelectableNbs(body.codigoNbs);
     if (nbsValidation.error) return NextResponse.json({ error: nbsValidation.error }, { status: 400 });
     body.codigoNbs = nbsValidation.code;
-    const updated = await prisma.venda.update({
-      where: { id: params.id },
-      data: {
-        valor: body.valor ? parseFloat(body.valor) : undefined,
-        descricao: body.descricao,
-      },
-    });
+    const updated = await prisma.venda.findUnique({ where: { id: params.id }, select: { id: true, empresaId: true } });
+    if (!updated) return NextResponse.json({ error: 'Venda não encontrada.' }, { status: 404 });
     await createLog({
       level: 'INFO',
       action: 'CORRECAO_RASCUNHO_SALVA',
-      message: 'Rascunho tecnico de correcao salvo na bancada admin.',
+      message: 'Sugestão técnica registrada. Nenhum dado fiscal ou valor da venda foi alterado.',
       empresaId: updated.empresaId,
       vendaId: updated.id,
       details: body,
     });
-    return NextResponse.json(updated);
+    return NextResponse.json({ success: true, proposalOnly: true });
   } catch {
     return NextResponse.json({ error: 'Erro ao atualizar venda.' }, { status: 500 });
   }
-}
+});
 
-export async function DELETE(request: Request, { params }: { params: { id: string } }) {
-  const authError = await ensureSupport(request);
-  if (authError) return authError;
+export const DELETE = withApiGuard(async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await getAuthenticatedUser(request);
   if (!user) return unauthorized();
-
+  if (!isAdminRole(user.role)) return forbidden();
+  const { id } = await params;
+  const body = await request.json();
+  const reauth = await requireAdminReauthentication({ actorId: user.id, password: body.adminPassword, justification: body.justification, action: 'ARCHIVE_SALE' });
+  if (reauth) return reauth;
   try {
-    const { id } = params;
-    const temNotaAutorizada = await prisma.notaFiscal.findFirst({
-      where: { vendaId: id, status: 'AUTORIZADA' },
-    });
-
-    if (temNotaAutorizada) {
-      return NextResponse.json(
-        { error: 'NÃ£o Ã© possÃ­vel excluir uma venda com Nota Autorizada. Cancele a nota primeiro.' },
-        { status: 403 },
-      );
-    }
-
-    await prisma.notaFiscal.updateMany({
-      where: { vendaId: id },
-      data: {
-        arquivadoEm: new Date(),
-        arquivadoPor: user.id,
-        motivoArquivamento: 'Exclusao solicitada no painel admin.',
-      } as any,
-    });
-    await prisma.venda.update({
-      where: { id },
-      data: {
-        status: 'ARQUIVADA',
-        arquivadoEm: new Date(),
-        arquivadoPor: user.id,
-        motivoArquivamento: 'Exclusao solicitada no painel admin.',
-      } as any,
-    });
-
-    return NextResponse.json({ success: true });
+    await archiveSale(user.id, id, true);
+    return NextResponse.json({ success: true, message: 'Venda arquivada; nenhum documento fiscal válido removido.' });
   } catch (error) {
-    console.error(error);
-    return NextResponse.json({ error: 'Erro ao excluir venda.' }, { status: 500 });
+    const failure = error as Error & { status?: number };
+    if (failure.status && failure.status < 500) return NextResponse.json({ error: failure.message }, { status: failure.status });
+    throw error;
   }
-}
+});

@@ -1,252 +1,82 @@
+import { withApiGuard } from '@/app/utils/api-route';
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
-import { stripEmpresaSecrets } from '@/app/utils/safe-data';
-import { normalizarRegimeTributario } from '@/app/utils/regime-tributario';
+import { AdminCompanyError, companyPublicRegistryData, listAdminCompanies, mutateAdminCompany, parseAdminCompanyMutation } from '@/app/services/adminCompanyService';
+import { checkRateLimit } from '@/app/utils/rate-limit';
+import { consultarEntidadeFiscalPublica } from '@/app/services/fiscalEntityService';
+import { prisma } from '@/app/utils/prisma';
 
-const prisma = new PrismaClient();
-
-// GET: Lista Empresas (Emissores) ou Clientes (Tomadores Globais)
-export async function GET(request: Request) {
+export const GET = withApiGuard(async function GET(request: Request) {
   const user = await getAuthenticatedUser(request);
   if (!user) return unauthorized();
   if (!['MASTER', 'ADMIN'].includes(user.role)) return forbidden();
-
-  const { searchParams } = new URL(request.url);
-  const page = parseInt(searchParams.get('page') || '1');
-  const limit = parseInt(searchParams.get('limit') || '10');
-  const search = searchParams.get('search') || '';
-  const type = searchParams.get('type') || 'PRESTADOR'; // 'PRESTADOR' | 'TOMADOR'
-
-  const skip = (page - 1) * limit;
-
   try {
-    let data = [];
-    let total = 0;
-
-    if (type === 'TOMADOR') {
-        // === MODO TOMADOR: Busca Global na Tabela CLIENTE ===
-        // Agora buscamos DIRETO na tabela Cliente, pois ela é global
-        const whereClause: any = {
-            arquivadoEm: null,
-            ...(search ? { OR: [
-                { nome: { contains: search, mode: 'insensitive' } },
-                { documento: { contains: search } },
-                { email: { contains: search, mode: 'insensitive' } }
-            ] } : {})
-        };
-
-        const [clientes, count] = await prisma.$transaction([
-            prisma.cliente.findMany({
-                where: whereClause,
-                skip,
-                take: limit,
-                include: { 
-                    // Mostra quantos vínculos este cliente tem (Quantas empresas o atendem)
-                    _count: { select: { vinculos: true } },
-                    // Opcional: Traz o primeiro vínculo para exibir "Ex: Vinculado a X"
-                    vinculos: {
-                        where: { arquivadoEm: null },
-                        take: 1,
-                        include: { empresa: { select: { razaoSocial: true, documento: true } } }
-                    }
-                },
-                orderBy: { nome: 'asc' }
-            }),
-            prisma.cliente.count({ where: whereClause })
-        ]);
-
-        data = clientes.map(c => ({
-            ...c,
-            id: c.id,
-            razaoSocial: c.nome, // Padroniza nome para a tabela visual
-            documento: c.documento,
-            origem: 'TOMADOR',
-            // Mostra a primeira empresa vinculada como referência visual
-            vinculo: c.vinculos[0]?.empresa || null,
-            totalVinculos: c._count.vinculos
-        }));
-        total = count;
-
-    } else {
-        // === MODO PRESTADOR: Busca na tabela EMPRESA (Seus Assinantes) ===
-        const whereClause: any = {
-            arquivadoEm: null,
-            ...(search ? { OR: [
-                { razaoSocial: { contains: search, mode: 'insensitive' } }, 
-                { documento: { contains: search } },
-                { donoUser: { nome: { contains: search, mode: 'insensitive' } } },
-                { donoUser: { email: { contains: search, mode: 'insensitive' } } }
-            ] } : {})
-        };
-
-        const [empresas, count] = await prisma.$transaction([
-            prisma.empresa.findMany({
-                where: whereClause,
-                skip,
-                take: limit,
-                include: { 
-                    donoUser: { select: { nome: true, email: true } },
-                    proprietarioUser: { select: { nome: true, email: true } } as any,
-                    // ADICIONE ESTA PARTE:
-                    minhaCarteira: {
-                        where: { arquivadoEm: null },
-                        include: { cliente: { select: { id: true, nome: true, documento: true } } }
-                    }
-                },
-                orderBy: { updatedAt: 'desc' }
-            }),
-            prisma.empresa.count({ where: whereClause })
-        ]);
-
-        data = empresas.map(emp => {
-            // Removemos os dados sensíveis antes de enviar para o Frontend Admin
-            return {
-                ...stripEmpresaSecrets(emp),
-                origem: 'PRESTADOR',
-                donos: (emp as any).proprietarioUser ? [(emp as any).proprietarioUser] : (emp.donoUser ? [emp.donoUser] : []),
-                clientesVinculados: emp.minhaCarteira.map((v: any) => v.cliente)
-            };
-        });
-        total = count;
-    }
-
-    return NextResponse.json({
-      data,
-      meta: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit)
-      }
-    });
-
+    return NextResponse.json(await listAdminCompanies(new URL(request.url).searchParams));
   } catch (error) {
-    console.error("Erro API Admin Empresas:", error);
-    return NextResponse.json({ error: 'Erro ao buscar dados.' }, { status: 500 });
+    if (error instanceof AdminCompanyError) return NextResponse.json({ error: error.message }, { status: error.status });
+    throw error;
   }
-}
+});
 
-// PUT: Edita cadastro (Unificado)
-export async function PUT(request: Request) {
+export const POST = withApiGuard(async function POST(request: Request) {
   const user = await getAuthenticatedUser(request);
-  if (!user || !['MASTER', 'ADMIN'].includes(user.role)) return forbidden();
-
+  if (!user) return unauthorized();
+  if (!['MASTER', 'ADMIN'].includes(user.role)) return forbidden();
   try {
     const body = await request.json();
-    const { id, origem, ...dados } = body; 
-
-    const pick = (source: any, fields: string[]) => {
-        return fields.reduce((acc, field) => {
-            if (source[field] !== undefined) acc[field] = source[field];
-            return acc;
-        }, {} as any);
-    };
-
-    if (origem === 'TOMADOR') {
-        const cleanData = pick(dados, [
-            'tipo', 'documento', 'nome', 'nomeFantasia', 'email', 'telefone',
-            'inscricaoMunicipal', 'inscricaoEstadual', 'cep', 'logradouro',
-            'numero', 'complemento', 'bairro', 'cidade', 'uf', 'pais',
-            'codigoIbge', 'moeda', 'nif'
-        ]);
-        if (dados.razaoSocial) cleanData.nome = dados.razaoSocial;
-        
-        const updated = await prisma.cliente.update({
-            where: { id },
-            data: cleanData
-        });
-        return NextResponse.json(updated);
-    } else {
-        if (dados.regimeTributario !== undefined) {
-            const regimeTributario = normalizarRegimeTributario(dados.regimeTributario);
-            if (!regimeTributario) {
-                return NextResponse.json({ error: 'Regime tributario obrigatorio ou nao atendido pelo SaaS.' }, { status: 400 });
-            }
-            dados.regimeTributario = regimeTributario;
-        }
-        const cleanData = pick(dados, [
-            'documento', 'ambiente', 'cadastroCompleto', 'serieDPS', 'ultimoDPS',
-            'email', 'razaoSocial', 'nomeFantasia', 'cep', 'logradouro',
-            'numero', 'complemento', 'bairro', 'cidade', 'uf', 'codigoIbge',
-            'aliquotaPadrao', 'issRetidoPadrao', 'tipoTributacaoPadrao',
-            'regimeEspecialTributacao', 'inscricaoMunicipal', 'regimeTributario'
-        ]);
-
-        const updated = await prisma.empresa.update({
-            where: { id },
-            data: cleanData
-        });
-        return NextResponse.json(stripEmpresaSecrets(updated));
+    if (!body || typeof body !== 'object' || Array.isArray(body)
+      || Object.keys(body).some(key => !['id', 'expectedUpdatedAt'].includes(key))
+      || typeof body.id !== 'string' || !/^[a-z0-9_-]{1,100}$/i.test(body.id)
+      || typeof body.expectedUpdatedAt !== 'string' || !Number.isFinite(Date.parse(body.expectedUpdatedAt))) {
+      throw new AdminCompanyError('Solicitação de consulta pública inválida.');
     }
-  } catch (e: any) {
-    return NextResponse.json({ error: 'Erro ao atualizar: ' + e.message }, { status: 500 });
+    if (!await checkRateLimit(`admin_company_preview_${user.id}`, 10, 60_000)) {
+      return NextResponse.json({ error: 'Aguarde antes de realizar novas consultas públicas.' }, { status: 429 });
+    }
+    const company = await prisma.empresa.findUnique({ where: { id: body.id }, select: { documento: true, updatedAt: true, arquivadoEm: true } });
+    if (!company) throw new AdminCompanyError('Prestador não encontrado.', 404);
+    if (company.arquivadoEm) throw new AdminCompanyError('Restaure o prestador antes de consultar a fonte pública.', 409);
+    if (company.updatedAt.toISOString() !== body.expectedUpdatedAt) throw new AdminCompanyError('Cadastro alterado. Reabra o prestador antes de consultar.', 409);
+    const registry = await consultarEntidadeFiscalPublica(company.documento);
+    if (!registry || registry.data.documento !== company.documento) throw new AdminCompanyError('A fonte pública não confirmou este CNPJ agora. Nenhum dado foi alterado; tente novamente em alguns instantes.', 424);
+    return NextResponse.json({ data: companyPublicRegistryData(registry), fonte: registry.fonte,
+      consultedAt: registry.consultedAt, sourceHash: registry.payloadHash, expectedUpdatedAt: company.updatedAt.toISOString() });
+  } catch (error) {
+    if (error instanceof SyntaxError) return NextResponse.json({ error: 'Operação JSON inválida.' }, { status: 400 });
+    if (error instanceof AdminCompanyError) return NextResponse.json({ error: error.message }, { status: error.status });
+    throw error;
+  }
+}, { maxBodyBytes: 4 * 1024 });
+
+async function mutate(request: Request) {
+  const user = await getAuthenticatedUser(request);
+  if (!user) return unauthorized();
+  if (!['MASTER', 'ADMIN'].includes(user.role)) return forbidden();
+  if (!(await checkRateLimit(`admin_reauth_${user.id}`, 10, 5 * 60 * 1000))) {
+    return NextResponse.json({ error: 'Muitas verificações administrativas. Aguarde 5 minutos.' }, { status: 429 });
+  }
+  try {
+    const body = await request.json();
+    // DELETE requires the same explicit, versioned body. Old query-string
+    // unbinding/deletion cannot bypass scope, reauthentication or audit.
+    if (request.method === 'DELETE' && body?.action !== 'ARCHIVE') {
+      return NextResponse.json({ error: 'Para arquivar, confirme cadastro, versão, senha e justificativa.' }, { status: 400 });
+    }
+    let registry = null;
+    if (body?.action === 'REFRESH') {
+      const parsed = parseAdminCompanyMutation(body);
+      const company = await prisma.empresa.findUnique({ where: { id: parsed.id }, select: { documento: true } });
+      if (!company) throw new AdminCompanyError('Prestador não encontrado.', 404);
+      registry = await consultarEntidadeFiscalPublica(company.documento);
+      if (!registry || registry.data.documento !== company.documento) throw new AdminCompanyError('Não foi possível confirmar novamente os dados na fonte pública. Nada foi alterado; faça uma nova consulta.', 424);
+      if (registry.payloadHash !== parsed.sourceHash) throw new AdminCompanyError('A fonte pública mudou desde a prévia. Consulte novamente antes de aplicar.', 409);
+    }
+    return NextResponse.json(await mutateAdminCompany(user.id, body, registry));
+  } catch (error) {
+    if (error instanceof SyntaxError) return NextResponse.json({ error: 'Envie a operação confirmada no corpo JSON. Atualize a tela.' }, { status: 400 });
+    if (error instanceof AdminCompanyError) return NextResponse.json({ error: error.message }, { status: error.status });
+    throw error;
   }
 }
-
-// DELETE: Excluir (Unificado)
-export async function DELETE(request: Request) {
-    const user = await getAuthenticatedUser(request);
-    if (!user || !['MASTER', 'ADMIN'].includes(user.role)) return forbidden();
-
-    const { searchParams } = new URL(request.url);
-    const id = searchParams.get('id'); // ID da Empresa ou do Cliente
-    const type = searchParams.get('type') || 'PRESTADOR'; 
-    const clienteId = searchParams.get('clienteId'); // ID do cliente para desvincular
-    const action = searchParams.get('action'); // 'UNBIND'
-
-    if (!id) return NextResponse.json({ error: 'ID necessário' }, { status: 400 });
-
-    try {
-        // === CASO 1: APENAS DESVINCULAR UM CLIENTE DE UMA EMPRESA ===
-        if (action === 'UNBIND' && clienteId) {
-            await prisma.vinculoCarteira.update({
-                where: {
-                    empresaId_clienteId: {
-                        empresaId: id,
-                        clienteId: clienteId
-                    }
-                },
-                data: { arquivadoEm: new Date(), arquivadoPor: user.id, motivoArquivamento: 'Desvinculo solicitado no painel admin.' } as any
-            });
-            return NextResponse.json({ success: true, message: 'Vínculo removido com sucesso.' });
-        }
-
-        // === CASO 2: EXCLUSÃO TOTAL (TOMADOR OU PRESTADOR) ===
-        if (type === 'TOMADOR') {
-            // Apaga Cliente Global e todos os seus vínculos/históricos
-            await prisma.vinculoCarteira.updateMany({
-                where: { clienteId: id },
-                data: { arquivadoEm: new Date(), arquivadoPor: user.id, motivoArquivamento: 'Cliente excluido no painel admin.' } as any
-            });
-            await prisma.cliente.update({
-                where: { id },
-                data: { arquivadoEm: new Date(), arquivadoPor: user.id, motivoArquivamento: 'Cliente excluido no painel admin.' } as any
-            });
-        } else {
-            // Apaga Prestador (Empresa Assinante) e limpa relações
-            await prisma.user.updateMany({ where: { empresaId: id }, data: { empresaId: null } });
-            await prisma.contadorVinculo.updateMany({
-                where: { empresaId: id },
-                data: { arquivadoEm: new Date(), arquivadoPor: user.id, motivoArquivamento: 'Empresa excluida no painel admin.' } as any
-            });
-            await prisma.vinculoCarteira.updateMany({
-                where: { empresaId: id },
-                data: { arquivadoEm: new Date(), arquivadoPor: user.id, motivoArquivamento: 'Empresa excluida no painel admin.' } as any
-            });
-            
-            await prisma.empresa.update({
-                where: { id },
-                data: { arquivadoEm: new Date(), arquivadoPor: user.id, motivoArquivamento: 'Empresa excluida no painel admin.' } as any
-            });
-        }
-
-        return NextResponse.json({ success: true });
-
-    } catch (e: any) {
-        console.error("Erro na exclusão/desvínculo Admin:", e);
-        return NextResponse.json({ 
-            error: 'Erro ao processar a ação: ' + (e.message || 'Erro interno') 
-        }, { status: 500 });
-    }
-}
+export const PUT = withApiGuard(mutate, { maxBodyBytes: 16 * 1024 });
+export const DELETE = withApiGuard(mutate, { maxBodyBytes: 16 * 1024 });

@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "rootDir": ".",
+    "outDir": "dist/worker",
+    "noEmit": false,
+    "incremental": false,
+    "plugins": []
+  },
+  "include": ["workers/emission-worker.ts", "workers/document-worker.ts", "workers/consultation-worker.ts"],
+  "exclude": ["node_modules", "dist", "tests", ".next"]
+}

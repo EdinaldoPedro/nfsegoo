@@ -8,123 +8,358 @@ datasource db {
 }
 
 model User {
-  id                    String            @id @default(uuid())
-  email                 String            @unique
-  senha                 String
-  nome                  String
-  role                  Role              @default(COMUM)
-  cpf                   String?           @unique
-  telefone              String?
-  plano                 String?           @default("GRATUITO")
-  planoCiclo            String            @default("MENSAL")
-  planoStatus           String            @default("active")
-  planoExpiresAt        DateTime?
-  cargo                 String?
-  avatarUrl             String?
-  resetToken            String?           @unique
-  resetExpires          DateTime?
-  darkMode              Boolean           @default(false)
-  idioma                String            @default("pt-BR")
-  notificacoesEmail     Boolean           @default(true)
-  ipOrigem              String?
-  lastLoginAt           DateTime?
-  empresaId             String?           @unique
-  createdAt             DateTime          @default(now())
-  updatedAt             DateTime          @updatedAt
-  tempEmail             String?
-  verificationCode      String?
-  verificationExpires   DateTime?
-  limiteEmpresas        Int               @default(5)
-  tutorialStep          Int               @default(0)
-  creditosPlano         Int               @default(0)
-  creditosExtras        Int               @default(0)
-  dataRenovacaoCiclo    DateTime?
-  empresasContabeis     ContadorVinculo[] @relation("ContadorUser")
-  pedidos               Pedido[]
-  historicoPlanos       PlanHistory[]
-  ticketsAtendidos      Ticket[]          @relation("AtendenteTicket")
-  ticketsCriados        Ticket[]          @relation("SolicitanteTicket")
-  mensagensTicket       TicketMensagem[]
-  empresa               Empresa?          @relation("DonoEmpresa", fields: [empresaId], references: [id])
-  clientes              UserCliente[]
-  empresasAdicionais    Int               @default(0)
-  empresasFaturadas     Empresa[]         @relation("FaturamentoEmpresa")
-  empresasCustodiadas   Empresa[]         @relation("CustodiaEmpresa")
-  empresasProprietarias Empresa[]         @relation("ProprietarioEmpresa")
-  eventosCrm            UserEvent[]
-  faturas               Fatura[]
-  cuponsUsados          CupomLog[]
-  pedidoAnexos          PedidoAnexo[]
+  id                       String                      @id @default(uuid())
+  email                    String                      @unique
+  senha                    String
+  sessionVersion           Int                         @default(0)
+  customerPortalGrantedAt  DateTime?
+  customerPortalGrantedById String?
+  customerPortalRevokedAt  DateTime?
+  mfaSecret                String?
+  mfaPendingSecret         String?
+  mfaPendingExpires        DateTime?
+  mfaEnabledAt             DateTime?
+  mfaRecoveryCodes         String?
+  mfaLastUsedStep          Int                         @default(-1)
+  nome                     String
+  role                     Role                        @default(COMUM)
+  cpf                      String?                     @unique
+  telefone                 String?
+  plano                    String?                     @default("GRATUITO")
+  planoCiclo               String                      @default("MENSAL")
+  planoStatus              String                      @default("active")
+  planoExpiresAt           DateTime?
+  cargo                    String?
+  avatarUrl                String?
+  resetToken               String?                     @unique
+  resetExpires             DateTime?
+  darkMode                 Boolean                     @default(false)
+  idioma                   String                      @default("pt-BR")
+  notificacoesEmail        Boolean                     @default(true)
+  ipOrigem                 String?
+  lastLoginAt              DateTime?
+  empresaId                String?                     @unique
+  createdAt                DateTime                    @default(now())
+  updatedAt                DateTime                    @updatedAt
+  privacyErasedAt          DateTime?
+  tempEmail                String?                     @unique
+  verificationCode         String?
+  verificationExpires      DateTime?
+  limiteEmpresas           Int                         @default(5)
+  tutorialStep             Int                         @default(0)
+  creditosPlano            Int                         @default(0)
+  creditosExtras           Int                         @default(0)
+  dataRenovacaoCiclo       DateTime?
+  empresasContabeis        ContadorVinculo[]           @relation("ContadorUser")
+  pedidos                  Pedido[]
+  historicoPlanos          PlanHistory[]
+  ticketsAtendidos         Ticket[]                    @relation("AtendenteTicket")
+  ticketsCriados           Ticket[]                    @relation("SolicitanteTicket")
+  mensagensTicket          TicketMensagem[]
+  empresa                  Empresa?                    @relation("DonoEmpresa", fields: [empresaId], references: [id])
+  clientes                 UserCliente[]
+  empresasAdicionais       Int                         @default(0)
+  empresasFaturadas        Empresa[]                   @relation("FaturamentoEmpresa")
+  empresasCustodiadas      Empresa[]                   @relation("CustodiaEmpresa")
+  empresasProprietarias    Empresa[]                   @relation("ProprietarioEmpresa")
+  eventosCrm               UserEvent[]
+  faturas                  Fatura[]
+  cuponsUsados             CupomLog[]
+  pedidoAnexos             PedidoAnexo[]
+  impersonacoesIniciadas   ImpersonationSession[]      @relation("ImpersonationActor")
+  impersonacoesRecebidas   ImpersonationSession[]      @relation("ImpersonationTarget")
+  sessoes                  AuthSession[]
+  creditReservations       EmissionCreditReservation[]
+  ownershipInitiated       CompanyOwnershipRequest[]   @relation("OwnershipInitiator")
+  ownershipReceived        CompanyOwnershipRequest[]   @relation("OwnershipRecipient")
+  ownershipPrevious        CompanyOwnershipRequest[]   @relation("OwnershipPrevious")
+  ownershipPrimary         CompanyOwnershipRequest[]   @relation("OwnershipPrimary")
+  ownershipReviewed        CompanyOwnershipRequest[]   @relation("OwnershipReviewer")
+  ownershipConsents        CompanyOwnershipConsent[]
+  passwordResetRequests    PasswordResetRequest[]
+  legalAcceptances         LegalAcceptance[]
+  privacyRequests          PrivacyRequest[]            @relation("PrivacyRequestSubject")
+  privacyRequestsResolved  PrivacyRequest[]            @relation("PrivacyRequestResolver")
+  securityIncidentsCreated SecurityIncident[]          @relation("SecurityIncidentCreator")
+  securityIncidentsUpdated SecurityIncident[]          @relation("SecurityIncidentUpdater")
+  mfaLoginChallenges       MfaLoginChallenge[]
+  trustedDevices           MfaTrustedDevice[]
+  entidadeFiscalCorrecoes  EntidadeFiscalCorrecao[]    @relation("EntidadeFiscalCorrecaoAutor")
+  entidadeFiscalEventos    EntidadeFiscalEvento[]      @relation("EntidadeFiscalEventoAutor")
+}
+
+model MfaLoginChallenge {
+  id                 String    @id @default(uuid())
+  tokenHash          String    @unique
+  userId             String
+  emailCodeHash      String?
+  emailCodeExpiresAt DateTime?
+  emailCodeSentAt    DateTime?
+  attempts           Int       @default(0)
+  expiresAt          DateTime
+  consumedAt         DateTime?
+  createdAt          DateTime  @default(now())
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt, consumedAt])
+}
+
+model MfaTrustedDevice {
+  id            String    @id @default(uuid())
+  userId        String
+  tokenHash     String    @unique
+  method        String
+  userAgentHash String?
+  createdAt     DateTime  @default(now())
+  lastUsedAt    DateTime  @default(now())
+  expiresAt     DateTime
+  revokedAt     DateTime?
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt, revokedAt])
+  @@index([expiresAt, revokedAt])
+}
+
+model PrivacyRequest {
+  id                 String    @id @default(uuid())
+  userId             String
+  type               String
+  status             String    @default("PENDENTE")
+  description        String?   @db.Text
+  identityVerifiedAt DateTime
+  dueAt              DateTime
+  resolutionSummary  String?   @db.Text
+  legalBasis         String?   @db.Text
+  resolvedAt         DateTime?
+  resolvedById       String?
+  version            Int       @default(1)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  subject            User      @relation("PrivacyRequestSubject", fields: [userId], references: [id], onDelete: Restrict)
+  resolvedBy         User?     @relation("PrivacyRequestResolver", fields: [resolvedById], references: [id], onDelete: Restrict)
+
+  @@index([userId, status, createdAt])
+  @@index([status, dueAt])
+  @@index([resolvedById, resolvedAt])
+}
+
+model SecurityIncident {
+  id                       String    @id @default(uuid())
+  protocol                 String    @unique
+  title                    String
+  category                 String
+  severity                 String
+  status                   String    @default("DETECTADO")
+  summary                  String    @db.Text
+  affectedData             String?   @db.Text
+  affectedSystems          String?   @db.Text
+  affectedSubjectsEstimate Int?
+  riskToSubjects           String    @default("DESCONHECIDO")
+  riskAssessment           String?   @db.Text
+  containmentActions       String?   @db.Text
+  decisionRationale        String?   @db.Text
+  detectedAt               DateTime
+  containedAt              DateTime?
+  regulatoryDeadlineAt     DateTime
+  notifiedAnpdAt           DateTime?
+  notifiedSubjectsAt       DateTime?
+  resolvedAt               DateTime?
+  retainUntil              DateTime
+  createdById              String
+  updatedById              String
+  version                  Int       @default(1)
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+  createdBy                User      @relation("SecurityIncidentCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy                User      @relation("SecurityIncidentUpdater", fields: [updatedById], references: [id], onDelete: Restrict)
+
+  @@index([status, regulatoryDeadlineAt])
+  @@index([severity, detectedAt])
+  @@index([retainUntil])
+}
+
+model EmailOutbox {
+  id                String    @id @default(uuid())
+  dedupKey          String    @unique
+  recipientHash     String
+  payloadEncrypted  String    @db.Text
+  status            String    @default("PENDENTE")
+  attempts          Int       @default(0)
+  maxAttempts       Int       @default(8)
+  nextAttemptAt     DateTime  @default(now())
+  leaseToken        String?
+  leaseUntil        DateTime?
+  lastErrorCode     String?
+  providerMessageId String?
+  sentAt            DateTime?
+  expiresAt         DateTime
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([status, nextAttemptAt, leaseUntil])
+  @@index([expiresAt])
+  @@index([recipientHash, createdAt])
+}
+
+model AuthSession {
+  id             String    @id @default(uuid())
+  userId         String
+  sessionVersion Int
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime  @default(now())
+  expiresAt      DateTime
+  revokedAt      DateTime?
+  mfaVerifiedAt  DateTime?
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt, revokedAt])
+}
+
+model RateLimitBucket {
+  keyHash   String   @id
+  hits      Int      @default(1)
+  expiresAt DateTime
+
+  @@index([expiresAt])
+}
+
+model PasswordResetRequest {
+  id               String    @id @default(uuid())
+  userId           String
+  tokenHash        String    @unique
+  expiresAt        DateTime
+  deliveredAt      DateTime?
+  deliveryFailedAt DateTime?
+  consumedAt       DateTime?
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([expiresAt, consumedAt, revokedAt])
+}
+
+model ImpersonationSession {
+  id             String    @id @default(uuid())
+  tokenHash      String    @unique
+  actorUserId    String
+  actorSessionId String?
+  targetUserId   String
+  mode           String    @default("READ_ONLY")
+  reason         String
+  ipAddress      String?
+  userAgent      String?
+  expiresAt      DateTime
+  revokedAt      DateTime?
+  createdAt      DateTime  @default(now())
+  actor          User      @relation("ImpersonationActor", fields: [actorUserId], references: [id], onDelete: Cascade)
+  target         User      @relation("ImpersonationTarget", fields: [targetUserId], references: [id], onDelete: Cascade)
+
+  @@index([actorUserId, expiresAt])
+  @@index([actorSessionId])
+  @@index([targetUserId, expiresAt])
+  @@index([expiresAt, revokedAt])
 }
 
 model PendingRegistration {
-  id                  String   @id @default(uuid())
-  email               String   @unique
-  senhaHash           String
-  nome                String
-  cpf                 String   @unique
-  telefone            String?
-  role                Role     @default(COMUM)
-  verificationCode    String
-  verificationExpires DateTime
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id                   String   @id @default(uuid())
+  email                String   @unique
+  senhaHash            String
+  nome                 String
+  cpf                  String   @unique
+  telefone             String?
+  role                 Role     @default(COMUM)
+  verificationCodeHash String
+  verificationExpires  DateTime
+  termsVersion         String
+  privacyVersion       String
+  acceptedAt           DateTime
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
+model LegalAcceptance {
+  id             String   @id @default(uuid())
+  userId         String
+  termsVersion   String
+  privacyVersion String
+  acceptedAt     DateTime
+  source         String
+  ipAddressHash  String?
+  userAgentHash  String?
+  createdAt      DateTime @default(now())
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, termsVersion, privacyVersion])
+  @@index([acceptedAt])
 }
 
 model Empresa {
-  id                       String            @id @default(uuid())
-  documento                String            @unique
-  ambiente                 String            @default("PRODUCAO")
-  cadastroCompleto         Boolean           @default(false)
-  serieDPS                 String            @default("900")
-  ultimoDPS                Int               @default(0)
-  email                    String?
-  razaoSocial              String
-  nomeFantasia             String?
-  cep                      String?
-  logradouro               String?
-  numero                   String?
-  complemento              String?
-  bairro                   String?
-  cidade                   String?
-  uf                       String?
-  codigoIbge               String?
-  aliquotaPadrao           Decimal?          @default(0.00) @db.Decimal(5, 2)
-  issRetidoPadrao          Boolean           @default(false)
-  tipoTributacaoPadrao     String?           @default("1")
-  regimeEspecialTributacao String?           @default("0")
-  inscricaoMunicipal       String?
-  regimeTributario         String?
-  certificadoA1            String?
-  senhaCertificado         String?
-  certificadoVencimento    DateTime?
-  updatedAt                DateTime          @updatedAt
-  lastApiCheck             DateTime?
-  arquivadoEm              DateTime?
-  arquivadoPor             String?
-  motivoArquivamento       String?
-  atividades               Cnae[]
-  contadoresLink           ContadorVinculo[] @relation("EmpresaContabil")
-  notasEmitidas            NotaFiscal[]      @relation("PrestadorNota")
-  logs                     SystemLog[]
-  donoUser                 User?             @relation("DonoEmpresa")
-  vinculadoA               UserCliente[]
-  vendasRealizadas         Venda[]           @relation("VendaPrestador")
-  sequenciasDps            DpsSequencia[]
-  minhaCarteira            VinculoCarteira[]
-  donoFaturamentoId        String?
-  donoFaturamento          User?             @relation("FaturamentoEmpresa", fields: [donoFaturamentoId], references: [id])
-  contadorCustodianteId    String?
-  contadorCustodiante      User?             @relation("CustodiaEmpresa", fields: [contadorCustodianteId], references: [id])
-  proprietarioUserId       String?
-  proprietarioUser         User?             @relation("ProprietarioEmpresa", fields: [proprietarioUserId], references: [id])
-  modoCobranca             String            @default("RESPONSAVEL_UNICO")
-  statusPropriedade        String            @default("ORFA")
+  id                           String                    @id @default(uuid())
+  documento                    String                    @unique
+  ambiente                     String                    @default("PRODUCAO")
+  cadastroCompleto             Boolean                   @default(false)
+  serieDPS                     String                    @default("900")
+  ultimoDPS                    Int                       @default(0)
+  email                        String?
+  razaoSocial                  String
+  nomeFantasia                 String?
+  cep                          String?
+  logradouro                   String?
+  numero                       String?
+  complemento                  String?
+  bairro                       String?
+  cidade                       String?
+  uf                           String?
+  codigoIbge                   String?
+  aliquotaPadrao               Decimal?                  @default(0.00) @db.Decimal(5, 2)
+  issRetidoPadrao              Boolean                   @default(false)
+  tipoTributacaoPadrao         String?                   @default("1")
+  regimeEspecialTributacao     String?                   @default("0")
+  inscricaoMunicipal           String?
+  regimeTributario             String?
+  certificadoA1                String?
+  senhaCertificado             String?
+  certificadoVencimento        DateTime?
+  certificadoCnpj              String?
+  certificadoFingerprintSha256 String?
+  certificadoValidadoEm        DateTime?
+  certificadoChainStatus       String?
+  certificadoCnpjSource        String?
+  updatedAt                    DateTime                  @updatedAt
+  lastApiCheck                 DateTime?
+  arquivadoEm                  DateTime?
+  arquivadoPor                 String?
+  motivoArquivamento           String?
+  atividades                   Cnae[]
+  contadoresLink               ContadorVinculo[]         @relation("EmpresaContabil")
+  notasEmitidas                NotaFiscal[]              @relation("PrestadorNota")
+  logs                         SystemLog[]
+  donoUser                     User?                     @relation("DonoEmpresa")
+  vinculadoA                   UserCliente[]
+  ownershipRequests            CompanyOwnershipRequest[]
+  vendasRealizadas             Venda[]                   @relation("VendaPrestador")
+  sequenciasDps                DpsSequencia[]
+  minhaCarteira                VinculoCarteira[]
+  clientesCadastrados          Cliente[]
+  donoFaturamentoId            String?
+  donoFaturamento              User?                     @relation("FaturamentoEmpresa", fields: [donoFaturamentoId], references: [id])
+  contadorCustodianteId        String?
+  contadorCustodiante          User?                     @relation("CustodiaEmpresa", fields: [contadorCustodianteId], references: [id])
+  proprietarioUserId           String?
+  proprietarioUser             User?                     @relation("ProprietarioEmpresa", fields: [proprietarioUserId], references: [id])
+  modoCobranca                 String                    @default("RESPONSAVEL_UNICO")
+  statusPropriedade            String                    @default("ORFA")
 
   @@index([donoFaturamentoId])
   @@index([contadorCustodianteId])
   @@index([proprietarioUserId])
   @@index([statusPropriedade])
+  @@index([certificadoVencimento])
+  @@index([certificadoChainStatus])
 }
 
 model DpsSequencia {
@@ -133,6 +368,7 @@ model DpsSequencia {
   ambiente            String
   serie               String
   ultimoConfirmado    Int       @default(0)
+  ultimoReservado     Int       @default(0)
   sincronizadoEm      DateTime?
   origem              String    @default("MANUAL")
   statusSincronizacao String    @default("NAO_SINCRONIZADO")
@@ -150,7 +386,9 @@ model DpsSequencia {
 model Cliente {
   id                 String            @id @default(uuid())
   tipo               String            @default("PJ")
-  documento          String?           @unique
+  documento          String?
+  empresaId          String?
+  entidadeFiscalId   String?
   nome               String
   nomeFantasia       String?
   email              String?
@@ -177,6 +415,105 @@ model Cliente {
   notas              NotaFiscal[]
   vendas             Venda[]
   vinculos           VinculoCarteira[]
+  empresa            Empresa?          @relation(fields: [empresaId], references: [id])
+  entidadeFiscal     EntidadeFiscal?   @relation(fields: [entidadeFiscalId], references: [id], onDelete: Restrict)
+
+  @@unique([empresaId, documento])
+  @@unique([id, empresaId])
+  @@index([empresaId, arquivadoEm, createdAt])
+  @@index([entidadeFiscalId])
+}
+
+// Identidade cadastral pública e compartilhada de uma pessoa jurídica. Dados
+// particulares da relação prestador/tomador permanecem em Cliente.
+model EntidadeFiscal {
+  id                String                    @id @default(uuid())
+  tipo              String                    @default("PJ")
+  documento         String                    @unique
+  razaoSocial       String
+  nomeFantasia      String?
+  situacaoCadastral String?
+  emailPublico      String?
+  telefonePublico   String?
+  cep               String?
+  logradouro        String?
+  numero            String?
+  complemento       String?
+  bairro            String?
+  cidade            String?
+  uf                String?
+  pais              String                    @default("Brasil")
+  codigoIbge        String?
+  fonte             String                    @default("LEGADO")
+  fonteConsultadaEm DateTime?
+  fontePayloadHash  String?
+  version           Int                       @default(1)
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+  clientes          Cliente[]
+  atividades        EntidadeFiscalAtividade[]
+  correcoes         EntidadeFiscalCorrecao[]
+  eventos           EntidadeFiscalEvento[]
+
+  @@index([razaoSocial])
+  @@index([updatedAt])
+}
+
+model EntidadeFiscalAtividade {
+  id               String         @id @default(uuid())
+  entidadeFiscalId String
+  codigo           String
+  descricao        String?
+  principal        Boolean        @default(false)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  entidadeFiscal   EntidadeFiscal @relation(fields: [entidadeFiscalId], references: [id], onDelete: Cascade)
+
+  @@unique([entidadeFiscalId, codigo])
+  @@index([codigo])
+}
+
+model EntidadeFiscalCorrecao {
+  id               String         @id @default(uuid())
+  entidadeFiscalId String
+  campo            String
+  valor            String?
+  justificativa    String         @db.Text
+  actorUserId      String
+  version          Int            @default(1)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  entidadeFiscal   EntidadeFiscal @relation(fields: [entidadeFiscalId], references: [id], onDelete: Cascade)
+  actor            User           @relation("EntidadeFiscalCorrecaoAutor", fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@unique([entidadeFiscalId, campo])
+  @@index([actorUserId, updatedAt])
+}
+
+model EntidadeFiscalEvento {
+  id               String         @id @default(uuid())
+  entidadeFiscalId String
+  origem           String
+  camposAlterados  String         @db.Text
+  snapshotJson     String?        @db.Text
+  actorUserId      String?
+  createdAt        DateTime       @default(now())
+  entidadeFiscal   EntidadeFiscal @relation(fields: [entidadeFiscalId], references: [id], onDelete: Cascade)
+  actor            User?          @relation("EntidadeFiscalEventoAutor", fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@index([entidadeFiscalId, createdAt])
+  @@index([actorUserId, createdAt])
+}
+
+// Auditable mapping for pre-migration IDs still present in open browser tabs/drafts.
+model ClienteTenantMigration {
+  originalClienteId String
+  empresaId         String
+  clienteId         String
+  createdAt         DateTime @default(now())
+
+  @@id([originalClienteId, empresaId])
+  @@index([clienteId])
 }
 
 model VinculoCarteira {
@@ -192,7 +529,7 @@ model VinculoCarteira {
   arquivadoEm        DateTime?
   arquivadoPor       String?
   motivoArquivamento String?
-  cliente            Cliente   @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  cliente            Cliente   @relation(fields: [clienteId, empresaId], references: [id, empresaId], onDelete: Cascade)
   empresa            Empresa   @relation(fields: [empresaId], references: [id], onDelete: Cascade)
 
   @@unique([empresaId, clienteId])
@@ -212,7 +549,7 @@ model Venda {
   motivoArquivamento String?
   notas              NotaFiscal[]
   logs               SystemLog[]
-  cliente            Cliente      @relation(fields: [clienteId], references: [id])
+  cliente            Cliente      @relation(fields: [clienteId, empresaId], references: [id, empresaId])
   empresa            Empresa      @relation("VendaPrestador", fields: [empresaId], references: [id])
 }
 
@@ -246,6 +583,17 @@ model EmissaoJob {
   partitionKey          Int       @default(0)
   idempotencyKey        String
   reservedPlanHistoryId String?
+  creditReservationId   String?   @unique
+  billingUnlimited      Boolean   @default(false)
+  ambiente              String    @default("HOMOLOGACAO")
+  transmissionStartedAt DateTime?
+  signedXml             String?   @db.Text
+  dpsId                 String?
+  preparedMetadataJson  String?   @db.Text
+  authorizedXmlBase64   String?   @db.Text
+  acknowledgedAt        DateTime?
+  leaseToken            String?
+  leaseUntil            DateTime?
   reservedDpsNumero     Int?
   serieDPS              String?
   lockedAt              DateTime?
@@ -259,22 +607,67 @@ model EmissaoJob {
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
+  creditReservation EmissionCreditReservation? @relation(fields: [creditReservationId], references: [id])
+  documentTask      EmissionDocumentTask?
+
   @@unique([empresaId, idempotencyKey])
   @@index([empresaId, status, createdAt])
   @@index([partitionKey, status, nextAttemptAt])
   @@index([vendaId])
+  @@index([status, nextAttemptAt, leaseUntil])
+}
+
+model EmissionDocumentTask {
+  id            String      @id @default(uuid())
+  jobId         String?     @unique
+  job           EmissaoJob? @relation(fields: [jobId], references: [id])
+  notaId        String      @unique
+  nota          NotaFiscal  @relation(fields: [notaId], references: [id])
+  revision      Int         @default(1)
+  status        String      @default("PENDENTE")
+  attempts      Int         @default(0)
+  leaseToken    String?
+  leaseUntil    DateTime?
+  nextAttemptAt DateTime?
+  lastError     String?
+  completedAt   DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([status, nextAttemptAt, leaseUntil])
+}
+
+model WorkerHeartbeat {
+  id                String   @id
+  productionEnabled Boolean  @default(false)
+  updatedAt         DateTime @updatedAt
+  startedAt         DateTime @default(now())
+}
+
+model EmissionRequestBlock {
+  id             String   @id @default(uuid())
+  empresaId      String
+  idempotencyKey String
+  actorUserId    String
+  createdAt      DateTime @default(now())
+
+  @@unique([empresaId, idempotencyKey])
 }
 
 model UserCliente {
-  id        String   @id @default(uuid())
-  userId    String
-  empresaId String
-  apelido   String?
-  createdAt DateTime @default(now())
-  empresa   Empresa  @relation(fields: [empresaId], references: [id])
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id               String    @id @default(uuid())
+  userId           String
+  empresaId        String
+  apelido          String?
+  createdAt        DateTime  @default(now())
+  revokedAt        DateTime?
+  revokedBy        String?
+  revocationReason String?
+  empresa          Empresa   @relation(fields: [empresaId], references: [id])
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, empresaId])
+  @@index([empresaId, revokedAt])
 }
 
 model Cnae {
@@ -289,18 +682,23 @@ model Cnae {
 }
 
 model NotaFiscal {
-  id                          String     @id @default(uuid())
+  id                          String                @id @default(uuid())
   vendaId                     String?
   numero                      Int?
-  valor                       Decimal    @db.Decimal(10, 2)
+  numeroOficial               String?
+  ambiente                    String?
+  dataCancelamento            DateTime?
+  valor                       Decimal               @db.Decimal(10, 2)
   descricao                   String
   prestadorCnpj               String
   tomadorCnpj                 String
-  status                      StatusNota @default(RASCUNHO)
+  tomadorNome                 String?
+  metadadosVerificadosEm      DateTime?
+  status                      StatusNota            @default(RASCUNHO)
   xmlBase64                   String?
   xmlAutorizadoBase64         String?
   xmlCancelamentoEventoBase64 String?
-  fiscalSnapshotJson          String?    @db.Text
+  fiscalSnapshotJson          String?               @db.Text
   pdfBase64                   String?
   chaveAcesso                 String?
   protocolo                   String?
@@ -309,13 +707,52 @@ model NotaFiscal {
   cnae                        String?
   codigoServico               String?
   dataEmissao                 DateTime?
-  createdAt                   DateTime   @default(now())
+  createdAt                   DateTime              @default(now())
   arquivadoEm                 DateTime?
   arquivadoPor                String?
   motivoArquivamento          String?
-  cliente                     Cliente    @relation(fields: [clienteId], references: [id])
-  empresa                     Empresa    @relation("PrestadorNota", fields: [empresaId], references: [id])
-  venda                       Venda?     @relation(fields: [vendaId], references: [id])
+  cliente                     Cliente               @relation(fields: [clienteId, empresaId], references: [id, empresaId])
+  empresa                     Empresa               @relation("PrestadorNota", fields: [empresaId], references: [id])
+  venda                       Venda?                @relation(fields: [vendaId], references: [id])
+  documentTask                EmissionDocumentTask?
+  fiscalOperations            FiscalNoteOperation[]
+
+  @@unique([id, empresaId])
+  @@index([empresaId, ambiente, dataEmissao, id])
+}
+
+model FiscalNoteOperation {
+  id                    String     @id @default(uuid())
+  notaId                String
+  empresaId             String
+  nota                  NotaFiscal @relation(fields: [notaId, empresaId], references: [id, empresaId], onDelete: Restrict)
+  actorUserId           String
+  tipo                  String
+  ambiente              String
+  chaveAcesso           String
+  issuerDocument        String
+  originalXmlHash       String?
+  idempotencyKey        String
+  reasonCode            String?
+  justification         String?
+  signedRequestXml      String?    @db.Text
+  transmissionStartedAt DateTime?
+  status                String     @default("PENDENTE")
+  statusMessage         String?
+  resultStatus          String?
+  attempts              Int        @default(0)
+  maxAttempts           Int        @default(8)
+  nextAttemptAt         DateTime?
+  leaseToken            String?
+  leaseUntil            DateTime?
+  finishedAt            DateTime?
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
+
+  @@unique([notaId, idempotencyKey])
+  @@index([notaId, createdAt])
+  @@index([empresaId, status, createdAt])
+  @@index([status, nextAttemptAt, leaseUntil])
 }
 
 model ConfiguracaoSistema {
@@ -338,6 +775,8 @@ model ConfiguracaoSistema {
   manutencaoMensagem        String?   @db.Text
   manutencaoPrevisao        String?
   manutencaoAtualizadaEm    DateTime?
+  version                   Int       @default(0)
+  updatedAt                 DateTime  @updatedAt
 }
 
 model GlobalNotice {
@@ -359,6 +798,7 @@ model GlobalNotice {
   arquivadoEm  DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
+  version      Int       @default(0)
 
   @@index([status, iniciaEm, terminaEm])
   @@index([publico])
@@ -533,19 +973,60 @@ model Plan {
 }
 
 model PlanHistory {
-  id                 String    @id @default(uuid())
-  userId             String
-  planId             String
-  dataInicio         DateTime  @default(now())
-  dataFim            DateTime?
-  status             String    @default("ATIVO")
-  notasEmitidas      Int       @default(0)
-  createdAt          DateTime  @default(now())
-  arquivadoEm        DateTime?
-  arquivadoPor       String?
-  motivoArquivamento String?
-  plan               Plan      @relation(fields: [planId], references: [id])
-  user               User      @relation(fields: [userId], references: [id])
+  id                       String           @id @default(uuid())
+  userId                   String
+  planId                   String
+  dataInicio               DateTime         @default(now())
+  dataFim                  DateTime?
+  status                   String           @default("ATIVO")
+  notasEmitidas            Int              @default(0)
+  limiteNotasContratado    Int?
+  limiteClientesContratado Int?
+  tipoContratado           String?
+  nomeContratado           String?
+  cicloInicio              DateTime?
+  pedidoId                 String?
+  createdAt                DateTime         @default(now())
+  arquivadoEm              DateTime?
+  arquivadoPor             String?
+  motivoArquivamento       String?
+  plan                     Plan             @relation(fields: [planId], references: [id])
+  user                     User             @relation(fields: [userId], references: [id])
+  pedido                   Pedido?          @relation(fields: [pedidoId], references: [id])
+  usageCycles              PlanUsageCycle[]
+
+  @@unique([pedidoId, planId])
+  @@index([userId, status, dataInicio, dataFim])
+}
+
+model PlanUsageCycle {
+  id           String                      @id @default(uuid())
+  historyId    String
+  startsAt     DateTime
+  endsAt       DateTime?
+  used         Int                         @default(0)
+  createdAt    DateTime                    @default(now())
+  history      PlanHistory                 @relation(fields: [historyId], references: [id])
+  reservations EmissionCreditReservation[]
+
+  @@unique([historyId, startsAt])
+  @@index([historyId, endsAt])
+}
+
+model EmissionCreditReservation {
+  id          String         @id @default(uuid())
+  userId      String
+  requestKey  String         @unique
+  cycleId     String
+  status      String         @default("RESERVED")
+  createdAt   DateTime       @default(now())
+  completedAt DateTime?
+  user        User           @relation(fields: [userId], references: [id])
+  cycle       PlanUsageCycle @relation(fields: [cycleId], references: [id])
+  job         EmissaoJob?
+
+  @@index([userId, status, createdAt])
+  @@index([cycleId, status])
 }
 
 model SystemLog {
@@ -576,28 +1057,29 @@ model SystemLog {
 }
 
 model Ticket {
-  id                 String           @id @default(uuid())
-  protocolo          Int              @default(autoincrement())
+  id                 String                    @id @default(uuid())
+  protocolo          Int                       @default(autoincrement())
   assunto            String
   categoria          String?
-  prioridade         String           @default("MEDIA")
+  prioridade         String                    @default("MEDIA")
   descricao          String
-  status             String           @default("ABERTO")
-  clientUnread       Boolean          @default(false)
+  status             String                    @default("ABERTO")
+  clientUnread       Boolean                   @default(false)
   anexoBase64        String?
   anexoNome          String?
   catalogId          String?
   solicitanteId      String
   atendenteId        String?
-  createdAt          DateTime         @default(now())
-  updatedAt          DateTime         @updatedAt
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
   arquivadoEm        DateTime?
   arquivadoPor       String?
   motivoArquivamento String?
-  atendente          User?            @relation("AtendenteTicket", fields: [atendenteId], references: [id])
-  catalogItem        TicketCatalog?   @relation(fields: [catalogId], references: [id])
-  solicitante        User             @relation("SolicitanteTicket", fields: [solicitanteId], references: [id])
+  atendente          User?                     @relation("AtendenteTicket", fields: [atendenteId], references: [id])
+  catalogItem        TicketCatalog?            @relation(fields: [catalogId], references: [id])
+  solicitante        User                      @relation("SolicitanteTicket", fields: [solicitanteId], references: [id])
   mensagens          TicketMensagem[]
+  ownershipRequests  CompanyOwnershipRequest[]
 }
 
 model TicketMensagem {
@@ -653,24 +1135,41 @@ model MunicipioHomologado {
 }
 
 model Pedido {
-  id                 String        @id @default(uuid())
-  userId             String
-  planoSlug          String
-  ciclo              String
-  notasAdicionais    Int           @default(0)
-  valorPlano         Decimal       @db.Decimal(10, 2)
-  valorAdicionais    Decimal       @db.Decimal(10, 2)
-  valorTotal         Decimal       @db.Decimal(10, 2)
-  status             String        @default("PENDENTE")
-  formaPagamento     String?
-  gatewayId          String?
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
-  arquivadoEm        DateTime?
-  arquivadoPor       String?
-  motivoArquivamento String?
-  user               User          @relation(fields: [userId], references: [id])
-  anexos             PedidoAnexo[]
+  id                  String        @id @default(uuid())
+  userId              String
+  planoSlug           String
+  ciclo               String
+  notasAdicionais     Int           @default(0)
+  valorPlano          Decimal       @db.Decimal(10, 2)
+  valorAdicionais     Decimal       @db.Decimal(10, 2)
+  valorTotal          Decimal       @db.Decimal(10, 2)
+  status              String        @default("PENDENTE")
+  formaPagamento      String?
+  gatewayId           String?
+  cotacao             Json?
+  cotacaoHash         String?
+  idempotencyKey      String?
+  pendingKey          String?       @unique
+  expiresAt           DateTime?
+  cupomId             String?
+  cupomEstado         String?
+  faturaId            String?       @unique
+  referenciaPagamento String?       @unique
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  arquivadoEm         DateTime?
+  arquivadoPor        String?
+  motivoArquivamento  String?
+  user                User          @relation(fields: [userId], references: [id])
+  anexos              PedidoAnexo[]
+  historicos          PlanHistory[]
+  cupom               Cupom?        @relation(fields: [cupomId], references: [id])
+  fatura              Fatura?       @relation(fields: [faturaId], references: [id])
+
+  @@unique([userId, idempotencyKey])
+  @@index([userId, formaPagamento, status, createdAt])
+  @@index([cupomId, cupomEstado, expiresAt])
+  @@index([status, expiresAt])
 }
 
 model PedidoAnexo {
@@ -694,6 +1193,7 @@ enum Role {
   ADMIN
   SUPORTE
   SUPORTE_TI
+  COMERCIAL
   CONTADOR
   COMUM
 }
@@ -749,6 +1249,7 @@ model Fatura {
 
   // Relação 1 para N (Uma fatura pode ter registado o uso de um cupom)
   cupomLogs CupomLog[]
+  pedido    Pedido?
 
   @@index([userId])
   @@index([status])
@@ -784,7 +1285,8 @@ model Cupom {
   updatedAt DateTime @updatedAt
 
   // Relação (Quem usou este cupom)
-  logs CupomLog[]
+  logs    CupomLog[]
+  pedidos Pedido[]
 
   // Novas regras avançadas
   planosValidos        String? // Guarda os IDs dos planos selecionados no container
@@ -816,4 +1318,60 @@ model CupomLog {
   @@index([cupomId])
   @@index([userId])
   @@index([faturaId])
+}
+
+// Immutable proposal; it grants no company access until all gates commit together.
+model CompanyOwnershipRequest {
+  id                      String                    @id @default(uuid())
+  empresaId               String
+  initiatorId             String
+  proposedOwnerId         String
+  previousOwnerId         String?
+  previousPrimaryUserId   String?
+  mode                    String
+  status                  String                    @default("PENDING")
+  termsVersion            String
+  ownershipSnapshotJson   String                    @db.Text
+  snapshotHash            String
+  caseTicketId            String
+  evidenceMessageId       String
+  evidenceHash            String
+  justification           String                    @db.Text
+  reviewerId              String?
+  reviewEvidenceMessageId String?
+  reviewEvidenceHash      String?
+  resolutionJustification String?
+  resolvedById            String?
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
+  expiresAt               DateTime
+  finishedAt              DateTime?
+  empresa                 Empresa                   @relation(fields: [empresaId], references: [id], onDelete: Restrict)
+  initiator               User                      @relation("OwnershipInitiator", fields: [initiatorId], references: [id], onDelete: Restrict)
+  proposedOwner           User                      @relation("OwnershipRecipient", fields: [proposedOwnerId], references: [id], onDelete: Restrict)
+  previousOwner           User?                     @relation("OwnershipPrevious", fields: [previousOwnerId], references: [id], onDelete: Restrict)
+  previousPrimaryUser     User?                     @relation("OwnershipPrimary", fields: [previousPrimaryUserId], references: [id], onDelete: Restrict)
+  reviewer                User?                     @relation("OwnershipReviewer", fields: [reviewerId], references: [id], onDelete: Restrict)
+  caseTicket              Ticket                    @relation(fields: [caseTicketId], references: [id], onDelete: Restrict)
+  consents                CompanyOwnershipConsent[]
+
+  @@index([empresaId, status, createdAt])
+  @@index([proposedOwnerId, status, createdAt])
+  @@index([previousOwnerId, status, createdAt])
+  @@index([previousPrimaryUserId, status, createdAt])
+  @@index([status, expiresAt])
+}
+
+model CompanyOwnershipConsent {
+  id             String                  @id @default(uuid())
+  requestId      String
+  userId         String
+  sessionVersion Int
+  termsHash      String
+  acceptedAt     DateTime                @default(now())
+  request        CompanyOwnershipRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  user           User                    @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([requestId, userId])
+  @@index([userId])
 }

@@ -1,5 +1,5 @@
-import { Prisma } from '@prisma/client';
 import { prisma } from '@/app/utils/prisma';
+import { noticeAudiences } from '@/app/services/globalNoticeService';
 
 type NotificationPriority = 'LOW' | 'NORMAL' | 'HIGH';
 
@@ -31,11 +31,6 @@ type FiscalNotificationParams = {
 const appNotificationModel = (prisma as any).appNotification;
 let notificationTableReadyCache: boolean | null = null;
 let globalNoticeAppColumnReadyCache: boolean | null = null;
-
-function audienceForRole(role: string) {
-  if (role === 'CONTADOR') return ['TODOS', 'CONTADORES'];
-  return ['TODOS', 'CLIENTES'];
-}
 
 function uniq(values: Array<string | null | undefined>) {
   return Array.from(new Set(values.filter(Boolean) as string[]));
@@ -153,7 +148,7 @@ export async function notifyFiscalEvent(params: FiscalNotificationParams) {
       select: { id: true },
     }),
     prisma.userCliente.findMany({
-      where: { empresaId: venda.empresaId },
+      where: { empresaId: venda.empresaId, revokedAt: null },
       select: { userId: true },
       take: 50,
     }),
@@ -205,19 +200,11 @@ export async function syncGlobalNoticeNotificationsForUser(user: { id: string; r
   if (!(await notificationTableReady()) || !(await globalNoticeAppColumnReady())) return 0;
 
   const now = new Date();
-  const audience = audienceForRole(user.role);
-  const audienceSql = Prisma.join(audience);
-  const notices = await prisma.$queryRaw<Array<any>>`
-    SELECT *
-    FROM "GlobalNotice"
-    WHERE "status" = 'ATIVO'
-      AND "notificarApp" = true
-      AND "publico" IN (${audienceSql})
-      AND ("iniciaEm" IS NULL OR "iniciaEm" <= ${now})
-      AND ("terminaEm" IS NULL OR "terminaEm" >= ${now})
-    ORDER BY "tipo" DESC, "createdAt" DESC
-    LIMIT 20
-  `;
+  const notices = await prisma.globalNotice.findMany({ where: { status: 'ATIVO', notificarApp: true,
+    publico: { in: noticeAudiences(user.role) }, OR: [{ iniciaEm: null }, { iniciaEm: { lte: now } }],
+    AND: [{ OR: [{ terminaEm: null }, { terminaEm: { gte: now } }] }] }, orderBy: [{ tipo: 'desc' }, { createdAt: 'desc' }],
+    take: 20, select: { id: true, tipo: true, titulo: true, mensagem: true, publico: true, linkLabel: true,
+      linkHref: true, anexoNome: true, terminaEm: true } });
 
   await Promise.all(
     notices.map((notice: any) =>
@@ -235,7 +222,7 @@ export async function syncGlobalNoticeNotificationsForUser(user: { id: string; r
           linkLabel: notice.linkLabel,
           linkHref: notice.linkHref,
           anexoNome: notice.anexoNome,
-          anexoBase64: notice.anexoBase64,
+          attachmentHref: notice.anexoNome ? `/api/avisos/${notice.id}/anexo` : null,
           terminaEm: notice.terminaEm,
         },
       }),

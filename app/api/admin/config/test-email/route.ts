@@ -1,129 +1,50 @@
 import { NextResponse } from 'next/server';
-import nodemailer from 'nodemailer';
+import { withApiGuard } from '@/app/utils/api-route';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 import { isAdminRole } from '@/app/utils/access-control';
-import { decrypt } from '@/app/utils/crypto';
+import { requireAdminReauthentication } from '@/app/utils/admin-security';
+import { EmailService } from '@/app/services/EmailService';
+import { createLog, createTraceId } from '@/app/services/logger';
 import { prisma } from '@/app/utils/prisma';
-import { createLog, createTraceId, getErrorDiagnostics, inferDebugHint } from '@/app/services/logger';
+import { CommercialError } from '@/app/utils/commercial-pricing';
+import { assertSmtpHostAllowed, normalizeSmtpHost } from '@/app/utils/smtp-security';
 
-export async function POST(request: Request) {
+export const POST = withApiGuard(async function POST(request: Request) {
+  const user = await getAuthenticatedUser(request);
+  if (!user) return unauthorized();
+  if (!isAdminRole(user.role)) return forbidden();
   const traceId = createTraceId('smtp');
-  const startedAt = Date.now();
-  const requestPath = new URL(request.url).pathname;
-  const userAuth = await getAuthenticatedUser(request);
-  if (!userAuth) return unauthorized();
-  if (!isAdminRole(userAuth.role)) return forbidden();
-
-  const userFull = await prisma.user.findUnique({ where: { id: userAuth.id } });
-  if (!userFull || !userFull.email) {
-    return NextResponse.json({ error: 'Usuario sem e-mail.' }, { status: 400 });
-  }
-
   try {
     const body = await request.json();
-
-    let passToUse = body.smtpPass;
-
-    if (!passToUse || passToUse === '********') {
-      const configSalva = await prisma.configuracaoSistema.findUnique({ where: { id: 'config' } });
-      passToUse = decrypt(configSalva?.smtpPass || '') || '';
+    if (!body || typeof body !== 'object' || Array.isArray(body)
+      || Object.keys(body).some(key => !['adminPassword', 'justification'].includes(key))) {
+      return NextResponse.json({ error: 'Envie somente senha e justificativa para testar a configuração já salva.' }, { status: 400 });
     }
-
-    if (!body.smtpHost || !body.smtpUser || !passToUse) {
-      return NextResponse.json({ error: 'Preencha host, usuario e senha para testar.' }, { status: 400 });
+    const reauthentication = await requireAdminReauthentication({ actorId: user.id, password: body.adminPassword,
+      justification: body.justification, action: 'SMTP_CONFIGURATION_TEST' });
+    if (reauthentication) return reauthentication;
+    const [account, config] = await Promise.all([
+      prisma.user.findUnique({ where: { id: user.id }, select: { email: true, nome: true } }),
+      prisma.configuracaoSistema.findUnique({ where: { id: 'config' }, select: { smtpHost: true, smtpUser: true,
+        smtpPass: true, emailRemetente: true } }),
+    ]);
+    if (!account?.email || !config?.smtpHost || !config.smtpUser || !config.smtpPass || !config.emailRemetente) {
+      return NextResponse.json({ error: 'Salve uma configuração SMTP completa antes do teste.' }, { status: 409 });
     }
-
-    await createLog({
-      level: 'INFO',
-      action: 'SMTP_TESTE_INICIADO',
-      message: `Teste SMTP iniciado por ${userFull.email}.`,
-      module: 'EMAIL',
-      traceId,
-      userId: userFull.id,
-      requestPath,
-      details: {
-        host: body.smtpHost,
-        port: body.smtpPort,
-        secure: body.smtpSecure === true,
-        smtpUser: body.smtpUser,
-        remetente: body.emailRemetente || body.smtpUser,
-      },
-    });
-
-    const remetente = body.emailRemetente || body.smtpUser;
-    const transporter = nodemailer.createTransport({
-      host: body.smtpHost,
-      port: Number(body.smtpPort) || 587,
-      secure: body.smtpSecure === true,
-      auth: {
-        user: body.smtpUser,
-        pass: passToUse,
-      },
-      tls: {
-        rejectUnauthorized: process.env.NODE_ENV === 'production',
-      },
-    });
-
-    await transporter.verify();
-
-    await transporter.sendMail({
-      from: `"NFSe Goo" <${remetente}>`,
-      to: userFull.email,
-      subject: 'Teste de configuracao - NFSe Goo',
-      html: `
-        <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #ccc; border-radius: 8px; color: #334155;">
-          <h2 style="color: #16a34a; margin-top: 0;">Sucesso!</h2>
-          <p>Ola, <strong>${userFull.nome}</strong>.</p>
-          <p>Se voce recebeu este e-mail, as configuracoes SMTP do NFSe Goo estao funcionando corretamente.</p>
-          <hr style="border: none; border-top: 1px solid #e2e8f0;" />
-          <p style="font-size: 12px; color: #666;">
-            <strong>Host:</strong> ${body.smtpHost}<br/>
-            <strong>Porta:</strong> ${body.smtpPort}<br/>
-            <strong>Seguro:</strong> ${body.smtpSecure ? 'Sim' : 'Nao'}
-          </p>
-        </div>
-      `,
-    });
-
-    await createLog({
-      level: 'INFO',
-      action: 'SMTP_TESTE_SUCESSO',
-      message: `SMTP validado e e-mail de teste enviado para ${userFull.email}.`,
-      module: 'EMAIL',
-      traceId,
-      userId: userFull.id,
-      requestPath,
-      statusCode: 200,
-      durationMs: Date.now() - startedAt,
-      details: { to: userFull.email, host: body.smtpHost, port: body.smtpPort },
-    });
-
-    return NextResponse.json({
-      success: true,
-      message: `E-mail enviado com sucesso para ${userFull.email}!`,
-    });
-  } catch (error: any) {
-    console.error('Erro SMTP:', error);
-    await createLog({
-      level: 'ERRO',
-      action: 'SMTP_TESTE_FALHA',
-      message: `Falha no teste SMTP: ${error.message}`,
-      module: 'EMAIL',
-      traceId,
-      userId: userAuth?.id,
-      requestPath,
-      statusCode: 400,
-      durationMs: Date.now() - startedAt,
-      debugHint: inferDebugHint(error, 'Confira host, porta, modo seguro, usuario, senha e limites do provedor SMTP.'),
-      details: getErrorDiagnostics(error),
-    });
-
-    return NextResponse.json(
-      {
-        error: 'Falha na conexao SMTP.',
-        details: error.message,
-      },
-      { status: 400 },
-    );
+    await assertSmtpHostAllowed(normalizeSmtpHost(config.smtpHost));
+    const email = new EmailService();
+    const result = await email.sendEmail(account.email, 'Teste de configuração - NFSe Goo',
+      email.getTemplateContratacaoManual({ nome: account.nome, titulo: 'Configuração SMTP validada',
+        mensagem: 'Esta mensagem confirma que o provedor salvo aceitou um envio transacional.' }), [],
+      { traceId, userId: user.id, requestPath: '/api/admin/config/test-email', module: 'EMAIL', queueOnFailure: false });
+    await createLog({ level: result.success ? 'INFO' : 'ERRO', action: result.success ? 'SMTP_TEST_SUCCESS' : 'SMTP_TEST_FAILED',
+      module: 'EMAIL', traceId, userId: user.id, statusCode: result.success ? 200 : 502,
+      message: result.success ? 'Teste da configuração SMTP salva concluído.' : 'Provedor recusou o teste da configuração SMTP salva.',
+      details: { justification: String(body.justification).trim() } });
+    if (!result.success) return NextResponse.json({ error: 'O provedor não aceitou a mensagem. Consulte o protocolo nos logs.' }, { status: 502 });
+    return NextResponse.json({ success: true, message: 'Mensagem de teste aceita pelo provedor salvo.' });
+  } catch (error) {
+    if (error instanceof CommercialError) return NextResponse.json({ error: error.message }, { status: error.status });
+    throw error;
   }
-}
+}, { maxBodyBytes: 8 * 1024 });

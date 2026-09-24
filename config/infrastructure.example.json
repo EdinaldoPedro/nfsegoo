@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "status": "APPROVED",
+  "environment": "PRODUCTION",
+  "approvedAt": "2026-09-24T12:00:00.000Z",
+  "reviewDueAt": "2027-03-20T12:00:00.000Z",
+  "architecture": {
+    "webReplicas": 1,
+    "singleReplicaRiskAccepted": true,
+    "workerServices": ["EMISSION", "DOCUMENT", "CONSULTATION"],
+    "managedPostgres": true,
+    "postgresMajor": 16,
+    "databasePubliclyAccessible": false,
+    "databaseTlsVerifyFull": true,
+    "encryptionAtRest": true,
+    "connectionBudgetDocumented": true,
+    "secretsVault": true,
+    "secretsVersioned": true,
+    "httpsOnly": true,
+    "externalHealthMonitoring": true,
+    "centralizedLogs": true,
+    "logRetentionDays": 30
+  },
+  "recovery": {
+    "automaticBackups": true,
+    "pointInTimeRecovery": true,
+    "retentionDays": 14,
+    "crossFailureDomainCopy": true,
+    "rpoHours": 24,
+    "rtoHours": 8,
+    "restoreTestedAt": "2026-09-24T12:00:00.000Z",
+    "evidenceRef": "runbook/restore/2026-09-24",
+    "xmlPdfRestored": true,
+    "encryptionKeyRestored": true,
+    "fiscalTransmissionDisabledDuringTest": true
+  },
+  "responsibilities": [
+    { "role": "APPLICATION", "owner": "equipe-plataforma", "escalationRef": "oncall/plataforma" },
+    { "role": "DATABASE", "owner": "equipe-plataforma", "escalationRef": "oncall/banco" },
+    { "role": "BACKUP_RESTORE", "owner": "responsavel-recuperacao", "escalationRef": "runbook/recuperacao" },
+    { "role": "SECURITY_SECRETS", "owner": "responsavel-seguranca", "escalationRef": "oncall/seguranca" },
+    { "role": "OBSERVABILITY", "owner": "equipe-operacao", "escalationRef": "oncall/operacao" },
+    { "role": "INCIDENT_RESPONSE", "owner": "coordenador-incidentes", "escalationRef": "runbook/incidentes" }
+  ]
+}

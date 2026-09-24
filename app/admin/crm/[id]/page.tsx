@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft, CreditCard, Clock, MessageSquare, Activity, Mail, Send, AlertCircle, Building2, FileCheck, Wrench, ShieldCheck } from 'lucide-react';
 import { useDialog } from '@/app/contexts/DialogContext';
@@ -16,7 +16,7 @@ export default function PerfilCrmCliente() {
     const [novaNota, setNovaNota] = useState('');
     const [loading, setLoading] = useState(true);
 
-    const carregarDados = async () => {
+    const carregarDados = useCallback(async () => {
         setLoading(true);
         const token = localStorage.getItem('token');
         try {
@@ -35,11 +35,11 @@ export default function PerfilCrmCliente() {
         } finally {
             setLoading(false);
         }
-    };
+    }, [dialog, params.id]);
 
     useEffect(() => {
         carregarDados();
-    }, [params.id]);
+    }, [carregarDados]);
 
     const handleAdicionarNota = async () => {
         if (!novaNota.trim()) return;
@@ -79,8 +79,8 @@ export default function PerfilCrmCliente() {
     if (loading) return <div className="p-8 text-center text-slate-500">A carregar perfil 360º...</div>;
     if (!user) return <div className="p-8 text-center text-red-500">Utilizador não encontrado.</div>;
 
-    const planoAtivo = user.planHistories?.find((h: any) => h.status === 'ATIVO');
-    const limites = diagnostico?.limites;
+    const limites = diagnostico?.limites || user.limits;
+    const planoAtivo = limites?.planoBase;
     const problemas = diagnostico?.problemas || [];
     const resumo = diagnostico?.resumo || {};
     const totalEmpresasOperacionais = (resumo.empresasProprietarias || 0) + (resumo.empresasCustodiadas || 0);
@@ -139,7 +139,7 @@ export default function PerfilCrmCliente() {
                                     <FileCheck size={14} /> NFS-e
                                 </div>
                                 <p className="text-lg font-black text-slate-900 mt-1">
-                                    {limites ? `${limites.notasUsadas}/${limites.limiteNotas || '∞'}` : '--'}
+                                    {limites ? `${limites.notasUsadas}/${limites.limiteNotas}` : '--'}
                                 </p>
                             </div>
                             <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
@@ -203,17 +203,17 @@ export default function PerfilCrmCliente() {
                         
                         {planoAtivo ? (
                             <div>
-                                <div className="text-2xl font-black text-white mb-1">{planoAtivo.plan?.name || 'Plano Personalizado'}</div>
-                                <div className="text-emerald-400 font-bold mb-4">R$ {Number(planoAtivo.plan?.priceMonthly || 0).toFixed(2)} <span className="text-xs text-slate-400 font-normal">/ mês (MRR)</span></div>
+                                <div className="text-2xl font-black text-white mb-1">{planoAtivo.nome}</div>
+                                <p className="text-xs text-slate-400 mb-4">Valores recebidos constam em Contratações. O preço do catálogo não comprova receita.</p>
                                 
                                 <div className="space-y-2">
                                     <div className="bg-slate-800/50 rounded-lg p-2 flex justify-between items-center text-sm border border-slate-700/50">
                                         <span className="text-slate-300">Notas Usadas:</span>
-                                        <span className="font-bold text-white">{planoAtivo.notasEmitidas} / {planoAtivo.plan?.maxNotasMensal || '∞'}</span>
+                                        <span className="font-bold text-white">{limites.notasUsadas} / {limites.limiteNotas}</span>
                                     </div>
                                     <div className="bg-slate-800/50 rounded-lg p-2 flex justify-between items-center text-sm border border-slate-700/50">
-                                        <span className="text-slate-300">Renovação:</span>
-                                        <span className="font-bold text-white">{planoAtivo.dataFim ? new Date(planoAtivo.dataFim).toLocaleDateString('pt-BR') : 'Vitalício'}</span>
+                                        <span className="text-slate-300">Vencimento:</span>
+                                        <span className="font-bold text-white">{planoAtivo.dataFim ? new Date(planoAtivo.dataFim).toLocaleDateString('pt-BR') : 'Sem vencimento informado'}</span>
                                     </div>
                                 </div>
                             </div>

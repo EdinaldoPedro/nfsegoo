@@ -73,11 +73,11 @@ export default function ResolucaoAdmin() {
           }
           setError(''); 
       } catch (e: any) { 
-          if (!ticket) setError(e.message || "Erro desconhecido");
+          setError(e.message || "Erro desconhecido");
       } finally {
           setLoading(false);
       }
-  }, [id, staffMembers.length, ticket, router]);
+  }, [id, staffMembers.length, router]);
 
   useEffect(() => { 
       carregarDados(); 
@@ -105,7 +105,7 @@ export default function ResolucaoAdmin() {
           const timer = setInterval(updateTimer, 60000);
           return () => clearInterval(timer);
       }
-  }, [ticket?.status, ticket?.createdAt, ticket?.updatedAt]);
+  }, [ticket]);
 
   useEffect(() => { msgEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [ticket?.mensagens?.length, activeTab]);
 

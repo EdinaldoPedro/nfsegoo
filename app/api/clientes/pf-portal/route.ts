@@ -1,19 +1,33 @@
+import { withApiGuard } from '@/app/utils/api-route';
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '@/app/utils/prisma';
 import { NfsePortalInscricaoClient } from '@/app/services/portal/NfsePortalInscricaoClient';
 import { validateRequest } from '@/app/utils/api-security';
 import { validarCPF } from '@/app/utils/cpf';
 import { resolveEmpresaContexto } from '@/app/utils/access-control';
+import { checkRateLimit } from '@/app/utils/rate-limit';
+import { validateJsonContentLength } from '@/app/utils/request-guards';
 
-const prisma = new PrismaClient();
-const MAX_CONSULTA_CPF_ATTEMPTS = 3;
+const MAX_CONSULTA_CPF_ATTEMPTS = 2;
 const RETRY_DELAY_MS = 1500;
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function POST(request: Request) {
+function consultationFailureCategory(error: unknown) {
+  const cause = error instanceof Error && error.cause instanceof Error ? error.cause : error;
+  const message = cause instanceof Error ? cause.message.toLowerCase() : '';
+  if (message.includes('navegador automatizado')) return 'BROWSER_UNAVAILABLE';
+  if (message.includes('login por certificado') || message.includes('sessao autenticada') || message.includes('link de acesso por certificado')) return 'PORTAL_AUTH';
+  if (message.includes('abrir e validar o certificado') || message.includes('certificado digital ausente') ||
+      message.includes('senha do certificado digital ausente') || message.includes('pkcs') || message.includes('cadeia de confiança')) return 'CERTIFICATE';
+  if (message.includes('http ') || message.includes('resposta invalida') || message.includes('nome/razao social')) return 'PORTAL_RESPONSE';
+  if (message.includes('timeout') || message.includes('timed out')) return 'TIMEOUT';
+  return 'UNKNOWN';
+}
+
+export const POST = withApiGuard(async function POST(request: Request) {
   const { targetId, errorResponse } = await validateRequest(request);
   if (errorResponse) return errorResponse;
 
@@ -21,6 +35,8 @@ export async function POST(request: Request) {
     const user = await prisma.user.findUnique({ where: { id: targetId } });
     if (!user) return NextResponse.json({ error: 'Proibido' }, { status: 401 });
 
+    const sizeError = validateJsonContentLength(request, 8 * 1024);
+    if (sizeError) return sizeError;
     const body = await request.json();
     const cpf = String(body.cpf || '').replace(/\D/g, '');
 
@@ -33,8 +49,7 @@ export async function POST(request: Request) {
     if (!empresaIdAlvo) {
       return NextResponse.json({ error: 'Acesso negado a esta empresa.' }, { status: 403 });
     }
-
-    const clienteExistente = await prisma.cliente.findUnique({ where: { documento: cpf } });
+    const clienteExistente = await prisma.cliente.findFirst({ where: { empresaId: empresaIdAlvo, documento: cpf, arquivadoEm: null } });
     if (clienteExistente) {
       return NextResponse.json({
         origem: 'BANCO_DADOS',
@@ -42,10 +57,19 @@ export async function POST(request: Request) {
         nome: clienteExistente.nome,
       });
     }
+    if (process.env.NODE_ENV === 'production' && process.env.ENABLE_PORTAL_CPF_AUTOMATION !== 'true') {
+      return NextResponse.json({
+        error: 'A consulta automática de CPF está desativada. Informe o nome manualmente.',
+        code: 'PORTAL_CPF_AUTOMATION_DISABLED',
+      }, { status: 409 });
+    }
+    if (!await checkRateLimit(`cpf_portal:${user.id}:${empresaIdAlvo}`, 5, 10 * 60 * 1000)) {
+      return NextResponse.json({ error: 'Limite de consultas oficiais atingido. Aguarde até dez minutos antes de tentar novamente. Você pode preencher o nome manualmente.', code: 'PORTAL_CPF_RATE_LIMITED' }, { status: 429 });
+    }
 
     const empresa = await prisma.empresa.findUnique({
       where: { id: empresaIdAlvo },
-      select: { id: true, certificadoA1: true, senhaCertificado: true },
+      select: { id: true, documento: true, certificadoA1: true, senhaCertificado: true },
     });
 
     if (!empresa?.certificadoA1 || !empresa?.senhaCertificado) {
@@ -56,7 +80,6 @@ export async function POST(request: Request) {
 
     const client = new NfsePortalInscricaoClient();
     let info = null;
-    let ultimoErro: any = null;
 
     for (let tentativa = 1; tentativa <= MAX_CONSULTA_CPF_ATTEMPTS; tentativa += 1) {
       try {
@@ -70,21 +93,24 @@ export async function POST(request: Request) {
             navigationTimeoutMs: 25000,
             authTimeoutMs: 20000,
             actionTimeoutMs: 6000,
+            expectedCnpj: empresa.documento,
           },
         );
         break;
-      } catch (error: any) {
-        ultimoErro = error;
-        console.warn(`[CPF PORTAL] Tentativa ${tentativa}/${MAX_CONSULTA_CPF_ATTEMPTS} falhou: ${error.message}`);
+      } catch (error) {
+        // Do not log CPF, certificate material, Playwright URLs or raw responses.
+        const category = consultationFailureCategory(error);
+        console.warn('[CPF_PORTAL_CONSULTATION_FAILED]', { category, attempt: tentativa });
+        if (category === 'BROWSER_UNAVAILABLE' || category === 'CERTIFICATE') break;
         if (tentativa < MAX_CONSULTA_CPF_ATTEMPTS) await delay(RETRY_DELAY_MS);
       }
     }
 
     if (!info) {
       return NextResponse.json({
-        error: 'Portal Nacional instavel: nao foi possivel consultar este CPF apos algumas tentativas. Tente novamente em instantes. Se necessario, informe o nome manualmente; o endereco completo continuara obrigatorio para emitir.',
-        details: ultimoErro?.message,
-      }, { status: 504 });
+        error: 'Não foi possível concluir a consulta oficial agora. Você pode informar o nome manualmente e tentar novamente mais tarde. O endereço completo continua obrigatório para emitir.',
+        code: 'PORTAL_CPF_UNAVAILABLE',
+      }, { status: 424 });
     }
 
     return NextResponse.json({
@@ -95,9 +121,9 @@ export async function POST(request: Request) {
       codigoPais: info.codigoPais,
       dataConsulta: info.dataConsulta,
     });
-  } catch (error: any) {
+  } catch {
     return NextResponse.json({
-      error: error.message || 'Nao foi possivel consultar o CPF no Portal Nacional.',
+      error: 'Nao foi possivel consultar o CPF no Portal Nacional.',
     }, { status: 502 });
   }
-}
+}, { maxBodyBytes: 8 * 1024 });

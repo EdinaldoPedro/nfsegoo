@@ -1,3 +1,4 @@
+import { withApiGuard } from '@/app/utils/api-route';
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
@@ -5,16 +6,16 @@ import { isSupportRole } from '@/app/utils/access-control';
 import { prisma } from '@/app/utils/prisma';
 
 function extractTag(xml: string, tag: string) {
-    const match = xml.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\/${tag}>`));
+    const match = xml.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`));
     return match ? match[1] : null;
 }
 
 function extractFullTag(xml: string, tag: string) {
-    const match = xml.match(new RegExp(`<${tag}[^>]*>[\\s\\S]*?<\/${tag}>`));
+    const match = xml.match(new RegExp(`<${tag}[^>]*>[\\s\\S]*?</${tag}>`));
     return match ? match[0] : null;
 }
 
-export async function POST(request: Request) {
+export const POST = withApiGuard(async function POST(request: Request) {
     const user = await getAuthenticatedUser(request);
     if (!user) return unauthorized();
     if (!isSupportRole(user.role)) return forbidden();
@@ -102,4 +103,4 @@ export async function POST(request: Request) {
     } catch (e: any) {
         return NextResponse.json({ error: e.message });
     }
-}
+});

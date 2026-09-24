@@ -1,3 +1,4 @@
+import { withApiGuard } from '@/app/utils/api-route';
 import { NextResponse } from 'next/server';
 import { getAuthenticatedUser, unauthorized } from '@/app/utils/api-middleware';
 import { prisma } from '@/app/utils/prisma';
@@ -35,7 +36,7 @@ function serializeNotification(item: any) {
   };
 }
 
-export async function GET(request: Request) {
+export const GET = withApiGuard(async function GET(request: Request) {
   const user = await getAuthenticatedUser(request);
   if (!user) return unauthorized();
 
@@ -69,9 +70,9 @@ export async function GET(request: Request) {
     unreadCount,
     data: items.map(serializeNotification),
   });
-}
+});
 
-export async function PATCH(request: Request) {
+export const PATCH = withApiGuard(async function PATCH(request: Request) {
   const user = await getAuthenticatedUser(request);
   if (!user) return unauthorized();
 
@@ -101,4 +102,4 @@ export async function PATCH(request: Request) {
   });
 
   return NextResponse.json({ success: true });
-}
+});

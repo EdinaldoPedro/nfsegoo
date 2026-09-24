@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Image from 'next/image';
 import { Clock3, Loader2, LogOut, RefreshCw, ShieldCheck, Sparkles, Wrench } from 'lucide-react';
 import { logoutAndRedirect } from '@/app/utils/client-session';
 
@@ -51,7 +52,7 @@ export default function MaintenancePage() {
             <div className="relative flex min-h-72 flex-col justify-between overflow-hidden border-b border-white/10 bg-gradient-to-br from-blue-600 to-blue-900 p-8 lg:min-h-[520px] lg:border-b-0 lg:border-r">
               <div className="absolute -right-16 -top-16 h-64 w-64 rounded-full border-[42px] border-white/10" />
               <div className="relative flex items-center gap-3">
-                <img src="/icons/G.png" alt="NFSeGoo" className="h-12 w-12 rounded-xl bg-white/10 object-contain p-1" />
+                <Image src="/icons/G.png" alt="NFSeGoo" width={48} height={48} className="h-12 w-12 rounded-xl bg-white/10 object-contain p-1" />
                 <div>
                   <p className="text-2xl font-black">NFSe<span className="font-light text-emerald-300">Goo</span></p>
                   <p className="text-xs font-bold uppercase tracking-[0.24em] text-blue-100">Central operacional</p>

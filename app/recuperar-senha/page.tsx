@@ -54,9 +54,9 @@ export default function RecuperarSenha() {
             <div className="bg-green-100 text-green-600 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
               <CheckCircle size={32} />
             </div>
-            <h2 className="text-2xl font-bold text-slate-800 mb-2">E-mail enviado</h2>
+            <h2 className="text-2xl font-bold text-slate-800 mb-2">Solicitação recebida</h2>
             <p className="text-slate-500 mb-6">
-              Enviamos um link para <strong>{email}</strong>. Abra seu e-mail e siga as instrucoes para redefinir sua senha.
+              Se houver uma conta elegível para <strong>{email}</strong>, você receberá as instruções de recuperação. Confira também a pasta de spam.
             </p>
             <button onClick={resetarTentativa} className="text-blue-600 font-bold hover:underline">
               Tentar outro e-mail
@@ -71,10 +71,13 @@ export default function RecuperarSenha() {
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">E-mail cadastrado</label>
+                <label htmlFor="recovery-email" className="block text-xs font-bold text-slate-500 uppercase mb-1">E-mail cadastrado</label>
                 <div className="relative">
                   <Mail className="absolute left-3 top-3 text-slate-400" size={20} />
                   <input
+                    id="recovery-email"
+                    autoComplete="email"
+                    maxLength={254}
                     type="email"
                     required
                     className="w-full pl-10 p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition"
@@ -89,7 +92,7 @@ export default function RecuperarSenha() {
               </div>
 
               {erro && (
-                <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                <div role="alert" className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
                   <AlertCircle size={18} className="mt-0.5 shrink-0" />
                   <span>{erro}</span>
                 </div>

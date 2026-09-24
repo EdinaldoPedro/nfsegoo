@@ -1,6 +1,5 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '@/app/utils/prisma';
 
-const prisma = new PrismaClient();
 
 interface CnaeInput {
   codigo: string;

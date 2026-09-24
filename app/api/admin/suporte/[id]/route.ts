@@ -1,8 +1,10 @@
+import { withApiGuard } from '@/app/utils/api-route';
 import { NextResponse } from 'next/server';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 import { isSupportRole } from '@/app/utils/access-control';
 import { prisma } from '@/app/utils/prisma';
 import { validateJsonContentLength } from '@/app/utils/request-guards';
+import { createLog } from '@/app/services/logger';
 
 const VALID_TICKET_STATUS = ['ABERTO', 'EM_ANDAMENTO', 'AGUARDANDO_CLIENTE', 'RESOLVIDO', 'FECHADO'];
 const VALID_PRIORITIES = ['BAIXA', 'MEDIA', 'ALTA', 'URGENTE', 'CRITICA'];
@@ -14,7 +16,8 @@ async function ensureSupport(request: Request) {
   return null;
 }
 
-export async function GET(request: Request, { params }: { params: { id: string } }) {
+export const GET = withApiGuard(async function GET(request: Request, { params: routeParams }: { params: Promise<{ id: string }> }) {
+  const params = await routeParams;
   const authError = await ensureSupport(request);
   if (authError) return authError;
 
@@ -40,11 +43,13 @@ export async function GET(request: Request, { params }: { params: { id: string }
   } catch {
     return NextResponse.json({ error: 'Erro interno' }, { status: 500 });
   }
-}
+});
 
-export async function PUT(request: Request, { params }: { params: { id: string } }) {
-  const authError = await ensureSupport(request);
-  if (authError) return authError;
+export const PUT = withApiGuard(async function PUT(request: Request, { params: routeParams }: { params: Promise<{ id: string }> }) {
+  const params = await routeParams;
+  const actor = await getAuthenticatedUser(request);
+  if (!actor) return unauthorized();
+  if (!isSupportRole(actor.role)) return forbidden();
 
   const sizeError = validateJsonContentLength(request);
   if (sizeError) return sizeError;
@@ -68,6 +73,15 @@ export async function PUT(request: Request, { params }: { params: { id: string }
     }
 
     if (body.atendenteId !== undefined) {
+      if (body.atendenteId) {
+        const atendente = await prisma.user.findUnique({
+          where: { id: String(body.atendenteId) },
+          select: { role: true },
+        });
+        if (!atendente || !isSupportRole(atendente.role)) {
+          return NextResponse.json({ error: 'Atendente invalido.' }, { status: 400 });
+        }
+      }
       data.atendenteId = body.atendenteId ? String(body.atendenteId) : null;
     }
 
@@ -91,8 +105,16 @@ export async function PUT(request: Request, { params }: { params: { id: string }
       where: { id: params.id },
       data,
     });
+    await createLog({
+      level: 'INFO',
+      action: 'TICKET_UPDATED_BY_SUPPORT',
+      module: 'SUPORTE',
+      userId: actor.id,
+      message: 'Ticket atualizado pela equipe de suporte.',
+      details: { ticketId: params.id, fields: Object.keys(data).filter((key) => key !== 'updatedAt') },
+    });
     return NextResponse.json(updated);
   } catch {
     return NextResponse.json({ error: 'Erro ao atualizar' }, { status: 500 });
   }
-}
+});

@@ -1,3 +1,4 @@
+import { withApiGuard } from '@/app/utils/api-route';
 import { NextResponse } from 'next/server';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 import { isSupportRole } from '@/app/utils/access-control';
@@ -10,7 +11,7 @@ async function ensureSupport(request: Request) {
   return null;
 }
 
-export async function GET(request: Request) {
+export const GET = withApiGuard(async function GET(request: Request) {
   const user = await getAuthenticatedUser(request);
   if (!user) return unauthorized();
 
@@ -23,9 +24,9 @@ export async function GET(request: Request) {
   } catch (e: any) {
     return NextResponse.json({ error: `Erro ao buscar: ${e.message}` }, { status: 500 });
   }
-}
+});
 
-export async function POST(request: Request) {
+export const POST = withApiGuard(async function POST(request: Request) {
   const authError = await ensureSupport(request);
   if (authError) return authError;
 
@@ -45,9 +46,9 @@ export async function POST(request: Request) {
   } catch (e: any) {
     return NextResponse.json({ error: `Erro ao criar: ${e.message}` }, { status: 500 });
   }
-}
+});
 
-export async function PUT(request: Request) {
+export const PUT = withApiGuard(async function PUT(request: Request) {
   const authError = await ensureSupport(request);
   if (authError) return authError;
 
@@ -66,9 +67,9 @@ export async function PUT(request: Request) {
   } catch {
     return NextResponse.json({ error: 'Erro ao atualizar' }, { status: 500 });
   }
-}
+});
 
-export async function DELETE(request: Request) {
+export const DELETE = withApiGuard(async function DELETE(request: Request) {
   const authError = await ensureSupport(request);
   if (authError) return authError;
 
@@ -82,4 +83,4 @@ export async function DELETE(request: Request) {
   } catch {
     return NextResponse.json({ error: 'Item em uso.' }, { status: 500 });
   }
-}
+});

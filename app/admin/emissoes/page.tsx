@@ -21,6 +21,9 @@ import {
 export const dynamic = 'force-dynamic';
 
 type FiltroStatus = 'todos' | 'falhas' | 'processando' | 'saudaveis' | 'pendencias';
+type EmissionHealth = { workerOnline: boolean; productionWorkerOnline: boolean; lastHeartbeatAt: string | null;
+  active: number; productionActive: number; waitingTooLong: number; retryOverdue: number; processingExpired: number;
+  manual: number; needsAttention: boolean };
 
 function normalizar(value: string) {
   return String(value || '')
@@ -79,6 +82,8 @@ export default function ListaEmissores() {
   const [busca, setBusca] = useState('');
   const [filtro, setFiltro] = useState<FiltroStatus>('todos');
   const [paginaAtual, setPaginaAtual] = useState(1);
+  const [emissionHealth, setEmissionHealth] = useState<EmissionHealth | null>(null);
+  const [healthError, setHealthError] = useState(false);
   const itensPorPagina = 10;
 
   useEffect(() => {
@@ -101,6 +106,21 @@ export default function ListaEmissores() {
         setError('Não foi possível carregar a lista.');
         setLoading(false);
       });
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    const refresh = async () => {
+      try {
+        const response = await fetch('/api/admin/emissoes/retomar', { cache: 'no-store' });
+        if (!response.ok) throw new Error('Saúde do processador indisponível.');
+        const data = await response.json();
+        if (mounted) { setEmissionHealth(data.emissionHealth); setHealthError(false); }
+      } catch { if (mounted) setHealthError(true); }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 15_000);
+    return () => { mounted = false; window.clearInterval(timer); };
   }, []);
 
   const resumo = useMemo(() => {
@@ -163,6 +183,14 @@ export default function ListaEmissores() {
 
   return (
     <div className="space-y-6">
+      {(healthError || emissionHealth?.needsAttention) && <section role="alert" className="rounded-2xl border border-amber-300 bg-amber-50 p-5 text-amber-950">
+        <h2 className="font-black">Fila de emissões exige acompanhamento</h2>
+        <p className="mt-1 text-sm">{healthError ? 'Não foi possível consultar a saúde do processador. Verifique o serviço e o banco.'
+          : !emissionHealth?.workerOnline ? `Processador de emissões sem heartbeat recente. ${emissionHealth?.active || 0} tarefa(s) aguardando ou em processamento.`
+          : emissionHealth?.productionActive && !emissionHealth.productionWorkerOnline ? 'Há emissões de produção aguardando, mas nenhum processador habilitado para produção.'
+          : `${emissionHealth?.waitingTooLong || 0} tarefa(s) aguardando há mais de 5 minutos; ${emissionHealth?.retryOverdue || 0} retentativa(s) vencida(s); ${emissionHealth?.processingExpired || 0} posse(s) expirada(s); ${emissionHealth?.manual || 0} em conciliação manual.`}</p>
+        <p className="mt-1 text-xs">Último heartbeat de emissão: {formatarData(emissionHealth?.lastHeartbeatAt || undefined)}. Não crie outra nota para destravar a fila.</p>
+      </section>}
       <section className="rounded-2xl bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900 text-white p-7 shadow-sm overflow-hidden relative">
         <div className="absolute right-8 top-6 w-40 h-40 border border-white/10 rounded-full"></div>
         <div className="relative flex flex-col lg:flex-row lg:items-end lg:justify-between gap-6">

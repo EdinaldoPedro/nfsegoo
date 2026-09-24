@@ -1,19 +1,28 @@
 'use client';
-import { useState, Suspense } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Lock, CheckCircle, Loader2, AlertTriangle } from 'lucide-react';
 import Link from 'next/link';
 
 function ResetForm() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const token = searchParams.get('token');
+  const [token, setToken] = useState<string | null | undefined>(undefined);
 
   const [senha1, setSenha1] = useState('');
   const [senha2, setSenha2] = useState('');
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
+
+  useEffect(() => {
+    const candidate = new URLSearchParams(window.location.hash.slice(1)).get('token');
+    setToken(candidate && /^[a-f0-9]{64}$/.test(candidate) ? candidate : null);
+    // Fragments are not sent to the server or Referrer header. Remove it from
+    // visible history once captured so screenshots/copying the URL do not leak it.
+    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+  }, []);
+
+  if (token === undefined) return <div className="text-center p-4">Carregando...</div>;
 
   if (!token) {
     return (
@@ -87,6 +96,8 @@ function ResetForm() {
           <Lock className="absolute left-3 top-3 text-slate-400" size={20} />
           <input
             type="password"
+            autoComplete="new-password"
+            maxLength={72}
             required
             className="w-full pl-10 p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
             placeholder="Minimo 8 caracteres"
@@ -102,6 +113,8 @@ function ResetForm() {
           <Lock className="absolute left-3 top-3 text-slate-400" size={20} />
           <input
             type="password"
+            autoComplete="new-password"
+            maxLength={72}
             required
             className="w-full pl-10 p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
             placeholder="Repita a senha"
@@ -132,9 +145,7 @@ export default function RedefinirSenhaPage() {
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
       <div className="bg-white w-full max-w-md p-8 rounded-2xl shadow-xl border border-slate-100">
         <h1 className="text-2xl font-bold text-slate-800 mb-6 text-center">Criar nova senha</h1>
-        <Suspense fallback={<div className="text-center p-4">Carregando...</div>}>
-          <ResetForm />
-        </Suspense>
+        <ResetForm />
       </div>
     </div>
   );

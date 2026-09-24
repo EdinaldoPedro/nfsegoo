@@ -9,6 +9,7 @@ export interface IResultadoEmissao {
     erros?: any[];
     xmlGerado?: string;
     motivo?: string;
+    failureKind?: 'LOCAL_REJECTION' | 'PORTAL_REJECTION' | 'UNKNOWN';
 }
 
 export interface IResultadoConsulta {
@@ -19,13 +20,17 @@ export interface IResultadoConsulta {
     pdfBase64?: string;       
     protocolo?: string; // <--- CAMPO NOVO ADICIONADO
     motivo?: string;
+    xmlEvento?: string;
+    dataCancelamento?: Date;
 }
 
 export interface IResultadoCancelamento {
     sucesso: boolean;
+    requestMatched?: boolean;
     dataCancelamento?: Date;
     xmlEvento?: string;       
     motivo?: string;
+    failureKind?: 'LOCAL_REJECTION' | 'PORTAL_REJECTION' | 'UNKNOWN';
 }
 
 export interface IDadosEmissao {
@@ -48,7 +53,11 @@ export interface IDadosEmissao {
 }
 
 export interface IEmissorStrategy {
-    executar(dados: IDadosEmissao): Promise<IResultadoEmissao>;
+    preparar(dados: IDadosEmissao): Promise<string>;
+    transmitirPreparado(xmlAssinado: string, empresa: any): Promise<IResultadoEmissao>;
+    conciliarDps(xmlAssinado: string, empresa: any): Promise<IResultadoEmissao>;
     consultar(chave: string, empresa: any): Promise<IResultadoConsulta>;
-    cancelar(chave: string, protocolo: string, motivo: string, empresa: any): Promise<IResultadoCancelamento>;
+    prepararCancelamento(chave: string, reason: { code: '1' | '2' | '9'; justification: string }, timestamp: Date, empresa: any): Promise<string>;
+    transmitirCancelamento(xml: string, chave: string, empresa: any): Promise<IResultadoCancelamento>;
+    conciliarCancelamento(xml: string, chave: string, empresa: any): Promise<IResultadoCancelamento>;
 }

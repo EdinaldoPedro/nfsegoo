@@ -1,0 +1,35 @@
+[Unit]
+Description=NFSe Goo - consultas fiscais (somente leitura)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=nfsegoo
+Group=nfsegoo
+WorkingDirectory=/opt/nfsegoo
+EnvironmentFile=/etc/nfsegoo/consultations.env
+ExecStartPre=/usr/bin/node /opt/nfsegoo/scripts/release-artifact.cjs
+ExecStartPre=/usr/bin/node /opt/nfsegoo/scripts/infrastructure-readiness.cjs
+ExecStartPre=/usr/bin/node /opt/nfsegoo/scripts/migration-gate.cjs
+ExecStart=/usr/bin/node /opt/nfsegoo/scripts/supervise-consultations.cjs
+Restart=always
+RestartSec=5
+TimeoutStopSec=180
+KillSignal=SIGTERM
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=full
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+UMask=0077
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

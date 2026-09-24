@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Menu, X, User, Briefcase, FileText, Settings, LogOut, Phone, Shield, ArrowLeft, Building2, Search, ChevronDown, BadgeHelp } from 'lucide-react';
+import { Menu, X, User, Briefcase, FileText, Settings, LogOut, Phone, Shield, ArrowLeft, Building2, Search, ChevronDown, BadgeHelp, Fingerprint } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { checkIsStaff } from '@/app/utils/permissions';
@@ -62,16 +62,16 @@ export default function Sidebar() {
                 }
 
                 if(res.ok) {
-                    setUserData(await res.json());
-                }
-
-                if (!checkIsStaff(role || '')) {
+                    const profile = await res.json();
+                    setUserData(profile);
+                    if (!checkIsStaff(role || '') || (profile.listaEmpresas || []).length > 0) {
                     const resNotif = await fetch('/api/clientes/notificacoes', {
                         headers: { 'x-user-id': userId }
                     });
                     if (resNotif.ok) {
                         const dataNotif = await resNotif.json();
                         setNotificacoes(dataNotif.count || 0);
+                    }
                     }
                 }
             } catch (error) { 
@@ -113,7 +113,7 @@ export default function Sidebar() {
         localStorage.removeItem('adminBackUpId');
         localStorage.removeItem('adminBackUpRole');
         localStorage.removeItem('empresaContextId');
-        window.location.href = '/admin/usuarios';
+        router.push('/admin/usuarios');
     } else {
         // === NOVA LÓGICA DE LOGOUT AQUI ===
         try {
@@ -161,10 +161,7 @@ export default function Sidebar() {
 
   const statusCert = getStatusCertificado();
   const showAdminPanel = checkIsStaff(userRole) && !isSupportMode;
-  const supportHref =
-    !isSupportMode && ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(userRole)
-      ? '/admin/suporte'
-      : '/cliente/suporte';
+  const supportHref = isSupportMode ? '/admin/suporte' : '/cliente/suporte';
   const empresasDisponiveis = userData?.listaEmpresas || [];
   const empresaAtualId =
     typeof window !== 'undefined'
@@ -216,11 +213,17 @@ export default function Sidebar() {
               <p><span className="font-medium">Email:</span> {userData?.email || '...'}</p>
               
               {!isContador && (
-                  <p><span className="font-medium">Plano:</span> <span className="text-green-600 font-bold">{userData?.plano?.tipo || 'Gratuito'}</span></p>
+                  <p><span className="font-medium">Plano:</span> <span className="text-green-600 font-bold">{userData?.planoDetalhado?.nome || 'Sem plano vigente'}</span></p>
               )}
               
               <Link href="/configuracoes/minha-conta" onClick={() => setIsOpen(false)} className="text-blue-600 hover:underline text-xs block mt-2">
                 Editar Dados Pessoais
+              </Link>
+              <Link href="/configuracoes/titularidade" onClick={() => setIsOpen(false)} className="text-blue-600 hover:underline text-xs block mt-2">
+                Transferências pendentes
+              </Link>
+              <Link href="/privacidade" onClick={() => setIsOpen(false)} className="flex items-center gap-1 text-blue-600 hover:underline text-xs mt-2">
+                <Fingerprint size={13} /> Meus dados e privacidade
               </Link>
             </div>
           </section>

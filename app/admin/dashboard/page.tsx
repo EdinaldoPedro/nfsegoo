@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
@@ -19,6 +19,7 @@ import {
   TrendingUp,
   Users
 } from 'lucide-react';
+import { formatReportMoney } from '@/app/utils/fiscal-report';
 import { useRouter } from 'next/navigation';
 
 const statusNotaClasses: Record<string, string> = {
@@ -33,9 +34,7 @@ function formatNumber(value: number | undefined) {
   return new Intl.NumberFormat('pt-BR').format(value || 0);
 }
 
-function formatMoney(value: number | undefined) {
-  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
-}
+function formatMoney(value: number | string | undefined) { return formatReportMoney(value); }
 
 function formatDate(value?: string) {
   if (!value) return 'Agora';
@@ -163,7 +162,7 @@ export default function AdminDashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
 
-  const carregarStats = async () => {
+  const carregarStats = useCallback(async () => {
     setRefreshing(true);
     setError('');
     try {
@@ -186,11 +185,11 @@ export default function AdminDashboard() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [router]);
 
   useEffect(() => {
     carregarStats();
-  }, []);
+  }, [carregarStats]);
 
   const totalStatusNotas = useMemo(() => {
     return Object.values(stats?.notas?.porStatus || {}).reduce((acc: any, item: any) => acc + item, 0);
@@ -260,22 +259,31 @@ export default function AdminDashboard() {
         </div>
       </div>
 
+      {!!((stats?.notas?.porAmbiente?.HOMOLOGACAO || 0) + (stats?.notas?.semAmbiente || 0)
+        + (stats?.notas?.datasEstimadasMes || 0) + (stats?.notas?.canceladasSemData || 0)) && <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+        {!!((stats?.notas?.porAmbiente?.HOMOLOGACAO || 0) + (stats?.notas?.semAmbiente || 0)) && <p>
+          Indicadores fiscais somente de produção. {formatNumber(stats?.notas?.porAmbiente?.HOMOLOGACAO)} documento(s) de teste e {formatNumber(stats?.notas?.semAmbiente)} sem ambiente confirmado não compõem os valores.
+        </p>}
+        {!!stats?.notas?.datasEstimadasMes && <p className="mt-1">{formatNumber(stats.notas.datasEstimadasMes)} nota(s) no mês usam data de cadastro porque a data oficial ainda não foi verificada.</p>}
+        {!!stats?.notas?.canceladasSemData && <p className="mt-1">{formatNumber(stats.notas.canceladasSemData)} cancelamento(s) sem data oficial não foram atribuídos a um mês.</p>}
+      </div>}
+
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
         <KpiCard icon={Users} label="Usuários operacionais" value={formatNumber(resumo.usuariosOperacionais)} hint={`${formatNumber(usuarios.novosMes)} novos no mês (${resumo.crescimentoUsuariosMes || 0}%)`} />
         <KpiCard icon={Building2} label="Empresas no SaaS" value={formatNumber(resumo.empresas)} hint={`${formatNumber(resumo.empresasCompletas)} completas, ${formatNumber(resumo.empresasIncompletas)} pendentes`} tone="purple" />
-        <KpiCard icon={FileCheck} label="Notas no mês" value={formatNumber(resumo.notasMes)} hint={`${resumo.variacaoNotasMes || 0}% contra o mês anterior`} tone="emerald" />
+        <KpiCard icon={FileCheck} label="Autorizadas no mês (produção)" value={formatNumber(resumo.notasMes)} hint={`${resumo.variacaoNotasMes || 0}% contra o mês anterior`} tone="emerald" />
         <KpiCard icon={CreditCard} label="Receita paga no mês" value={formatMoney(financeiro.valorPagoMes)} hint={`${formatNumber(financeiro.faturasPagasMes)} faturas pagas`} tone="amber" />
       </div>
 
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
-        <KpiCard icon={Receipt} label="Valor fiscal emitido" value={formatMoney(resumo.valorNotasMes)} hint="Somente NFS-e autorizadas no mês" tone="emerald" />
+        <KpiCard icon={Receipt} label="Valor autorizado (produção)" value={formatMoney(resumo.valorNotasMes)} hint="Não é a receita do SaaS; exclui homologação, canceladas e legado sem ambiente" tone="emerald" />
         <KpiCard icon={LifeBuoy} label="Tickets abertos" value={formatNumber(suporte.abertos)} hint={`${formatNumber(suporte.novos7d)} novos nos últimos 7 dias`} tone={suporte.abertos ? 'amber' : 'slate'} />
         <KpiCard icon={AlertTriangle} label="Atenções fiscais" value={formatNumber((empresas.semIbge || 0) + (empresas.semCertificado || 0))} hint={`${formatNumber(empresas.semIbge)} sem IBGE, ${formatNumber(empresas.semCertificado)} sem certificado`} tone="red" />
         <KpiCard icon={Database} label="Base técnica" value={formatNumber(tecnico.globalCnae)} hint={`${formatNumber(tecnico.tributacoesMunicipais)} regras municipais`} tone="blue" />
       </div>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-        <Section title="Consumo de NFS-e" subtitle="Volume emitido e distribuição por status.">
+        <Section title="Consumo de NFS-e" subtitle="Produção: autorizadas por dia e distribuição atual por status.">
           <MiniTrend data={stats?.notas?.porDia30d || {}} />
           <div className="mt-5 flex flex-wrap gap-2">
             {Object.entries(stats?.notas?.porStatus || {}).map(([status, value]: any) => (

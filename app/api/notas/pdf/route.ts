@@ -1,99 +1,39 @@
+import { withApiGuard } from '@/app/utils/api-route';
 import { NextResponse } from 'next/server';
-import zlib from 'zlib';
-import { generateDanfsePdf } from '@/app/services/pdf/DanfseGenerator';
-import { createLog } from '@/app/services/logger';
+import { gunzipSync } from 'node:zlib';
 import { forbidden, getAuthenticatedUser, unauthorized } from '@/app/utils/api-middleware';
-import { hasEmpresaAccess } from '@/app/utils/access-control';
+import { canOperateFiscalNote, requestFiscalDocument } from '@/app/services/fiscalNoteService';
 import { prisma } from '@/app/utils/prisma';
+import { checkRateLimit } from '@/app/utils/rate-limit';
 
-export async function POST(request: Request) {
+export const POST = withApiGuard(async function POST(request: Request) {
   const user = await getAuthenticatedUser(request);
   if (!user) return unauthorized();
+  const customerMode = request.headers.get('x-portal-mode') === 'customer';
+  const { notaId } = await request.json();
+  if (typeof notaId !== 'string' || !notaId || notaId.length > 100) return NextResponse.json({ error: 'Nota inválida.' }, { status: 400 });
+  const metadata = await prisma.notaFiscal.findUnique({ where: { id: notaId }, select: { empresaId: true } });
+  if (!metadata || !await canOperateFiscalNote(user, metadata.empresaId, 'CONSULTAR', prisma, customerMode)) return forbidden();
+  if (!await checkRateLimit('note_pdf_' + user.id, 30, 60_000)) return NextResponse.json({ error: 'Aguarde antes de solicitar mais documentos.' }, { status: 429 });
 
-  try {
-    const { notaId } = await request.json();
-
-    const nota = await prisma.notaFiscal.findUnique({
-      where: { id: notaId },
-      include: { empresa: true },
-    });
-
-    if (!nota || !nota.chaveAcesso) {
-      return NextResponse.json({ error: 'Nota invÃ¡lida ou sem chave.' }, { status: 400 });
-    }
-
-    const hasAccess = await hasEmpresaAccess(user, nota.empresaId);
-    if (!hasAccess) return forbidden();
-
-    if (nota.pdfBase64) {
-      const bufferBanco = Buffer.from(nota.pdfBase64, 'base64');
-      const isGzip = bufferBanco[0] === 0x1f && bufferBanco[1] === 0x8b;
-      const pdfFinal = isGzip ? zlib.gunzipSync(bufferBanco) : bufferBanco;
-
-      return new NextResponse(pdfFinal as any, {
-        headers: { 'Content-Type': 'application/pdf' },
-      });
-    }
-
-    const xmlOficial = nota.xmlAutorizadoBase64 || nota.xmlBase64;
-    if (!xmlOficial) {
-      return NextResponse.json({ error: 'XML autorizado ausente para gerar o DANFSe.' }, { status: 400 });
-    }
-
-    let pdfBuffer: Buffer;
-    try {
-      pdfBuffer = await generateDanfsePdf(xmlOficial, {
-        cancelada: nota.status === 'CANCELADA',
-        eventoCancelamentoXml: nota.xmlCancelamentoEventoBase64,
-      });
-    } catch (error: any) {
-      await createLog({
-        level: 'ALERTA',
-        action: 'FALHA_GERACAO_DANFSE_MANUAL',
-        message: 'O usuario tentou baixar o DANFSe, mas o PDF nao pode ser gerado a partir do XML.',
-        details: {
-          erro: error.message,
-          origem: 'menu_cliente',
-          notaId: nota.id,
-          numeroNota: nota.numero,
-        },
-        empresaId: nota.empresaId,
-        vendaId: nota.vendaId || undefined,
-      });
-
-      return NextResponse.json({
-        error: 'Nao foi possivel gerar o DANFSe a partir do XML autorizado.',
-        details: error.message,
-      }, { status: 422 });
-    }
-
-    const pdfGzip = zlib.gzipSync(pdfBuffer);
-    const pdfBase64 = pdfGzip.toString('base64');
-
-    await prisma.notaFiscal.update({
-      where: { id: notaId },
-      data: { pdfBase64 },
-    });
-
-    await createLog({
-      level: 'INFO',
-      action: 'DANFSE_GERADO_MANUAL',
-      message: 'DANFSe gerado localmente a partir do XML autorizado.',
-      details: { notaId: nota.id, numeroNota: nota.numero },
-      empresaId: nota.empresaId,
-      vendaId: nota.vendaId || undefined,
-    });
-
-    return new NextResponse(pdfBuffer as any, {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="NFSe-${nota.numero}.pdf"`,
-        'Content-Length': pdfBuffer.length.toString(),
-      },
-    });
-  } catch (error: any) {
-    console.error('[ERRO PDF]', error.message);
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-}
+  const result = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "NotaFiscal" WHERE "id" = ${notaId} FOR UPDATE`;
+    const note = await tx.notaFiscal.findUniqueOrThrow({ where: { id: notaId }, include: { documentTask: true } });
+    const actor = await tx.user.findUnique({ where: { id: user.id } });
+    if (note.arquivadoEm || !actor || !await canOperateFiscalNote(actor, note.empresaId, 'CONSULTAR', tx, customerMode)) return { forbidden: true };
+    if (!['AUTORIZADA', 'CANCELADA'].includes(note.status) || !note.chaveAcesso || !(note.xmlAutorizadoBase64 || note.xmlBase64)) return { error: 'Nota sem documento fiscal autorizado disponível.', status: 409 };
+    // Legacy PDFs must be regenerated through the verified, compare-and-swap
+    // document worker before being offered. Never render/save in this HTTP route.
+    if (note.pdfBase64 && note.documentTask?.status === 'CONCLUIDA') return { pdf: note.pdfBase64, number: note.numeroOficial || String(note.numero || '') };
+    if (note.documentTask?.status === 'REVISAO_MANUAL') return { error: 'Documento não disponível. Solicite ao suporte a verificação do XML e a regeneração do PDF.', status: 409 };
+    if (!note.documentTask || note.documentTask.status === 'CONCLUIDA') await requestFiscalDocument(tx, note.id);
+    return { error: 'PDF solicitado e ainda em preparação. Aguarde a conclusão no histórico e tente baixar novamente.', status: 202 };
+  });
+  if (result.forbidden) return forbidden();
+  if (!result.pdf) return NextResponse.json({ error: result.error, pending: result.status === 202 }, { status: result.status || 409 });
+  const compressed = Buffer.from(result.pdf, 'base64');
+  const pdf = compressed[0] === 0x1f && compressed[1] === 0x8b ? gunzipSync(compressed, { maxOutputLength: 20 * 1024 * 1024 }) : compressed;
+  if (pdf.length > 20 * 1024 * 1024 || pdf.subarray(0, 5).toString('ascii') !== '%PDF-') return NextResponse.json({ error: 'Documento inválido. Solicite uma nova geração ao suporte.' }, { status: 422 });
+  return new NextResponse(new Uint8Array(pdf), { headers: { 'Content-Type': 'application/pdf',
+    'Content-Disposition': `attachment; filename="NFSe-${String(result.number).replace(/[^0-9]/g, '')}.pdf"`, 'Cache-Control': 'private, no-store' } });
+});

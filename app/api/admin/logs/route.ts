@@ -1,3 +1,4 @@
+import { withApiGuard } from '@/app/utils/api-route';
 import { NextResponse } from 'next/server';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 import { sanitizeLogValue } from '@/app/services/logger';
@@ -34,7 +35,7 @@ function getDateFilter(period: string | null, from: string | null, to: string | 
   return { gte: new Date(now - hours * 60 * 60 * 1000) };
 }
 
-export async function GET(request: Request) {
+export const GET = withApiGuard(async function GET(request: Request) {
   try {
     const user = await getAuthenticatedUser(request);
     if (!user) return unauthorized();
@@ -44,7 +45,7 @@ export async function GET(request: Request) {
     const page = toInt(searchParams.get('page'), 1);
     const limit = toInt(searchParams.get('limit'), 80, 200);
     const level = searchParams.get('level');
-    const module = searchParams.get('module');
+    const moduleFilter = searchParams.get('module');
     const traceId = searchParams.get('traceId');
     const vendaId = searchParams.get('vendaId');
     const empresaId = searchParams.get('empresaId');
@@ -68,7 +69,7 @@ export async function GET(request: Request) {
     if (errorsOnly) where.level = { in: ['ERRO', 'ALERTA'] };
     else if (level && level !== 'ALL') where.level = level;
 
-    if (module && module !== 'ALL') where.module = module;
+    if (moduleFilter && moduleFilter !== 'ALL') where.module = moduleFilter;
     if (traceId) where.traceId = traceId;
     if (vendaId) where.vendaId = vendaId;
     if (empresaId) where.empresaId = empresaId;
@@ -147,4 +148,4 @@ export async function GET(request: Request) {
     console.error('Erro ao buscar logs:', error);
     return NextResponse.json({ error: 'Erro ao buscar logs.' }, { status: 500 });
   }
-}
+});

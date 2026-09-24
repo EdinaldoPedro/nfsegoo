@@ -1,9 +1,10 @@
+import { withApiGuard } from '@/app/utils/api-route';
 import { NextResponse } from 'next/server';
 import { getAuthenticatedUser, unauthorized } from '@/app/utils/api-middleware';
 import { prisma } from '@/app/utils/prisma';
 import { normalizeNbsSearch } from '@/app/utils/nbs';
 
-export async function GET(request: Request) {
+export const GET = withApiGuard(async function GET(request: Request) {
   const user = await getAuthenticatedUser(request);
   if (!user) return unauthorized();
 
@@ -34,4 +35,4 @@ export async function GET(request: Request) {
   });
 
   return NextResponse.json({ data });
-}
+});

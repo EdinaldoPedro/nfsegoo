@@ -1,3 +1,4 @@
+import { withApiGuard } from '@/app/utils/api-route';
 import { NextResponse } from 'next/server';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 import { isSupportRole } from '@/app/utils/access-control';
@@ -15,14 +16,14 @@ function parseDetails(details?: string | null) {
   }
 }
 
-export async function GET(request: Request, { params }: { params: { id: string } }) {
+export const GET = withApiGuard(async function GET(request: Request, { params: routeParams }: { params: Promise<{ id: string }> }) {
+  const params = await routeParams;
   const admin = await getAuthenticatedUser(request);
   if (!admin) return unauthorized();
   if (!isSupportRole(admin.role)) return forbidden();
 
   const userId = params.id;
 
-  try {
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: {
@@ -95,8 +96,8 @@ export async function GET(request: Request, { params }: { params: { id: string }
 
     const problemas = [];
     if (limites.status !== 'ATIVO') problemas.push({ tipo: 'PLANO', mensagem: limites.reason || `Plano com status ${limites.status}.` });
-    if (limites.limiteNotas > 0 && limites.notasUsadas >= limites.limiteNotas) problemas.push({ tipo: 'LIMITE_NOTAS', mensagem: 'Limite de NFS-e atingido.' });
-    if (limites.limiteClientes > 0 && limites.clientesUsados >= limites.limiteClientes) problemas.push({ tipo: 'LIMITE_CLIENTES', mensagem: 'Limite de clientes atingido.' });
+    if (limites.allowedBase && !limites.unlimited && limites.notasUsadas >= limites.limiteNotas) problemas.push({ tipo: 'LIMITE_NOTAS', mensagem: 'Limite de NFS-e atingido (zero não é ilimitado).' });
+    if (limites.allowedBase && !limites.unlimited && limites.clientesUsados >= limites.limiteClientes) problemas.push({ tipo: 'LIMITE_CLIENTES', mensagem: 'Limite de clientes atingido (zero não é ilimitado).' });
     if (user.role === 'CONTADOR' && user.plano === 'PARCEIRO') problemas.push({ tipo: 'PLANO_LEGADO', mensagem: 'Contador ainda usa PARCEIRO legado.' });
     if (user.role === 'CONTADOR' && vinculosContador.length === 0 && empresasProprietarias.length === 0) problemas.push({ tipo: 'CARTEIRA', mensagem: 'Contador sem empresas vinculadas ou proprietarias.' });
 
@@ -134,7 +135,4 @@ export async function GET(request: Request, { params }: { params: { id: string }
         logsErroRecentes: logsRecentes.filter((l) => ['ERRO', 'ERROR', 'CRITICAL'].includes(l.level)).length,
       },
     });
-  } catch (error: any) {
-    return NextResponse.json({ error: 'Erro ao montar diagnostico.', detalhes: error.message }, { status: 500 });
-  }
-}
+});

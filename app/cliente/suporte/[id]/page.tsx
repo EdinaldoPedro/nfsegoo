@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { use, useCallback, useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
     ArrowLeft, Send, Paperclip, Clock, 
@@ -31,6 +31,7 @@ interface Ticket {
     mensagens: Mensagem[];
     createdAt: string;
     updatedAt: string;
+    clientUnread?: boolean;
 }
 
 const STATUS_MAP: Record<string, string> = {
@@ -51,7 +52,8 @@ const STATUS_COLORS: Record<string, string> = {
     'CANCELADO': 'bg-red-100 text-red-700'
 };
 
-export default function ClienteTicketDetalhes({ params }: { params: { id: string } }) {
+export default function ClienteTicketDetalhes({ params: routeParams }: { params: Promise<{ id: string }> }) {
+    const params = use(routeParams);
     const router = useRouter();
     const dialog = useDialog();
     
@@ -64,49 +66,49 @@ export default function ClienteTicketDetalhes({ params }: { params: { id: string
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
-    // === CARREGAR DADOS ===
-    useEffect(() => {
-        const role = localStorage.getItem('userRole') || '';
-        const isSupportMode = localStorage.getItem('isSupportMode') === 'true';
-        const isInternalSupport = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(role);
-
-        if (isInternalSupport && !isSupportMode) {
-            router.replace('/admin/suporte');
-            return;
-        }
-
-        fetchTicket();
-        // Atualiza a cada 5 segundos para ver novas respostas em tempo real
-        const interval = setInterval(fetchTicket, 5000); 
-        return () => clearInterval(interval);
-    }, [params.id]);
-
-    // Scroll para baixo quando chegar mensagem nova
-    useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [ticket?.mensagens]);
-
-    const fetchTicket = async () => {
+    const fetchTicket = useCallback(async () => {
         try {
             const userId = localStorage.getItem('userId');
 
             const res = await fetch(`/api/suporte/tickets/${params.id}`, {
-                headers: { 
-                    'x-user-id': userId || ''
+                headers: {
+                    'x-user-id': userId || '', 'x-portal-mode': 'customer'
                 }
             });
-            
+
             if (res.status === 401) { router.push('/login'); return; }
 
             const data = await res.json();
-            if (res.ok) setTicket(data);
-            
+            if (res.ok) {
+                setTicket(data);
+                if (data.clientUnread && localStorage.getItem('isSupportMode') !== 'true') {
+                    void fetch(`/api/suporte/tickets/${params.id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '', 'x-portal-mode': 'customer' },
+                        body: JSON.stringify({ markRead: true }),
+                    });
+                }
+            }
+
         } catch (error) {
             console.error(error);
         } finally {
             setLoading(false);
         }
-    };
+    }, [params.id, router]);
+
+    // === CARREGAR DADOS ===
+    useEffect(() => {
+        fetchTicket();
+        // Atualiza a cada 5 segundos para ver novas respostas em tempo real
+        const interval = setInterval(fetchTicket, 5000);
+        return () => clearInterval(interval);
+    }, [fetchTicket, router]);
+
+    // Scroll para baixo quando chegar mensagem nova
+    useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [ticket?.mensagens]);
 
     const handleEnviar = async () => {
         if (!resposta.trim() && !anexo) return;
@@ -119,7 +121,7 @@ export default function ClienteTicketDetalhes({ params }: { params: { id: string
                 method: 'POST',
                 headers: { 
                     'Content-Type': 'application/json',
-                    'x-user-id': userId || ''
+                    'x-user-id': userId || '', 'x-portal-mode': 'customer'
                 },
                 body: JSON.stringify({
                     ticketId: params.id,

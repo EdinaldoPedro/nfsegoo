@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
@@ -88,6 +88,7 @@ export default function SystemLogs() {
   const [loading, setLoading] = useState(false);
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
   const [search, setSearch] = useState('');
+  const [submittedSearch, setSubmittedSearch] = useState('');
   const [level, setLevel] = useState('ALL');
   const [moduleFilter, setModuleFilter] = useState('ALL');
   const [period, setPeriod] = useState('24h');
@@ -102,7 +103,7 @@ export default function SystemLogs() {
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
   }, [logs, selectedLog]);
 
-  const carregar = async () => {
+  const carregar = useCallback(async () => {
     setLoading(true);
     const token = localStorage.getItem('token');
     const params = new URLSearchParams({
@@ -114,7 +115,7 @@ export default function SystemLogs() {
       errorsOnly: errorsOnly ? 'true' : 'false',
     });
 
-    if (search.trim()) params.set('search', search.trim());
+    if (submittedSearch) params.set('search', submittedSearch);
     if (traceFilter.trim()) params.set('traceId', traceFilter.trim());
 
     try {
@@ -128,9 +129,9 @@ export default function SystemLogs() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [errorsOnly, includeDebug, level, moduleFilter, period, submittedSearch, traceFilter]);
 
-  const carregarDiagnostico = async () => {
+  const carregarDiagnostico = useCallback(async () => {
     setDiagnosticsLoading(true);
     const token = localStorage.getItem('token');
     try {
@@ -142,15 +143,15 @@ export default function SystemLogs() {
     } finally {
       setDiagnosticsLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     carregar();
-  }, [level, moduleFilter, period, includeDebug, errorsOnly, traceFilter]);
+  }, [carregar]);
 
   useEffect(() => {
     carregarDiagnostico();
-  }, []);
+  }, [carregarDiagnostico]);
 
   const statCards = [
     { label: 'Erros 24h', value: stats.errors24h || 0, icon: AlertTriangle, tone: 'text-red-600 bg-red-50 border-red-100' },
@@ -227,7 +228,7 @@ export default function SystemLogs() {
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter') carregar();
+                      if (e.key === 'Enter') setSubmittedSearch(search.trim());
                     }}
                   />
                 </div>

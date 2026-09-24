@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import Image from 'next/image';
 import {
   ArrowRight,
   Eye,
@@ -16,9 +17,30 @@ import {
 } from 'lucide-react';
 import { clearClientSession } from '@/app/utils/client-session';
 
+function authenticatedDestination(status: {
+  role?: string | null;
+  mfaRequired?: boolean;
+  legalAcceptanceRequired?: boolean;
+  maintenanceActive?: boolean;
+  maintenance?: { active?: boolean };
+}) {
+  if (status.mfaRequired) return '/seguranca';
+  if (status.legalAcceptanceRequired) return '/aceite-legal';
+  if (status.maintenanceActive || status.maintenance?.active) return '/manutencao';
+  if (status.role === 'COMERCIAL') return '/admin/contratacoes';
+  if (['ADMIN', 'MASTER', 'SUPORTE', 'SUPORTE_TI'].includes(status.role || '')) return '/admin/dashboard';
+  if (status.role === 'CONTADOR') return '/contador';
+  return '/cliente/dashboard';
+}
+
 export default function Login() {
   const router = useRouter();
-  const [form, setForm] = useState({ login: '', senha: '' });
+  const [form, setForm] = useState({ login: '', senha: '', otpCode: '' });
+  const [mfaRequired, setMfaRequired] = useState(false);
+  const [mfaChallenge, setMfaChallenge] = useState('');
+  const [mfaMethod, setMfaMethod] = useState<'TOTP' | 'EMAIL'>('TOTP');
+  const [trustDevice, setTrustDevice] = useState(true);
+  const [emailCodeSent, setEmailCodeSent] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -28,6 +50,14 @@ export default function Login() {
     if (reason === 'sessao-expirada') {
       setError('Sua sessão expirou ou foi encerrada. Entre novamente para continuar.');
     }
+    let active = true;
+    void fetch('/api/system/status', { cache: 'no-store' })
+      .then((response) => response.ok ? response.json() : null)
+      .then((status) => {
+        if (active && status?.authenticated) window.location.replace(authenticatedDestination(status));
+      })
+      .catch(() => {});
+    return () => { active = false; };
   }, []);
 
   const handleSubmit = async (e: any) => {
@@ -39,12 +69,18 @@ export default function Login() {
       const resposta = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify(mfaChallenge
+          ? { mfaChallenge, mfaMethod, otpCode: form.otpCode, trustDevice }
+          : { login: form.login, senha: form.senha }),
       });
 
       const dados = await resposta.json();
 
       if (!resposta.ok) {
+        if (dados.mfaRequired) {
+          setMfaRequired(true);
+          if (dados.mfaChallenge) setMfaChallenge(dados.mfaChallenge);
+        }
         setError(dados.error || 'Erro ao fazer login');
         setLoading(false);
         return;
@@ -53,6 +89,16 @@ export default function Login() {
       clearClientSession();
       localStorage.setItem('userId', dados.user.id);
       localStorage.setItem('userRole', dados.user.role);
+
+      if (dados.requireMfaSetup) {
+        window.location.replace('/seguranca');
+        return;
+      }
+
+      if (dados.legalAcceptanceRequired) {
+        window.location.replace('/aceite-legal');
+        return;
+      }
 
       if (dados.maintenanceActive) {
         window.location.replace('/manutencao');
@@ -64,7 +110,9 @@ export default function Login() {
         return;
       }
 
-      if (['ADMIN', 'MASTER', 'SUPORTE', 'SUPORTE_TI'].includes(dados.user.role)) {
+      if (dados.user.role === 'COMERCIAL') {
+        router.push('/admin/contratacoes');
+      } else if (['ADMIN', 'MASTER', 'SUPORTE', 'SUPORTE_TI'].includes(dados.user.role)) {
         router.push('/admin/dashboard');
       } else if (dados.user.role === 'CONTADOR') {
         router.push('/contador');
@@ -77,6 +125,24 @@ export default function Login() {
     }
   };
 
+  const sendEmailCode = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      const response = await fetch('/api/auth/mfa/email-code', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mfaChallenge }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Não foi possível enviar o código.');
+      setEmailCodeSent(true);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Não foi possível enviar o código.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <main className="min-h-screen bg-slate-950 text-slate-900 selection:bg-blue-200 selection:text-blue-950">
       <div className="grid min-h-screen lg:grid-cols-[1.08fr_0.92fr]">
@@ -85,7 +151,7 @@ export default function Login() {
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_15%,rgba(37,99,235,0.38),transparent_32%),radial-gradient(circle_at_86%_76%,rgba(16,185,129,0.24),transparent_30%)]" />
 
           <div className="relative z-10 flex items-center gap-3">
-            <img src="/icons/G.png" alt="NFSeGoo" className="h-11 w-11 object-contain" />
+            <Image src="/icons/G.png" alt="NFSeGoo" width={44} height={44} className="h-11 w-11 object-contain" />
             <div>
               <p className="text-2xl font-black tracking-tight">
                 NFSe<span className="font-light text-emerald-300">Goo</span>
@@ -138,7 +204,7 @@ export default function Login() {
           <div className="w-full max-w-md">
             <div className="mb-8 flex items-center justify-between lg:hidden">
               <Link href="/" className="flex items-center gap-3">
-                <img src="/icons/G.png" alt="NFSeGoo" className="h-10 w-10 object-contain" />
+                <Image src="/icons/G.png" alt="NFSeGoo" width={40} height={40} className="h-10 w-10 object-contain" />
                 <span className="text-2xl font-black tracking-tight text-blue-700">
                   NFSe<span className="font-light text-emerald-500">Goo</span>
                 </span>
@@ -167,12 +233,15 @@ export default function Login() {
 
               <form onSubmit={handleSubmit} className="space-y-5">
                 <div>
-                  <label className="mb-2 block text-sm font-bold text-slate-700">Email ou CPF</label>
+                  <label htmlFor="login-identifier" className="mb-2 block text-sm font-bold text-slate-700">Email ou CPF</label>
                   <div className="relative">
                     <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                     <input
+                      id="login-identifier"
+                      autoComplete="username"
                       type="text"
                       required
+                      disabled={mfaRequired}
                       placeholder="seu@email.com ou 000.000.000-00"
                       className="w-full rounded-lg border border-slate-300 bg-white py-3 pl-10 pr-3 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
                       value={form.login}
@@ -183,7 +252,7 @@ export default function Login() {
 
                 <div>
                   <div className="mb-2 flex items-center justify-between gap-3">
-                    <label className="block text-sm font-bold text-slate-700">Senha</label>
+                    <label htmlFor="login-password" className="block text-sm font-bold text-slate-700">Senha</label>
                     <button
                       type="button"
                       onClick={() => router.push('/recuperar-senha')}
@@ -195,8 +264,11 @@ export default function Login() {
                   <div className="relative">
                     <LockKeyhole className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                     <input
+                      id="login-password"
+                      autoComplete="current-password"
                       type={showPassword ? 'text' : 'password'}
                       required
+                      disabled={mfaRequired}
                       className="w-full rounded-lg border border-slate-300 bg-white py-3 pl-10 pr-12 text-slate-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
                       value={form.senha}
                       onChange={(e) => setForm({ ...form, senha: e.target.value })}
@@ -212,12 +284,54 @@ export default function Login() {
                   </div>
                 </div>
 
+                {mfaRequired && (
+                  <div className="space-y-4 rounded-lg border border-blue-200 bg-blue-50/60 p-4">
+                    <div>
+                      <p className="text-sm font-black text-slate-800">Confirme o segundo fator</p>
+                      <p className="mt-1 text-xs leading-5 text-slate-600">Escolha como deseja receber ou gerar o código.</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button type="button" onClick={() => { setMfaMethod('TOTP'); setForm({ ...form, otpCode: '' }); }}
+                        className={`rounded-lg border px-3 py-2 text-xs font-black ${mfaMethod === 'TOTP' ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white text-slate-700'}`}>
+                        Aplicativo
+                      </button>
+                      <button type="button" onClick={() => { setMfaMethod('EMAIL'); setForm({ ...form, otpCode: '' }); }}
+                        className={`rounded-lg border px-3 py-2 text-xs font-black ${mfaMethod === 'EMAIL' ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white text-slate-700'}`}>
+                        E-mail
+                      </button>
+                    </div>
+                    {mfaMethod === 'EMAIL' && (
+                      <button type="button" disabled={loading || emailCodeSent} onClick={sendEmailCode}
+                        className="w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-black text-blue-700 disabled:opacity-60">
+                        {emailCodeSent ? 'Código enviado — verifique seu e-mail' : 'Enviar código por e-mail'}
+                      </button>
+                    )}
+                    <div>
+                    <label htmlFor="login-otp" className="mb-2 block text-sm font-bold text-slate-700">
+                      {mfaMethod === 'EMAIL' ? 'Código recebido por e-mail' : 'Código do autenticador ou de recuperação'}
+                    </label>
+                    <input id="login-otp" autoComplete="one-time-code" value={form.otpCode}
+                      onChange={(e) => setForm({ ...form, otpCode: e.target.value })}
+                      required maxLength={48} className="w-full rounded-lg border border-slate-300 p-3 text-slate-900 focus:ring-2 focus:ring-blue-500" />
+                    </div>
+                    <label className="flex cursor-pointer items-start gap-3 text-xs leading-5 text-slate-600">
+                      <input type="checkbox" checked={trustDevice} onChange={(event) => setTrustDevice(event.target.checked)} className="mt-1" />
+                      <span><strong>Confiar neste dispositivo</strong><br />
+                        {mfaMethod === 'TOTP' ? 'Não pedir novamente por 7 dias neste navegador.' : 'Não pedir novamente por 24 horas neste navegador.'}
+                      </span>
+                    </label>
+                    <button type="button" onClick={() => {
+                      setMfaRequired(false); setMfaChallenge(''); setEmailCodeSent(false); setForm({ ...form, otpCode: '' }); setError('');
+                    }} className="text-xs font-bold text-slate-500 underline">Usar outra conta</button>
+                  </div>
+                )}
+
                 <button
                   type="submit"
                   disabled={loading}
                   className="group flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-5 py-3.5 font-black text-white shadow-lg shadow-blue-200 transition hover:bg-blue-700 hover:shadow-blue-300 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {loading ? 'Entrando...' : 'Entrar'}
+                  {loading ? 'Validando...' : mfaRequired ? 'Confirmar acesso' : 'Entrar'}
                   {!loading && <ArrowRight size={18} className="transition group-hover:translate-x-0.5" />}
                 </button>
               </form>

@@ -16,6 +16,7 @@ const emptyForm = {
   retemIr: '', aliquotaIr: '', retemInss: '', aliquotaInss: '', calculaPisCofinsDevido: '', aliquotaPisDevido: '', aliquotaCofinsDevido: '',
   habilitaIbsCbs: '', inicioObrigatoriedadeIbsCbs: '', codigoIndicadorOperacao: '', cstIbsCbs: '', classeTribIbsCbs: '', finNfsePadrao: '0', indFinalPadrao: '0', indDestPadrao: '0',
   versaoLayout: '1.01', fonteNormativa: '', observacoesFiscal: '',
+  justification: '', adminPassword: '',
 };
 
 const toDateInput = (value: any) => value ? new Date(value).toISOString().slice(0, 10) : '';
@@ -60,15 +61,10 @@ export default function TributacaoMunicipalPage() {
       .then(res => setListaCnaes(Array.isArray(res) ? res : (res.data || [])))
       .catch(() => setListaCnaes([]));
 
-    fetch('/api/admin/empresas?limit=1000', { headers: { Authorization: `Bearer ${token}` } })
+    fetch('/api/admin/tributacao-municipal?municipios=true', { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
       .then((res: any) => {
-        const listaEmpresas = res.data || (Array.isArray(res) ? res : []);
-        const cidadesMap = new Map();
-        listaEmpresas.forEach((emp: any) => {
-          if (emp.codigoIbge && emp.cidade) cidadesMap.set(emp.codigoIbge, { ibge: emp.codigoIbge, nome: `${emp.cidade}/${emp.uf}` });
-        });
-        setListaCidades(Array.from(cidadesMap.values()));
+        setListaCidades(Array.isArray(res.data) ? res.data : []);
       })
       .catch(err => console.error('Erro ao carregar cidades', err));
   };
@@ -81,8 +77,11 @@ export default function TributacaoMunicipalPage() {
 
   const handleSave = async () => {
     if (!form.cnae || !form.codigoIbge || (form.exigeCodigoTributacaoMunicipal && !form.codigoTributacaoMunicipal)) return dialog.showAlert('Preencha os campos obrigatórios.');
+    if (!form.fonteNormativa?.trim()) return dialog.showAlert({ type: 'warning', description: 'Informe a fonte normativa da regra.' });
+    if (!form.justification?.trim() || form.justification.trim().length < 10) return dialog.showAlert({ type: 'warning', description: 'Informe uma justificativa com pelo menos 10 caracteres.' });
+    if (!form.adminPassword) return dialog.showAlert({ type: 'warning', description: 'Informe sua senha administrativa atual.' });
     const token = localStorage.getItem('token');
-    const payload = { ...form, aliquotaIss: form.aliquotaIss ? parseFloat(form.aliquotaIss) : null };
+    const payload = { ...form, expectedUpdatedAt: editing?.updatedAt, aliquotaIss: form.aliquotaIss ? parseFloat(form.aliquotaIss) : null };
     const res = await fetch('/api/admin/tributacao-municipal', {
       method: editing ? 'PUT' : 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -98,16 +97,22 @@ export default function TributacaoMunicipalPage() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    const confirmed = await dialog.showConfirm({ title: 'Excluir regra?', description: 'Esta ação removerá a configuração tributária para este município.', type: 'danger', confirmText: 'Sim, excluir' });
+  const handleDelete = async (item: any) => {
+    const confirmed = await dialog.showConfirm({ title: 'Suspender regra?', description: 'A regra deixará de ser usada em novas emissões, mas o histórico e as notas anteriores serão preservados.', type: 'warning', confirmText: 'Suspender regra' });
     if (!confirmed) return;
+    const justification = await dialog.showPrompt({ title: 'Justificativa da suspensão', description: 'Informe o motivo com pelo menos 10 caracteres.' });
+    if (!justification || justification.trim().length < 10) return dialog.showAlert({ type: 'warning', description: 'A suspensão não foi realizada. Informe uma justificativa válida.' });
+    const adminPassword = await dialog.showPrompt({ title: 'Confirmar identidade', description: 'Digite sua senha administrativa atual.', inputType: 'password' });
+    if (!adminPassword) return;
     const token = localStorage.getItem('token');
-    await fetch(`/api/admin/tributacao-municipal?id=${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+    const response = await fetch('/api/admin/tributacao-municipal', { method: 'DELETE', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ id: item.id, expectedUpdatedAt: item.updatedAt, justification, adminPassword }) });
+    const data = await response.json().catch(() => null);
+    if (!response.ok) return dialog.showAlert({ type: 'danger', description: data?.error || 'Erro ao suspender regra.' });
     carregarRegras(page, termoBusca);
-    dialog.showAlert({ type: 'success', description: 'Regra removida.' });
+    dialog.showAlert({ type: 'success', description: 'Regra suspensa e histórico preservado.' });
   };
 
-  const getNomeCidade = (ibge: string) => listaCidades.find(c => c.ibge === ibge)?.nome || ibge;
+  const getNomeCidade = (item: any) => item.municipio?.nome || listaCidades.find(c => c.ibge === item.codigoIbge)?.nome || 'Município não identificado';
   const opcoesCnae = listaCnaes.map(c => ({ value: c.codigo, label: c.codigo, subLabel: c.descricao }));
   const opcoesCidade = listaCidades.map(c => ({ value: c.ibge, label: c.nome, subLabel: `IBGE: ${c.ibge}` }));
   const comIss = lista.filter(item => item.aliquotaIss).length;
@@ -155,13 +160,13 @@ export default function TributacaoMunicipalPage() {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {lista.length === 0 ? <tr><td colSpan={6} className="p-10 text-center text-slate-400">Nenhum registro encontrado.</td></tr> : lista.map(item => (
-              <tr key={item.id} className="transition hover:bg-slate-50">
-                <td className="p-4"><span className="font-mono font-black text-slate-800">{item.cnae}</span></td>
-                <td className="p-4"><div className="flex flex-col"><span className="flex items-center gap-1 font-bold text-slate-700"><MapPin size={14} className="text-blue-500" />{getNomeCidade(item.codigoIbge)}</span><span className="pl-5 font-mono text-[10px] text-slate-400">IBGE: {item.codigoIbge}</span></div></td>
+              <tr key={item.id} className={`transition hover:bg-slate-50 ${item.ativo ? '' : 'bg-amber-50/60'}`}>
+                <td className="p-4"><span className="font-mono font-black text-slate-800">{item.cnae}</span>{!item.ativo && <span className="ml-2 rounded-full bg-amber-100 px-2 py-1 text-[10px] font-black uppercase text-amber-800">Suspensa</span>}</td>
+                <td className="p-4"><div className="flex flex-col"><span className="flex items-center gap-1 font-bold text-slate-700"><MapPin size={14} className="text-blue-500" />{getNomeCidade(item)}</span><span className="pl-5 font-mono text-[10px] text-slate-400">IBGE: {item.codigoIbge}</span></div></td>
                 <td className="p-4"><span className="rounded-full border border-orange-200 bg-orange-100 px-3 py-1 text-xs font-black text-orange-800">{item.codigoTributacaoMunicipal}</span></td>
                 <td className="p-4 text-center">{item.aliquotaIss ? <span className="rounded-full border border-emerald-200 bg-emerald-100 px-3 py-1 text-xs font-black text-emerald-800">{Number(item.aliquotaIss).toFixed(2)}%</span> : <span className="text-slate-300">-</span>}</td>
                 <td className="p-4 text-center">{item.exigeNbs ? <span className="rounded-full bg-purple-100 px-3 py-1 text-xs font-black text-purple-700">Sim</span> : <span className="text-slate-300">-</span>}</td>
-                <td className="p-4"><div className="flex justify-end gap-2"><button onClick={() => { setEditing(item); setForm({ ...emptyForm, ...item, aliquotaIss: item.aliquotaIss ? String(item.aliquotaIss) : '', inicioVigencia: toDateInput(item.inicioVigencia), fimVigencia: toDateInput(item.fimVigencia), inicioObrigatoriedadeIbsCbs: toDateInput(item.inicioObrigatoriedadeIbsCbs) }); setModalOpen(true); }} className="rounded-xl p-2 text-blue-600 hover:bg-blue-50"><Edit size={18} /></button><button onClick={() => handleDelete(item.id)} className="rounded-xl p-2 text-red-500 hover:bg-red-50"><Trash2 size={18} /></button></div></td>
+                <td className="p-4"><div className="flex justify-end gap-2"><button onClick={() => { setEditing(item); setForm({ ...emptyForm, ...item, justification: '', adminPassword: '', aliquotaIss: item.aliquotaIss ? String(item.aliquotaIss) : '', inicioVigencia: toDateInput(item.inicioVigencia), fimVigencia: toDateInput(item.fimVigencia), inicioObrigatoriedadeIbsCbs: toDateInput(item.inicioObrigatoriedadeIbsCbs) }); setModalOpen(true); }} className="rounded-xl p-2 text-blue-600 hover:bg-blue-50"><Edit size={18} /></button>{item.ativo && <button onClick={() => handleDelete(item)} className="rounded-xl p-2 text-amber-600 hover:bg-amber-50" title="Suspender regra"><Trash2 size={18} /></button>}</div></td>
               </tr>
             ))}
           </tbody>
@@ -238,6 +243,11 @@ export default function TributacaoMunicipalPage() {
               <section className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 <div><label className="mb-1 block text-xs font-black uppercase text-slate-500">Fonte normativa</label><input className={inputBase} value={form.fonteNormativa || ''} onChange={e => setForm({ ...form, fonteNormativa: e.target.value })} placeholder="NT, lei ou URL oficial" /></div>
                 <div><label className="mb-1 block text-xs font-black uppercase text-slate-500">Observações do operador</label><input className={inputBase} value={form.observacoesFiscal || ''} onChange={e => setForm({ ...form, observacoesFiscal: e.target.value })} /></div>
+              </section>
+              <section className="rounded-2xl border border-slate-300 bg-slate-50 p-4">
+                <h4 className="text-sm font-black uppercase text-slate-700">Confirmação e histórico</h4>
+                <p className="mt-1 text-xs text-slate-500">A operação ficará registrada com responsável, justificativa e fotografias anterior e posterior.</p>
+                <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2"><div><label className="mb-1 block text-xs font-bold text-slate-600">Justificativa</label><textarea className={`${inputBase} resize-none`} rows={3} value={form.justification || ''} onChange={e => setForm({ ...form, justification: e.target.value })} /></div><div><label className="mb-1 block text-xs font-bold text-slate-600">Sua senha administrativa</label><input type="password" autoComplete="current-password" className={inputBase} value={form.adminPassword || ''} onChange={e => setForm({ ...form, adminPassword: e.target.value })} /></div></div>
               </section>
             </div>
             <div className="flex justify-end gap-2 border-t bg-slate-50 p-5"><button onClick={() => setModalOpen(false)} className="rounded-xl px-5 py-3 text-sm font-bold text-slate-600 hover:bg-white">Cancelar</button><button onClick={handleSave} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-6 py-3 text-sm font-bold text-white hover:bg-blue-700"><Save size={18} /> Salvar</button></div>

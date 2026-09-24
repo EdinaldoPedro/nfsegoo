@@ -1,9 +1,15 @@
+import { withApiGuard } from '@/app/utils/api-route';
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '@/app/utils/prisma';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 import { validateSelectableNbs } from '@/app/utils/nbs';
+import { canReadFiscalCatalog, canWriteFiscalCatalog } from '@/app/utils/fiscal-admin-access';
+import { requireAdminReauthentication } from '@/app/utils/admin-security';
+import {
+  assertFiscalRuleVersion, changedFiscalRuleFields, FiscalRuleGovernanceError, fiscalRuleSnapshot,
+  parseFiscalRuleGovernance, validateNormativeSource,
+} from '@/app/utils/fiscal-rule-governance';
 
-const prisma = new PrismaClient();
 
 const decimalOrNull = (value: unknown) => {
   if (value === null || value === undefined || value === '') return null;
@@ -12,10 +18,10 @@ const decimalOrNull = (value: unknown) => {
 };
 
 // GET: Lista paginada e com busca
-export async function GET(request: Request) {
+export const GET = withApiGuard(async function GET(request: Request) {
   const user = await getAuthenticatedUser(request);
   if (!user) return unauthorized();
-  if (!['MASTER', 'ADMIN', 'CONTADOR'].includes(user.role)) return forbidden();
+  if (!canReadFiscalCatalog(user.role)) return forbidden();
   const { searchParams } = new URL(request.url);
   const page = parseInt(searchParams.get('page') || '1');
   const limit = parseInt(searchParams.get('limit') || '10');
@@ -54,16 +60,22 @@ export async function GET(request: Request) {
   } catch (error) {
     return NextResponse.json({ error: 'Erro ao buscar dados.' }, { status: 500 });
   }
-}
+});
 
 // PUT: Atualiza dados tributários
-export async function PUT(request: Request) {
+export const PUT = withApiGuard(async function PUT(request: Request) {
   const user = await getAuthenticatedUser(request);
   if (!user) return unauthorized();
-  if (!['MASTER', 'ADMIN', 'CONTADOR'].includes(user.role)) return forbidden();
+  if (!canWriteFiscalCatalog(user.role)) return forbidden();
 
   try {
     const body = await request.json();
+    const governance = parseFiscalRuleGovernance(body, true);
+    const reauthenticationError = await requireAdminReauthentication({
+      actorId: user.id, password: governance.adminPassword, justification: governance.justification,
+      action: 'GLOBAL_CNAE_RULE_UPDATE',
+    });
+    if (reauthenticationError) return reauthenticationError;
     
     // ATUALIZADO: Recebendo todas as novas regras de retenção
     const { 
@@ -139,9 +151,14 @@ export async function PUT(request: Request) {
     const csllRetencao = crsfAtiva ? decimalOrNull(aliquotaCsllRetencao) ?? 1 : decimalOrNull(aliquotaCsllRetencao);
     const totalCrsf = crsfAtiva ? Number((pisRetencao! + cofinsRetencao! + csllRetencao!).toFixed(2)) : null;
 
-    const atualizado = await prisma.globalCnae.update({
-      where: { id },
-      data: {
+    const fonteNormativaValidada = validateNormativeSource(fonteNormativa);
+    const atualizado = await prisma.$transaction(async (tx) => {
+      const anterior = await tx.globalCnae.findUnique({ where: { id } });
+      if (!anterior) throw new FiscalRuleGovernanceError('CNAE fiscal não encontrado.', 404);
+      assertFiscalRuleVersion(anterior.updatedAt, governance.expectedUpdatedAt);
+      const salvo = await tx.globalCnae.update({
+        where: { id },
+        data: {
         itemLc,
         codigoTributacaoNacional,
         codigoNbs: nbsValidation.code,
@@ -168,14 +185,25 @@ export async function PUT(request: Request) {
         codigoIndicadorOperacao: codigoIndicadorOperacao || null,
         cstIbsCbs: cstIbsCbs || null,
         classeTribIbsCbs: classeTribIbsCbs || null,
-        fonteNormativa: fonteNormativa || null,
+        fonteNormativa: fonteNormativaValidada,
         inicioVigencia: inicioVigencia ? new Date(`${inicioVigencia}T00:00:00.000Z`) : null,
         fimVigencia: fimVigencia ? new Date(`${fimVigencia}T23:59:59.999Z`) : null
-      }
+        },
+      });
+      const before = fiscalRuleSnapshot(anterior);
+      const after = fiscalRuleSnapshot(salvo);
+      await tx.systemLog.create({ data: {
+        level: 'ALERTA', module: 'REGRAS_FISCAIS', action: 'GLOBAL_CNAE_RULE_UPDATED', userId: user.id,
+        message: 'Regra nacional de CNAE atualizada com reautenticação e histórico.',
+        details: JSON.stringify({ ruleType: 'GLOBAL_CNAE', ruleId: salvo.id, cnae: salvo.codigo,
+          justification: governance.justification, changedFields: changedFiscalRuleFields(before, after), before, after }),
+      } });
+      return salvo;
     });
 
     return NextResponse.json(atualizado);
   } catch (error) {
+    if (error instanceof FiscalRuleGovernanceError) return NextResponse.json({ error: error.message }, { status: error.status });
     return NextResponse.json({ error: 'Erro ao atualizar' }, { status: 500 });
   }
-}
+});

@@ -32,9 +32,7 @@ export default function TermosDeUso() {
             </div>
           </div>
 
-          <div className="mb-8 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm font-semibold leading-6 text-amber-900">
-            {legalNotice}
-          </div>
+          {legalNotice && <div className="mb-8 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm font-semibold leading-6 text-amber-900">{legalNotice}</div>}
 
           <div className="space-y-8 text-sm leading-7 text-slate-700">
             <section>

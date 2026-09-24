@@ -1,9 +1,12 @@
+import { withApiGuard } from '@/app/utils/api-route';
 import { NextResponse } from 'next/server';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 import { isSupportRole } from '@/app/utils/access-control';
 import { prisma } from '@/app/utils/prisma';
 import { sanitizeLogValue } from '@/app/services/logger';
 import { stripEmpresaSecrets } from '@/app/utils/safe-data';
+
+export const dynamic = 'force-dynamic';
 
 function sanitizeStoredDetails(details: string | null) {
   if (!details) return details;
@@ -14,7 +17,8 @@ function sanitizeStoredDetails(details: string | null) {
   }
 }
 
-export async function GET(request: Request, { params }: { params: { id: string } }) {
+export const GET = withApiGuard(async function GET(request: Request, { params: routeParams }: { params: Promise<{ id: string }> }) {
+  const params = await routeParams;
   const user = await getAuthenticatedUser(request);
   if (!user) return unauthorized();
   if (!isSupportRole(user.role)) return forbidden();
@@ -53,4 +57,4 @@ export async function GET(request: Request, { params }: { params: { id: string }
     console.error(error);
     return NextResponse.json({ error: 'Erro ao buscar detalhes' }, { status: 500 });
   }
-}
+});

@@ -1,0 +1,37 @@
+[Unit]
+Description=NFSe Goo - aplicação web
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=nfsegoo
+Group=nfsegoo
+WorkingDirectory=/opt/nfsegoo
+EnvironmentFile=/etc/nfsegoo/web.env
+Environment=HOSTNAME=127.0.0.1
+Environment=PORT=3000
+ExecStartPre=/usr/bin/node /opt/nfsegoo/scripts/release-artifact.cjs
+ExecStartPre=/usr/bin/node /opt/nfsegoo/scripts/infrastructure-readiness.cjs
+ExecStartPre=/usr/bin/node /opt/nfsegoo/scripts/migration-gate.cjs
+ExecStart=/usr/bin/node /opt/nfsegoo/node_modules/next/dist/bin/next start
+Restart=always
+RestartSec=5
+TimeoutStopSec=60
+KillSignal=SIGTERM
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=full
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+UMask=0077
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

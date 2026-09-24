@@ -1,9 +1,11 @@
+import { withApiGuard } from '@/app/utils/api-route';
 import { NextResponse } from 'next/server';
-import { prisma } from '@/app/utils/prisma';
+import { validarCPF } from '@/app/utils/cpf';
+import { getRequestIp } from '@/app/utils/request-ip';
 import { checkRateLimit } from '@/app/utils/rate-limit';
 import { validateJsonContentLength, validateSameOrigin } from '@/app/utils/request-guards';
 
-export async function POST(request: Request) {
+export const POST = withApiGuard(async function POST(request: Request) {
   try {
     const originError = validateSameOrigin(request);
     if (originError) return originError;
@@ -12,7 +14,7 @@ export async function POST(request: Request) {
     if (sizeError) return sizeError;
 
     const { email, cpf } = await request.json();
-    const ip = request.headers.get('x-forwarded-for') || '127.0.0.1';
+    const ip = getRequestIp(request);
     const ipAllowed = await checkRateLimit(`auth_check_ip_${ip}`, 20, 15 * 60 * 1000);
 
     if (!ipAllowed) {
@@ -23,26 +25,12 @@ export async function POST(request: Request) {
 
     if (email) {
       const emailNormalizado = String(email).trim().toLowerCase();
-      const userEmail = await prisma.user.findUnique({
-        where: { email: emailNormalizado },
-        select: { id: true },
-      });
-
-      if (userEmail) {
-        errors.email = 'Este e-mail ja esta cadastrado.';
-      }
+      if (emailNormalizado.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailNormalizado)) errors.email = 'E-mail invalido.';
     }
 
     if (cpf) {
       const cpfLimpo = String(cpf).replace(/\D/g, '');
-      const userCpf = await prisma.user.findUnique({
-        where: { cpf: cpfLimpo },
-        select: { id: true },
-      });
-
-      if (userCpf) {
-        errors.cpf = 'Este CPF ja esta vinculado a uma conta.';
-      }
+      if (!validarCPF(cpfLimpo)) errors.cpf = 'CPF invalido.';
     }
 
     return NextResponse.json({
@@ -52,4 +40,4 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: 'Erro ao verificar dados.' }, { status: 500 });
   }
-}
+});

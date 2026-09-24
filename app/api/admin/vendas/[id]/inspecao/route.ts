@@ -1,3 +1,4 @@
+import { withApiGuard } from '@/app/utils/api-route';
 import { NextResponse } from 'next/server';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 import { isSupportRole } from '@/app/utils/access-control';
@@ -11,7 +12,8 @@ async function ensureSupport(request: Request) {
   return null;
 }
 
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export const POST = withApiGuard(async function POST(request: Request, { params: routeParams }: { params: Promise<{ id: string }> }) {
+  const params = await routeParams;
   const authError = await ensureSupport(request);
   if (authError) return authError;
 
@@ -29,4 +31,4 @@ export async function POST(request: Request, { params }: { params: { id: string 
       error: error.message || 'Nao foi possivel inspecionar a emissao.',
     }, { status: 500 });
   }
-}
+});

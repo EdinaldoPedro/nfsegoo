@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   AlertTriangle,
@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { useDialog } from '@/app/contexts/DialogContext';
 import { logoutAndRedirect } from '@/app/utils/client-session';
+import { formatCnpj, formatCnpjInput, normalizeCnpj, validarCNPJ } from '@/app/utils/cnpj';
 
 const PAGE_SIZE = 12;
 const STATUS_PENDENTES = ['PENDENTE', 'PENDENTE_DONO', 'PENDENTE_CUSTODIANTE'];
@@ -45,6 +46,20 @@ const filtrosRapidos = [
   { id: 'SEM_EMISSAO', label: 'Sem emissão recente' },
   { id: 'CADASTRO_INCOMPLETO', label: 'Cadastro incompleto' },
 ];
+
+function diasAte(data?: string | null) {
+  if (!data) return null;
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  const alvo = new Date(data);
+  alvo.setHours(0, 0, 0, 0);
+  return Math.ceil((alvo.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+function certificadoVencendo(item: any) {
+  const dias = diasAte(item.empresa?.certificadoVencimento);
+  return dias !== null && dias >= 0 && dias <= 30;
+}
 
 export default function ContadorDashboard() {
   const router = useRouter();
@@ -71,7 +86,7 @@ export default function ContadorDashboard() {
     }
   };
 
-  const carregar = () => {
+  const carregar = useCallback(() => {
     const userId = localStorage.getItem('userId');
     if (!userId) return router.push('/login');
 
@@ -88,11 +103,11 @@ export default function ContadorDashboard() {
         if (Array.isArray(solicitacoesData)) setSolicitacoesCustodia(solicitacoesData);
       })
       .finally(() => setLoading(false));
-  };
+  }, [router]);
 
   useEffect(() => {
     carregar();
-  }, []);
+  }, [carregar]);
 
   useEffect(() => {
     setPagina(1);
@@ -100,9 +115,7 @@ export default function ContadorDashboard() {
   }, [termoBusca, filtroAtivo, ordenacao]);
 
   const formatarDocumento = (documento?: string) => {
-    const digits = (documento || '').replace(/\D/g, '');
-    if (digits.length !== 14) return documento || 'Documento não informado';
-    return digits.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+    return documento ? formatCnpj(documento) : 'Documento não informado';
   };
 
   const formatarData = (data?: string | null) => {
@@ -110,23 +123,9 @@ export default function ContadorDashboard() {
     return new Intl.DateTimeFormat('pt-BR').format(new Date(data));
   };
 
-  const diasAte = (data?: string | null) => {
-    if (!data) return null;
-    const hoje = new Date();
-    hoje.setHours(0, 0, 0, 0);
-    const alvo = new Date(data);
-    alvo.setHours(0, 0, 0, 0);
-    return Math.ceil((alvo.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24));
-  };
-
   const temPendencia = (item: any) => {
     const empresa = item.empresa || {};
     return item.status !== 'APROVADO' || !empresa.temCertificado || !empresa.cadastroCompleto || !empresa.codigoIbge;
-  };
-
-  const certificadoVencendo = (item: any) => {
-    const dias = diasAte(item.empresa?.certificadoVencimento);
-    return dias !== null && dias >= 0 && dias <= 30;
   };
 
   const semEmissaoRecente = (item: any) => {
@@ -146,7 +145,6 @@ export default function ContadorDashboard() {
 
   const empresasFiltradas = useMemo(() => {
     const texto = normalizarBusca(termoBusca);
-    const termoNumerico = termoBusca.replace(/\D/g, '');
 
     return empresas
       .filter((item) => {
@@ -158,9 +156,8 @@ export default function ContadorDashboard() {
           empresa.email,
           empresa.cidade,
           empresa.uf,
-        ].some((valor) => normalizarBusca(String(valor || '')).includes(texto)) || (
-          termoNumerico.length > 0 && documento.replace(/\D/g, '').includes(termoNumerico)
-        );
+          documento,
+        ].some((valor) => normalizarBusca(String(valor || '')).includes(texto));
 
         if (!buscaOk) return false;
 
@@ -197,13 +194,13 @@ export default function ContadorDashboard() {
   }, [empresas]);
 
   const handleAdicionarCliente = async () => {
-    const cnpjLimpo = novoCnpj.replace(/\D/g, '');
+    const cnpjLimpo = normalizeCnpj(novoCnpj);
 
-    if (cnpjLimpo.length !== 14) {
+    if (!cnpjLimpo || !validarCNPJ(cnpjLimpo)) {
       return showAlert({
         type: 'warning',
         title: 'CNPJ inválido',
-        description: 'O CNPJ deve conter exatamente 14 números.',
+        description: 'Informe um CNPJ válido, inclusive seus dígitos verificadores.',
       });
     }
 
@@ -327,7 +324,7 @@ export default function ContadorDashboard() {
       : empresasFiltradas;
 
     const linhas = [
-      ['Razão Social', 'CNPJ', 'Cidade', 'UF', 'Status', 'Certificado', 'Notas no mês', 'Última emissão'],
+      ['Razão Social', 'CNPJ', 'Cidade', 'UF', 'Status', 'Certificado', 'Notas autorizadas no mês (produção)', 'Última emissão (produção)', 'Homologação excluída', 'Legado sem ambiente excluído'],
       ...base.map((item) => [
         item.empresa?.razaoSocial || '',
         item.empresa?.documento || '',
@@ -337,6 +334,7 @@ export default function ContadorDashboard() {
         item.empresa?.temCertificado ? 'Sim' : 'Não',
         String(item.resumo?.notasMes || 0),
         item.resumo?.ultimaEmissao ? formatarData(item.resumo.ultimaEmissao) : '',
+        String(item.resumo?.notasHomologacao || 0), String(item.resumo?.notasSemAmbiente || 0),
       ]),
     ];
 
@@ -382,7 +380,7 @@ export default function ContadorDashboard() {
 
         <section className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
           <ResumoCard icon={Building2} label="Empresas vinculadas" value={resumo.total} tone="blue" />
-          <ResumoCard icon={BadgeCheck} label="Notas no mês" value={resumo.notasMes} tone="emerald" />
+          <ResumoCard icon={BadgeCheck} label="Autorizadas (produção/mês)" value={resumo.notasMes} tone="emerald" />
           <ResumoCard icon={FileWarning} label="Com pendências" value={resumo.pendencias} tone="amber" />
           <ResumoCard icon={ShieldCheck} label="Certificados vencendo" value={resumo.certificadosVencendo} tone="red" />
           <ResumoCard icon={Users} label="Clientes nas carteiras" value={resumo.clientes} tone="slate" />
@@ -404,15 +402,15 @@ export default function ContadorDashboard() {
               <div className="flex flex-col gap-2 sm:flex-row">
                 <input
                   className="w-full rounded-2xl border border-slate-200 px-4 py-3 font-mono text-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100 sm:w-72"
-                  placeholder="CNPJ somente números"
+                  placeholder="00.AAA.000/0000-00"
                   value={novoCnpj}
-                  onChange={(e) => setNovoCnpj(e.target.value.replace(/\D/g, ''))}
-                  maxLength={14}
+                  onChange={(e) => setNovoCnpj(formatCnpjInput(e.target.value))}
+                  maxLength={18}
                   disabled={processando}
                 />
                 <button
                   onClick={handleAdicionarCliente}
-                  disabled={processando || novoCnpj.length < 14}
+                  disabled={processando || !validarCNPJ(novoCnpj)}
                   className="inline-flex min-w-[150px] items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {processando ? <Loader2 className="animate-spin" size={18} /> : <><Send size={17} /> Adicionar</>}
@@ -596,9 +594,15 @@ export default function ContadorDashboard() {
                       <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
                         <InfoPill label="Certificado" value={empresa.temCertificado ? (diasCertificado !== null ? `${diasCertificado} dias` : 'Ativo') : 'Ausente'} danger={!empresa.temCertificado || (diasCertificado !== null && diasCertificado <= 30)} />
                         <InfoPill label="Última emissão" value={formatarData(item.resumo?.ultimaEmissao)} muted={!item.resumo?.ultimaEmissao} />
-                        <InfoPill label="Notas no mês" value={item.resumo?.notasMes || 0} />
+                        <InfoPill label="Autorizadas (produção/mês)" value={item.resumo?.notasMes || 0} />
                         <InfoPill label="Clientes" value={item.resumo?.clientesCarteira || 0} />
                       </div>
+
+                      {item.status === 'APROVADO' && (item.resumo?.notasSemAmbiente || 0) > 0 && (
+                        <p className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
+                          {item.resumo.notasSemAmbiente} nota(s) históricas sem ambiente confirmado. Não entram nos indicadores de produção; consulte-as no relatório desta empresa.
+                        </p>
+                      )}
 
                       {(!empresa.cadastroCompleto || !empresa.codigoIbge) && (
                         <div className="mt-3 rounded-2xl bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700 ring-1 ring-amber-200">

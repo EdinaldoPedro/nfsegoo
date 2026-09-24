@@ -16,15 +16,25 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
     setIsContadorContext(!!localStorage.getItem('empresaContextId'));
   }, []);
 
-  const sairDoSuporte = () => {
+  const sairDoSuporte = async () => {
     const adminId = localStorage.getItem('adminBackUpId');
+
+    try {
+      await fetch('/api/admin/impersonate', { method: 'DELETE' });
+    } catch {
+      // A limpeza local ainda precisa acontecer se a rede estiver indisponivel.
+    }
 
     if (adminId) {
       localStorage.setItem('userId', adminId);
+      const adminRole = localStorage.getItem('adminBackUpRole');
+      if (adminRole) localStorage.setItem('userRole', adminRole);
       localStorage.removeItem('adminBackUpId');
+      localStorage.removeItem('adminBackUpRole');
       localStorage.removeItem('isSupportMode');
+      localStorage.removeItem('supportModeExpiresAt');
       localStorage.removeItem('empresaContextId');
-      window.location.href = '/admin/usuarios';
+      router.push('/admin/usuarios');
     } else {
       router.push('/login');
     }

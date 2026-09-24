@@ -1,6 +1,7 @@
 'use client';
 
 import Link from "next/link";
+import Image from "next/image";
 import { useState, useEffect, useRef, ReactNode } from "react";
 import { CheckCircle, ArrowRight, MapPin, Info, Loader2, Zap, Shield, Users, ChevronLeft, ChevronRight, ChevronDown, Briefcase, Calculator, Handshake, RefreshCw, FileDown, LifeBuoy, Bell, ClipboardCheck, Building2, Laptop, Smartphone } from "lucide-react";
 
@@ -172,7 +173,7 @@ export default function LandingPage() {
       <header className={`fixed top-0 w-full z-50 transition-all duration-500 ease-in-out ${scrolled ? 'bg-white/90 backdrop-blur-md shadow-sm py-3 translate-y-0' : 'bg-transparent py-5 animate-in slide-in-from-top-full duration-700'}`}>
         <div className="flex justify-between items-center px-6 max-w-7xl mx-auto">
             <Link href="/" onClick={(e) => { e.preventDefault(); window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="text-2xl font-black text-blue-600 flex items-center gap-2 tracking-tight group hover:scale-105 transition-transform active:scale-95">
-                <img src="/icons/G.png" alt="NFSeGoo" className="w-8 h-8 object-contain" />
+                <Image src="/icons/G.png" alt="NFSeGoo" width={32} height={32} className="h-8 w-8 object-contain" />
                 <span className="bg-gradient-to-r from-blue-700 to-emerald-400 bg-clip-text text-transparent">
                     NFSe<span className="font-light">Goo</span>
                 </span>
@@ -455,8 +456,11 @@ export default function LandingPage() {
                             <style dangerouslySetInnerHTML={{ __html: `::-webkit-scrollbar { display: none; }` }} />
                             
                             {planos.map((plano: any) => {
-                                let parsedFeatures: string[] = [];
-                                try { parsedFeatures = JSON.parse(plano.features); } catch { parsedFeatures = plano.features ? String(plano.features).split(',') : []; }
+                                let parsedFeatures: string[];
+                                try {
+                                    const features = JSON.parse(plano.features);
+                                    parsedFeatures = Array.isArray(features) ? features.filter((item): item is string => typeof item === 'string') : [];
+                                } catch { parsedFeatures = plano.features ? String(plano.features).split(',') : []; }
                                 const isAnual = Number(plano.priceMonthly) === 0 && Number(plano.priceYearly) > 0;
                                 const price = isAnual ? Number(plano.priceYearly) : Number(plano.priceMonthly);
                                 const label = isAnual ? '/ano' : '/mês';
@@ -500,7 +504,7 @@ export default function LandingPage() {
                                             <li className="flex items-start gap-3 text-slate-300">
                                                 <CheckCircle size={18} className="text-emerald-400 flex-shrink-0 mt-0.5" />
                                                 <span className="font-medium text-sm">
-                                                    {plano.maxClientes > 0 ? <strong className="text-white">{plano.maxClientes} Clientes</strong> : <strong className="text-white">Clientes Ilimitados</strong>}
+                                                    <strong className="text-white">{plano.maxClientes} clientes</strong>
                                                 </span>
                                             </li>
                                             {parsedFeatures.slice(0, 4).map((feat, i) => (
@@ -531,7 +535,7 @@ export default function LandingPage() {
           <div className="max-w-7xl mx-auto px-6 text-center">
             <Reveal>
                 <div className="flex items-center justify-center gap-2 text-3xl font-black mb-6 tracking-tight group hover:scale-105 transition-transform cursor-pointer">
-                    <img src="/icons/G.png" alt="NFSeGoo" className="w-10 h-10 object-contain group-hover:-translate-y-1 transition-transform" />
+                    <Image src="/icons/G.png" alt="NFSeGoo" width={40} height={40} className="h-10 w-10 object-contain transition-transform group-hover:-translate-y-1" />
                     <span className="bg-gradient-to-r from-blue-400 to-emerald-400 bg-clip-text text-transparent">
                         NFSe<span className="font-light">Goo</span>
                     </span>
@@ -684,7 +688,7 @@ function ProductPresentationShowcase() {
                                 </div>
 
                                 <div className="mx-5 mb-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-inner">
-                                    <img src={item.preview} alt={`Prévia ${item.title}`} className="h-64 w-full object-cover object-top transition duration-500 group-hover:scale-[1.03]" />
+                                    <Image src={item.preview} alt={`Prévia ${item.title}`} width={1200} height={700} sizes="(min-width: 1024px) 50vw, 100vw" className="h-64 w-full object-cover object-top transition duration-500 group-hover:scale-[1.03]" />
                                 </div>
 
                                 <div className="flex items-center justify-between border-t border-slate-200 bg-white px-5 py-4">
@@ -797,7 +801,7 @@ function ProductShowcase() {
                             <div className="grid min-h-[360px] grid-cols-[170px_minmax(0,1fr)] bg-slate-50">
                                 <aside className="hidden bg-slate-950 p-4 text-white sm:block">
                                     <div className="flex items-center gap-3">
-                                        <img src="/icons/G.png" alt="NFSeGoo" className="h-9 w-9 rounded-2xl bg-white p-1.5" />
+                                        <Image src="/icons/G.png" alt="NFSeGoo" width={36} height={36} className="h-9 w-9 rounded-2xl bg-white p-1.5" />
                                         <div>
                                             <p className="text-[9px] font-black uppercase tracking-[0.2em] text-blue-300">Dashboard</p>
                                             <h4 className="text-base font-black">NFSe Goo</h4>
@@ -882,7 +886,7 @@ function ProductShowcase() {
                             <div className="bg-white px-5 pb-4 pt-9">
                                 <div className="flex items-center justify-between">
                                     <div className="flex items-center gap-3">
-                                        <img src="/icons/G.png" alt="NFSeGoo" className="h-9 w-9 rounded-2xl border border-slate-100 bg-white p-1.5 shadow-sm" />
+                                        <Image src="/icons/G.png" alt="NFSeGoo" width={36} height={36} className="h-9 w-9 rounded-2xl border border-slate-100 bg-white p-1.5 shadow-sm" />
                                         <div>
                                             <p className="text-[9px] font-black uppercase tracking-[0.18em] text-blue-600">NFSe Goo</p>
                                             <h4 className="text-sm font-black text-slate-950">Meu painel</h4>
@@ -957,7 +961,7 @@ function ProductShowcaseLegacy() {
             <div className="grid gap-4 lg:grid-cols-[270px_minmax(0,1fr)]">
                 <aside className="rounded-3xl bg-slate-950 p-5 text-white">
                     <div className="flex items-center gap-3">
-                        <img src="/icons/G.png" alt="NFSeGoo" className="h-10 w-10 rounded-2xl bg-white p-1.5" />
+                        <Image src="/icons/G.png" alt="NFSeGoo" width={40} height={40} className="h-10 w-10 rounded-2xl bg-white p-1.5" />
                         <div>
                             <p className="text-[10px] font-black uppercase tracking-[0.22em] text-blue-300">Dashboard</p>
                             <h3 className="text-lg font-black">NFSe Goo</h3>

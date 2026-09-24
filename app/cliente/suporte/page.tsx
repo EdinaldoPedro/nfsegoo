@@ -16,17 +16,8 @@ export default function MeusChamados() {
   const [termoBusca, setTermoBusca] = useState('');
 
   useEffect(() => {
-    const role = localStorage.getItem('userRole') || '';
-    const isSupportMode = localStorage.getItem('isSupportMode') === 'true';
-    const isInternalSupport = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(role);
-
-    if (isInternalSupport && !isSupportMode) {
-        router.replace('/admin/suporte');
-        return;
-    }
-
     carregarDados();
-  }, []);
+  }, [router]);
 
   // Filtro local
   useEffect(() => {
@@ -48,7 +39,7 @@ export default function MeusChamados() {
     
     // Header seguro
     const headers = { 
-        'x-user-id': userId || ''
+        'x-user-id': userId || '', 'x-portal-mode': 'customer'
     };
     
     setLoading(true);
@@ -76,28 +67,28 @@ export default function MeusChamados() {
     }
   };
 
-  const responderSolicitacao = async (vinculoId: string, acao: 'APROVAR' | 'REJEITAR', nomeContador: string) => {
+  const responderSolicitacao = async (vinculoId: string, acao: 'APROVAR' | 'REJEITAR' | 'REVOGAR', nomeContador: string) => {
       const termo = acao === 'APROVAR' 
-        ? `ATENÇÃO: Ao aprovar, você confirma que conhece o contador(a) "${nomeContador}" e AUTORIZA o acesso dele(a) aos dados fiscais e cadastrais da sua empresa nesta plataforma.\n\nDeseja confirmar o acesso?`
-        : `Deseja recusar o acesso de "${nomeContador}"?`;
+        ? `Ao aprovar, você autoriza o contador(a) "${nomeContador}" a consultar dados fiscais, gerenciar o cadastro e realizar operações de emissão na sua empresa. O vínculo permanece até ser revogado. Não é uma sessão temporária de suporte. Deseja confirmar?`
+        : `Deseja ${acao === 'REVOGAR' ? 'revogar' : 'recusar'} o acesso contábil de "${nomeContador}"? Os documentos históricos serão preservados.`;
 
-      if (!await dialog.showConfirm({ type: acao === 'APROVAR' ? 'warning' : 'danger', title: acao === 'APROVAR' ? 'Autorizar acesso ao suporte?' : 'Recusar solicitação?', description: termo, confirmText: acao === 'APROVAR' ? 'Autorizar acesso' : 'Recusar', cancelText: 'Voltar' })) return;
+      if (!await dialog.showConfirm({ type: acao === 'APROVAR' ? 'warning' : 'danger', title: acao === 'APROVAR' ? 'Autorizar contador?' : 'Encerrar acesso contábil?', description: termo, confirmText: acao === 'APROVAR' ? 'Autorizar acesso' : 'Confirmar encerramento', cancelText: 'Voltar' })) return;
 
       const userId = localStorage.getItem('userId');
 
       try {
-          const res = await fetch('/api/contador/vinculo', {
-              method: 'PUT',
+          const res = await fetch(acao === 'REVOGAR' ? `/api/contador/vinculo?id=${encodeURIComponent(vinculoId)}` : '/api/contador/vinculo', {
+              method: acao === 'REVOGAR' ? 'DELETE' : 'PUT',
               headers: {
                   'Content-Type': 'application/json', 
-                  'x-user-id': userId || ''
+                  'x-user-id': userId || '', 'x-portal-mode': 'customer'
               },
               body: JSON.stringify({ vinculoId, acao })
           });
           
           if(res.ok) {
-              await dialog.showAlert({ type: 'success', title: acao === 'APROVAR' ? 'Acesso autorizado' : 'Solicitação recusada', description: acao === 'APROVAR' ? 'A equipe de suporte já pode acessar sua conta pelo período informado.' : 'O acesso à sua conta não foi autorizado.' });
-              setSolicitacoes(prev => prev.filter(s => s.id !== vinculoId));
+              await dialog.showAlert({ type: 'success', title: acao === 'APROVAR' ? 'Contador autorizado' : 'Acesso encerrado', description: acao === 'APROVAR' ? 'O contador pode operar nesta empresa até a revogação do vínculo.' : 'O vínculo contábil foi encerrado.' });
+              setSolicitacoes(prev => acao === 'APROVAR' ? prev.map((s) => s.id === vinculoId ? { ...s, status: 'APROVADO' } : s) : prev.filter(s => s.id !== vinculoId));
           } else {
               await dialog.showAlert({ type: 'danger', title: 'Não foi possível concluir', description: 'Tente novamente. Se o problema continuar, fale com o suporte.' });
           }
@@ -179,9 +170,9 @@ export default function MeusChamados() {
                         <UserCheck size={24}/>
                     </div>
                     <div>
-                        <h2 className="text-lg font-bold text-slate-800">Solicitações de Acesso</h2>
+                        <h2 className="text-lg font-bold text-slate-800">Vínculos de contadores</h2>
                         <p className="text-slate-500 text-sm mt-1">
-                            Contadores solicitando permissão para gerenciar sua empresa.
+                            Autorize solicitações ou revogue o acesso de contadores à sua empresa.
                         </p>
                     </div>
                 </div>
@@ -199,7 +190,7 @@ export default function MeusChamados() {
                                 </div>
                             </div>
                             
-                            <div className="flex gap-2 w-full md:w-auto">
+                            {sol.status === 'APROVADO' ? <button onClick={() => responderSolicitacao(sol.id, 'REVOGAR', sol.contador.nome)} className="rounded-lg border border-red-300 text-red-700 px-4 py-2 text-sm font-bold">Revogar acesso</button> : <div className="flex gap-2 w-full md:w-auto">
                                 <button 
                                     onClick={() => responderSolicitacao(sol.id, 'APROVAR', sol.contador.nome)}
                                     className="flex-1 md:flex-none bg-green-600 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-green-700 flex items-center justify-center gap-2 transition"
@@ -212,7 +203,7 @@ export default function MeusChamados() {
                                 >
                                     <X size={14}/> Negar
                                 </button>
-                            </div>
+                            </div>}
                         </div>
                     ))}
                 </div>

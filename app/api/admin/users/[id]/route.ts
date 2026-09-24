@@ -1,30 +1,36 @@
+import { withApiGuard } from '@/app/utils/api-route';
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
 import { getAuthenticatedUser, forbidden } from '@/app/utils/api-middleware';
 import { stripUserSecrets } from '@/app/utils/safe-data';
-import { marcarEmpresasProprietariasDoContador } from '@/app/services/contadorOwnershipService';
-import { aplicarPlanoContadorCustom, ativarPlanoContadorPadrao } from '@/app/services/contadorPlanService';
-import { createLog } from '@/app/services/logger';
+import { assertNoLegacyCompanyMutation } from '@/app/services/adminAccountCompanyService';
+import { CommercialError } from '@/app/utils/commercial-pricing';
+import { prisma } from '@/app/utils/prisma';
+import { isLastMaster, requireAdminReauthentication, validateRoleTransition, updateUserRoleSecurely } from '@/app/utils/admin-security';
+import { validateJsonContentLength } from '@/app/utils/request-guards';
+import { getEffectivePlanLimits } from '@/app/services/planService';
 
-const prisma = new PrismaClient();
 
-export async function GET(request: Request, { params }: { params: { id: string } }) {
+export const GET = withApiGuard(async function GET(request: Request, { params: routeParams }: { params: Promise<{ id: string }> }) {
+  const params = await routeParams;
   const admin = await getAuthenticatedUser(request);
   if (!admin || !['MASTER', 'ADMIN'].includes(admin.role)) return forbidden();
 
   try {
     const user = await prisma.user.findUnique({
       where: { id: params.id },
-      include: {
-        empresa: true,
+      select: {
+        id: true, nome: true, email: true, telefone: true, role: true, empresaId: true,
+        createdAt: true, updatedAt: true, limiteEmpresas: true, empresasAdicionais: true,
+        plano: true, planoCiclo: true, planoStatus: true,
+        empresa: { select: { id: true, documento: true, razaoSocial: true, ambiente: true, arquivadoEm: true } },
         empresasContabeis: {
-          include: { empresa: true },
+          where: { status: 'APROVADO', arquivadoEm: null, empresa: { arquivadoEm: null } },
+          take: 50, orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+          select: { id: true, status: true, empresa: { select: { id: true, documento: true, razaoSocial: true } } },
         },
-        empresasProprietarias: true,
+        _count: { select: { empresasContabeis: { where: { status: 'APROVADO', arquivadoEm: null, empresa: { arquivadoEm: null } } } } },
         historicoPlanos: {
-          include: { plan: true },
-          orderBy: { createdAt: 'desc' },
-          take: 5,
+          include: { plan: true }, orderBy: [{ createdAt: 'desc' }, { id: 'asc' }], take: 5,
         },
       },
     });
@@ -32,276 +38,126 @@ export async function GET(request: Request, { params }: { params: { id: string }
     if (!user) return NextResponse.json({ error: 'Usuario nao encontrado' }, { status: 404 });
 
     const { historicoPlanos, ...safeUser } = user;
-    return NextResponse.json({ ...stripUserSecrets(safeUser), planHistories: historicoPlanos });
+    return NextResponse.json({ ...safeUser, status: safeUser.planoStatus, planHistories: historicoPlanos, limits: await getEffectivePlanLimits(user.id) });
   } catch (error) {
     return NextResponse.json({ error: 'Erro ao buscar' }, { status: 500 });
   }
-}
+});
 
-export async function PATCH(request: Request, { params }: { params: { id: string } }) {
+export const PATCH = withApiGuard(async function PATCH(request: Request, { params: routeParams }: { params: Promise<{ id: string }> }) {
+  const params = await routeParams;
   const admin = await getAuthenticatedUser(request);
   if (!admin || !['MASTER', 'ADMIN'].includes(admin.role)) return forbidden();
 
   try {
+    const sizeError = validateJsonContentLength(request, 64 * 1024);
+    if (sizeError) return sizeError;
     const body = await request.json();
+    assertNoLegacyCompanyMutation(body);
     const {
       limiteEmpresas,
       role,
-      limiteNotas,
-      limiteClientes,
-      assinaturaAtiva,
-      renovacaoAutomatica,
-      aplicarPlanoPadrao,
-      addEmpresaProprietaria,
-      removeEmpresaProprietariaId,
     } = body;
+
+    if (['limiteNotas', 'limiteClientes', 'assinaturaAtiva', 'renovacaoAutomatica', 'aplicarPlanoPadrao', 'plano'].some((key) => body[key] !== undefined)) {
+      return NextResponse.json({ error: 'Use a ação Conceder benefício para contratos. Salvar acesso não altera assinatura.' }, { status: 409 });
+    }
 
     const userAtual = await prisma.user.findUnique({ where: { id: params.id } });
     if (!userAtual) return NextResponse.json({ error: 'Usuario nao encontrado' }, { status: 404 });
+    if (admin.role !== 'MASTER' && ['MASTER', 'ADMIN'].includes(userAtual.role)) return forbidden();
 
-    if (addEmpresaProprietaria) {
-      const cnpjLimpo = String(addEmpresaProprietaria.documento || '').replace(/\D/g, '');
-      if (cnpjLimpo.length !== 14) return NextResponse.json({ error: 'CNPJ invalido.' }, { status: 400 });
+    const reauthError = await requireAdminReauthentication({
+      actorId: admin.id,
+      password: body.adminPassword,
+      justification: body.justification,
+      action: 'UPDATE_ADMINISTRATIVE_USER',
+    });
+    if (reauthError) return reauthError;
 
-      const empresaExistente = await prisma.empresa.findUnique({ where: { documento: cnpjLimpo } });
-      const proprietarioAtual = empresaExistente ? (empresaExistente as any).proprietarioUserId : null;
-
-      if (proprietarioAtual && proprietarioAtual !== params.id) {
-        return NextResponse.json({ error: 'Esta empresa ja possui outro proprietario.' }, { status: 409 });
+    if (role) {
+      const roleError = validateRoleTransition({
+        actorId: admin.id,
+        actorRole: admin.role,
+        targetId: userAtual.id,
+        targetRole: userAtual.role,
+        newRole: String(role),
+      });
+      if (roleError) return NextResponse.json({ error: roleError }, { status: 403 });
+      if (role !== 'MASTER' && await isLastMaster(userAtual.id)) {
+        return NextResponse.json({ error: 'O ultimo MASTER nao pode ser removido.' }, { status: 409 });
       }
-
-      const empresa = empresaExistente
-        ? await prisma.empresa.update({
-            where: { id: empresaExistente.id },
-            data: {
-              proprietarioUserId: params.id,
-              contadorCustodianteId: params.id,
-              statusPropriedade: 'PROPRIETARIA',
-              donoFaturamentoId: (empresaExistente as any).donoFaturamentoId || params.id,
-            } as any,
-          })
-        : await prisma.empresa.create({
-            data: {
-              documento: cnpjLimpo,
-              razaoSocial: addEmpresaProprietaria.razaoSocial || `Empresa ${cnpjLimpo}`,
-              proprietarioUserId: params.id,
-              contadorCustodianteId: params.id,
-              donoFaturamentoId: params.id,
-              statusPropriedade: 'PROPRIETARIA',
-            } as any,
-          });
-
-      await prisma.contadorVinculo.upsert({
-        where: { contadorId_empresaId: { contadorId: params.id, empresaId: empresa.id } },
-        create: { contadorId: params.id, empresaId: empresa.id, status: 'APROVADO' } as any,
-        update: {
-          status: 'APROVADO',
-          arquivadoEm: null,
-          arquivadoPor: null,
-          motivoArquivamento: null,
-        } as any,
-      });
-
-      await createLog({
-        level: 'INFO',
-        action: 'EMPRESA_PROPRIETARIA_MARCADA',
-        module: 'VINCULOS',
-        userId: admin.id,
-        empresaId: empresa.id,
-        message: 'Empresa marcada como proprietaria de contador pelo administrativo.',
-        details: {
-          contadorId: params.id,
-          documento: cnpjLimpo,
-          razaoSocial: empresa.razaoSocial,
-          empresaExistente: !!empresaExistente,
-        },
-      });
-
-      return NextResponse.json({ success: true, empresa });
-    }
-
-    if (removeEmpresaProprietariaId) {
-      const empresaAntes = await prisma.empresa.findFirst({
-        where: { id: removeEmpresaProprietariaId, proprietarioUserId: params.id } as any,
-        select: { id: true, documento: true, razaoSocial: true },
-      });
-
-      await prisma.empresa.updateMany({
-        where: { id: removeEmpresaProprietariaId, proprietarioUserId: params.id } as any,
-        data: { proprietarioUserId: null } as any,
-      });
-
-      await createLog({
-        level: 'ALERTA',
-        action: 'EMPRESA_PROPRIETARIA_REMOVIDA',
-        module: 'VINCULOS',
-        userId: admin.id,
-        empresaId: removeEmpresaProprietariaId,
-        message: 'Empresa deixou de ser proprietaria de contador pelo administrativo.',
-        details: {
-          contadorId: params.id,
-          empresa: empresaAntes,
-        },
-      });
-
-      return NextResponse.json({ success: true });
     }
 
     const data: Record<string, unknown> = {};
-    if (role) data.role = role;
-    if (limiteEmpresas !== undefined) data.limiteEmpresas = parseInt(limiteEmpresas, 10);
-
-    const updated = await prisma.user.update({
-      where: { id: params.id },
-      data,
-    });
-
-    if (limiteEmpresas !== undefined && Number(limiteEmpresas) !== userAtual.limiteEmpresas) {
-      await createLog({
-        level: 'INFO',
-        action: 'LIMITE_EMPRESAS_CONTADOR_ATUALIZADO',
-        module: 'PLANOS',
-        userId: admin.id,
-        message: 'Limite de empresas do contador atualizado pelo administrativo.',
-        details: {
-          targetUserId: updated.id,
-          limiteAnterior: userAtual.limiteEmpresas,
-          limiteNovo: parseInt(limiteEmpresas, 10),
-        },
-      });
+    if (limiteEmpresas !== undefined) {
+      if (typeof limiteEmpresas !== 'number' || !Number.isInteger(limiteEmpresas) || limiteEmpresas < 0 || limiteEmpresas > 10_000) {
+        return NextResponse.json({ error: 'Limite de empresas deve ser um inteiro entre 0 e 10.000.' }, { status: 400 });
+      }
+      data.limiteEmpresas = limiteEmpresas;
     }
-
-    if (role === 'CONTADOR' && (userAtual.role !== 'CONTADOR' || aplicarPlanoPadrao)) {
-      await marcarEmpresasProprietariasDoContador(updated.id);
-      const { plano } = await ativarPlanoContadorPadrao(updated.id, 'ANUAL');
-
-      await createLog({
-        level: 'INFO',
-        action: aplicarPlanoPadrao ? 'PLANO_CONTADOR_PADRAO_APLICADO' : 'CONTA_PROMOVIDA_CONTADOR',
-        module: 'PLANOS',
-        userId: admin.id,
-        message: aplicarPlanoPadrao
-          ? 'Plano padrao de contador aplicado pela edicao administrativa.'
-          : 'Conta promovida para contador pela edicao administrativa.',
-        details: { targetUserId: updated.id, planSlug: plano.slug },
-      });
-    }
-
-    if (
-      role === 'CONTADOR' &&
-      (limiteNotas !== undefined ||
-        limiteClientes !== undefined ||
-        assinaturaAtiva !== undefined ||
-        renovacaoAutomatica !== undefined)
-    ) {
-      const planoCustom = await aplicarPlanoContadorCustom({
-        userId: updated.id,
-        limiteNotas: limiteNotas !== undefined ? parseInt(limiteNotas, 10) : undefined,
-        limiteClientes: limiteClientes !== undefined ? parseInt(limiteClientes, 10) : undefined,
-        assinaturaAtiva: assinaturaAtiva !== false,
-        renovacaoAutomatica: !!renovacaoAutomatica,
-      });
-
-      await createLog({
-        level: 'INFO',
-        action: 'PLANO_CONTADOR_CUSTOM_ATUALIZADO',
-        module: 'PLANOS',
-        userId: admin.id,
-        message: 'Plano individual do contador atualizado pelo administrativo.',
-        details: {
-          targetUserId: updated.id,
-          planSlug: planoCustom.plano.slug,
-          limiteNotas: planoCustom.plano.maxNotasMensal,
-          limiteClientes: planoCustom.plano.maxClientes,
-          assinaturaAtiva: planoCustom.assinaturaAtiva,
-          renovacaoAutomatica: !!renovacaoAutomatica,
-        },
-      });
-
-      const userAtualizado = await prisma.user.findUnique({ where: { id: updated.id } });
-      return NextResponse.json(stripUserSecrets(userAtualizado));
-    }
-
-    return NextResponse.json(stripUserSecrets(updated));
+    const result = await updateUserRoleSecurely(admin.id, params.id, role === undefined ? undefined : String(role), data, body.justification);
+    if (result.error) return result.error;
+    return NextResponse.json(stripUserSecrets(result.user));
   } catch (error) {
-    console.error('Erro no PATCH:', error);
+    if (error instanceof CommercialError) return NextResponse.json({ error: error.message }, { status: error.status });
     return NextResponse.json({ error: 'Erro ao atualizar' }, { status: 500 });
   }
-}
+}, { maxBodyBytes: 64 * 1024 });
 
-export async function PUT(request: Request, { params }: { params: { id: string } }) {
+export const PUT = withApiGuard(async function PUT(request: Request, { params: routeParams }: { params: Promise<{ id: string }> }) {
+  const params = await routeParams;
   const admin = await getAuthenticatedUser(request);
   if (!admin || !['MASTER', 'ADMIN'].includes(admin.role)) return forbidden();
 
   try {
+    const sizeError = validateJsonContentLength(request, 64 * 1024);
+    if (sizeError) return sizeError;
     const body = await request.json();
 
-    const dataToUpdate: Record<string, unknown> = {};
-    if (body.nome !== undefined) dataToUpdate.nome = body.nome;
-    if (body.email !== undefined) dataToUpdate.email = body.email;
-    if (body.status !== undefined) dataToUpdate.status = body.status;
-    if (body.role !== undefined) dataToUpdate.role = body.role;
+    assertNoLegacyCompanyMutation(body);
+    if (Object.hasOwn(body, 'email')) return NextResponse.json({ error: 'O e-mail de login só pode ser alterado pelo titular após confirmação do novo endereço.' }, { status: 409 });
+    const targetUser = await prisma.user.findUnique({ where: { id: params.id } });
+    if (!targetUser) return NextResponse.json({ error: 'Usuario nao encontrado.' }, { status: 404 });
+    if (admin.role !== 'MASTER' && ['MASTER', 'ADMIN'].includes(targetUser.role)) return forbidden();
 
-    if (body.plano) {
-      const plan = await prisma.plan.findFirst({
-        where: { OR: [{ id: body.plano }, { slug: body.plano }] },
+    const reauthError = await requireAdminReauthentication({
+      actorId: admin.id,
+      password: body.adminPassword,
+      justification: body.justification,
+      action: 'UPDATE_USER_ACCOUNT',
+    });
+    if (reauthError) return reauthError;
+
+    if (body.role !== undefined) {
+      const roleError = validateRoleTransition({
+        actorId: admin.id,
+        actorRole: admin.role,
+        targetId: targetUser.id,
+        targetRole: targetUser.role,
+        newRole: String(body.role),
       });
-
-      if (plan) {
-        dataToUpdate.plano = plan.slug;
-
-        const historyExistente = await prisma.planHistory.findFirst({
-          where: { userId: params.id, planId: plan.id, status: 'ATIVO' },
-        });
-
-        if (!historyExistente) {
-          if (plan.tipo === 'PLANO') {
-            const historicosAntigos = await prisma.planHistory.findMany({
-              where: { userId: params.id, status: 'ATIVO' },
-              include: { plan: true },
-            });
-
-            await Promise.all(
-              historicosAntigos
-                .filter((hist) => hist.plan?.tipo === 'PLANO')
-                .map((hist) =>
-                  prisma.planHistory.update({
-                    where: { id: hist.id },
-                    data: { status: 'CANCELADO' },
-                  }),
-                ),
-            );
-          }
-
-          const dataFim = new Date();
-          dataFim.setMonth(dataFim.getMonth() + 1);
-
-          await prisma.planHistory.create({
-            data: {
-              userId: params.id,
-              planId: plan.id,
-              status: 'ATIVO',
-              dataInicio: new Date(),
-              dataFim,
-              notasEmitidas: 0,
-            },
-          });
-
-          dataToUpdate.planoStatus = 'active';
-        }
-      } else {
-        dataToUpdate.plano = body.plano;
+      if (roleError) return NextResponse.json({ error: roleError }, { status: 403 });
+      if (body.role !== 'MASTER' && await isLastMaster(targetUser.id)) {
+        return NextResponse.json({ error: 'O ultimo MASTER nao pode ser removido.' }, { status: 409 });
       }
     }
 
-    const updatedUser = await prisma.user.update({
-      where: { id: params.id },
-      data: dataToUpdate,
-    });
+    const dataToUpdate: Record<string, unknown> = {};
+    if (body.nome !== undefined) {
+      if (typeof body.nome !== 'string' || body.nome.trim().length < 2 || body.nome.length > 160 || Array.from(body.nome as string).some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) return NextResponse.json({ error: 'Nome inválido (entre 2 e 160 caracteres).' }, { status: 400 });
+      dataToUpdate.nome = body.nome.trim();
+    }
+    if (body.role !== undefined) dataToUpdate.role = body.role;
 
-    return NextResponse.json(stripUserSecrets(updatedUser));
+    if (body.plano !== undefined) {
+      return NextResponse.json({ error: 'Use a concessão administrativa de benefício; esta rota não altera contratos.' }, { status: 409 });
+    }
+    const result = await updateUserRoleSecurely(admin.id, params.id, body.role === undefined ? undefined : String(body.role), dataToUpdate, body.justification);
+    if (result.error) return result.error;
+    return NextResponse.json(stripUserSecrets(result.user));
   } catch (error) {
-    console.error('Erro no PUT User:', error);
+    if (error instanceof CommercialError) return NextResponse.json({ error: error.message }, { status: error.status });
     return NextResponse.json({ error: 'Erro ao atualizar' }, { status: 500 });
   }
-}
+}, { maxBodyBytes: 64 * 1024 });

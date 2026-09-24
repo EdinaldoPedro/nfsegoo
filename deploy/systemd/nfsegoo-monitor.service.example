@@ -1,0 +1,28 @@
+[Unit]
+Description=NFSe Goo - diagnóstico operacional agregado
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=nfsegoo
+Group=nfsegoo
+WorkingDirectory=/opt/nfsegoo
+EnvironmentFile=/etc/nfsegoo/monitor.env
+Environment=MONITOR_OUTPUT=json
+ExecStart=/usr/bin/node /opt/nfsegoo/scripts/operational-monitor.cjs
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=full
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+UMask=0077
+
+# Saída 1 representa alerta; saída 2 representa crítico. O coletor de logs/on-call
+# deve notificar ambas, respeitando a prioridade descrita no runbook.

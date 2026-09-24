@@ -1,8 +1,7 @@
-import crypto from 'crypto';
-import forge from 'node-forge';
 import { decrypt, encrypt } from '@/app/utils/crypto';
 import { createLog } from '@/app/services/logger';
 import { prisma } from '@/app/utils/prisma';
+import { parsePkcs12, type CertificateChainStatus } from '@/app/utils/pkcs12';
 
 type CertificatePurpose =
   | 'SIGN_XML'
@@ -19,14 +18,16 @@ interface CertificateSource {
   empresaId?: string | null;
   certificadoA1?: string | null;
   senhaCertificado?: string | null;
+  expectedCnpj?: string | null;
+  requireTrustedChain?: boolean;
   purpose: CertificatePurpose;
 }
 
 export interface CertificateCredentials {
   cert: string;
   key: string;
-  senha: string;
   fingerprintSha256: string;
+  chainStatus: CertificateChainStatus;
 }
 
 function decryptRequired(value: string | null | undefined, label: string) {
@@ -51,8 +52,9 @@ function scheduleLegacyReencrypt(source: CertificateSource, pfxBase64: string, s
   if (!certificadoA1 || !senhaCertificado) return;
 
   void prisma.empresa
-    .update({
-      where: { id: source.empresaId },
+    .updateMany({
+      // A lazy re-encryption must not overwrite a certificate rotated meanwhile.
+      where: { id: source.empresaId, certificadoA1: source.certificadoA1, senhaCertificado: source.senhaCertificado },
       data: { certificadoA1, senhaCertificado },
     })
     .catch(() => {});
@@ -63,30 +65,13 @@ export function openEmpresaCertificate(source: CertificateSource): CertificateCr
   const senha = decryptRequired(source.senhaCertificado, 'Senha do certificado digital');
 
   try {
-    const pfxBuffer = Buffer.from(pfxBase64, 'base64');
-    const p12Asn1 = forge.asn1.fromDer(pfxBuffer.toString('binary'));
-    const p12 = forge.pkcs12.pkcs12FromAsn1(p12Asn1, senha);
-
-    const certBags = p12.getBags({ bagType: forge.pki.oids.certBag });
-    // @ts-ignore node-forge types do not expose indexed OID bags cleanly.
-    const cert = certBags[forge.pki.oids.certBag]?.[0]?.cert;
-
-    const keyBags = p12.getBags({ bagType: forge.pki.oids.pkcs8ShroudedKeyBag });
-    // @ts-ignore node-forge types do not expose indexed OID bags cleanly.
-    let key = keyBags[forge.pki.oids.pkcs8ShroudedKeyBag]?.[0]?.key;
-    if (!key) {
-      const keyBags2 = p12.getBags({ bagType: forge.pki.oids.keyBag });
-      // @ts-ignore node-forge types do not expose indexed OID bags cleanly.
-      key = keyBags2[forge.pki.oids.keyBag]?.[0]?.key;
-    }
-
-    if (!cert || !key) {
-      throw new Error('Chaves nao encontradas no PFX.');
-    }
-
-    const certPem = forge.pki.certificateToPem(cert);
-    const keyPem = forge.pki.privateKeyToPem(key);
-    const fingerprintSha256 = crypto.createHash('sha256').update(certPem).digest('hex');
+    const parsed = parsePkcs12({
+      base64: pfxBase64,
+      password: senha,
+      expectedCnpj: source.expectedCnpj,
+      requireTrustedChain: source.requireTrustedChain,
+    });
+    const fingerprintSha256 = parsed.fingerprintSha256;
 
     scheduleLegacyReencrypt(source, pfxBase64, senha);
 
@@ -98,16 +83,17 @@ export function openEmpresaCertificate(source: CertificateSource): CertificateCr
       details: {
         purpose: source.purpose,
         fingerprintSha256,
+        chainStatus: parsed.chainStatus,
       },
-    });
+    }).catch(() => {});
 
     return {
-      cert: certPem,
-      key: keyPem,
-      senha,
+      cert: parsed.certPem,
+      key: parsed.keyPem,
       fingerprintSha256,
+      chainStatus: parsed.chainStatus,
     };
-  } catch (error: any) {
-    throw new Error(`Erro ao abrir certificado digital: ${error.message}`);
+  } catch (error) {
+    throw new Error('Não foi possível abrir e validar o certificado digital.', { cause: error });
   }
 }

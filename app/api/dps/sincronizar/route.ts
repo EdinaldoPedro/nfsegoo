@@ -1,23 +1,26 @@
+import { withApiGuard } from '@/app/utils/api-route';
 import { NextResponse } from 'next/server';
 import { validateRequest } from '@/app/utils/api-security';
-import { hasEmpresaAccess, resolveEmpresaContexto } from '@/app/utils/access-control';
+import { hasCustomerCompanyAccess, resolveEmpresaContexto } from '@/app/utils/access-control';
 import { findDpsSequence, normalizeDpsEnvironment, normalizeDpsSeries, syncDpsSequence } from '@/app/services/dpsSequenceService';
+import { nextDpsCandidate, normalizeDpsNumber } from '@/app/utils/dps-identity';
+import { checkRateLimit } from '@/app/utils/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
-async function resolveAuthorizedCompany(request: Request, user: any, targetId: string) {
+async function resolveAuthorizedCompany(request: Request, user: any) {
   const contextId = request.headers.get('x-empresa-id');
   const empresaId = await resolveEmpresaContexto(user, contextId);
   if (!empresaId) return null;
-  return await hasEmpresaAccess(user, empresaId) ? empresaId : null;
+  return await hasCustomerCompanyAccess(user, empresaId) ? empresaId : null;
 }
 
-export async function GET(request: Request) {
+export const GET = withApiGuard(async function GET(request: Request) {
   const { user, targetId, errorResponse } = await validateRequest(request);
   if (errorResponse) return errorResponse;
   if (!user || !targetId) return NextResponse.json({ error: 'Não autenticado.' }, { status: 401 });
 
-  const empresaId = await resolveAuthorizedCompany(request, user, targetId);
+  const empresaId = await resolveAuthorizedCompany(request, user);
   if (!empresaId) return NextResponse.json({ error: 'Acesso proibido.' }, { status: 403 });
 
   const { searchParams } = new URL(request.url);
@@ -29,23 +32,25 @@ export async function GET(request: Request) {
       ambiente,
       serie,
       ultimoConfirmado: sequence?.ultimoConfirmado || 0,
-      proximoNumero: (sequence?.ultimoConfirmado || 0) + 1,
+      ultimoReservado: sequence?.ultimoReservado || 0,
+      proximoNumero: nextDpsCandidate(sequence?.ultimoConfirmado || 0, sequence?.ultimoReservado || 0),
       sincronizadoEm: sequence?.sincronizadoEm || null,
       origem: sequence?.origem || null,
       statusSincronizacao: sequence?.statusSincronizacao || 'NAO_SINCRONIZADO',
     });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: error.status || 400 });
+    if (error.status && error.status < 500) return NextResponse.json({ error: error.message }, { status: error.status });
+    throw error;
   }
-}
+});
 
-export async function POST(request: Request) {
+export const POST = withApiGuard(async function POST(request: Request) {
   const { user, targetId, errorResponse } = await validateRequest(request);
   if (errorResponse) return errorResponse;
   if (!user || !targetId) return NextResponse.json({ error: 'Não autenticado.' }, { status: 401 });
-
-  const empresaId = await resolveAuthorizedCompany(request, user, targetId);
+  const empresaId = await resolveAuthorizedCompany(request, user);
   if (!empresaId) return NextResponse.json({ error: 'Acesso proibido.' }, { status: 403 });
+  if (!await checkRateLimit('sync_dps_company_' + empresaId, 3, 60_000)) return NextResponse.json({ error: 'Aguarde antes de consultar a numeração novamente.' }, { status: 429 });
 
   try {
     const body = await request.json();
@@ -53,21 +58,25 @@ export async function POST(request: Request) {
       empresaId,
       ambiente: normalizeDpsEnvironment(body.ambiente),
       serie: normalizeDpsSeries(body.serie),
-      ultimoConhecido: Math.max(0, Number(body.ultimoConhecido || 0)),
+      ultimoConhecido: normalizeDpsNumber(body.ultimoConhecido ?? 0, true),
       maxConsultas: body.maxConsultas,
-      userId: targetId,
+      userId: user.id,
     });
 
     return NextResponse.json({
       success: true,
-      ...result,
-      message: result.completo
-        ? `Numeração sincronizada. Próxima DPS disponível: ${result.proximoNumero}.`
-        : `Consultamos ${result.consultas} números. A sincronização ficou parcial e pode ser continuada a partir da DPS ${result.proximoNumero}.`,
+      ambiente: result.ambiente, serie: result.serie, ultimoConfirmado: result.ultimoConfirmado,
+      ultimoReservado: result.ultimoReservado, proximoNumero: result.proximoNumero,
+      sincronizadoEm: result.sincronizadoEm, statusSincronizacao: result.statusSincronizacao,
+      consultas: result.consultas, completo: result.completo,
+      message: result.proximoNumero === null
+        ? 'Intervalo de numeração suportado esgotado. Solicite análise; não reinicie a sequência.'
+        : result.completo
+          ? `Consulta concluída. Próximo candidato local: ${result.proximoNumero}. A reserva ocorre ao processar a emissão.`
+          : `Consultamos ${result.consultas} números. Resultado parcial; próximo candidato local ${result.proximoNumero}.`,
     }, { status: result.completo ? 200 : 206 });
   } catch (error: any) {
-    return NextResponse.json({
-      error: error.message || 'Não foi possível sincronizar a numeração da DPS.',
-    }, { status: error.status || (error?.response?.status ? 502 : 503) });
+    if (error.status && error.status < 500) return NextResponse.json({ error: error.message }, { status: error.status });
+    return NextResponse.json({ error: 'Não foi possível sincronizar a numeração da DPS. Os números já reservados foram preservados.' }, { status: 503 });
   }
-}
+});

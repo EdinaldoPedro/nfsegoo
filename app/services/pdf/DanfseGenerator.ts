@@ -183,8 +183,9 @@ function onlyDigits(value: string) {
 }
 
 function formatDocument(value: string) {
+  const normalized = value.trim().toUpperCase();
+  if (/^[A-Z0-9]{12}[0-9]{2}$/.test(normalized)) return normalized.replace(/^(.{2})(.{3})(.{3})(.{4})(.{2})$/, '$1.$2.$3/$4-$5');
   const digits = onlyDigits(value);
-  if (digits.length === 14) return digits.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
   if (digits.length === 11) return digits.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4');
   return value;
 }

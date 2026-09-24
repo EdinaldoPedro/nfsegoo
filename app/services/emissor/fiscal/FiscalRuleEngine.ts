@@ -1,4 +1,5 @@
 import { prisma } from '@/app/utils/prisma';
+import type { Prisma } from '@prisma/client';
 import { getFederalRetentionEligibility, getIbsCbsMandatoryDate, getIbsCbsPilotControl, getPisCofinsDueDefaults, isIbsCbsMandatory, meetsFederalRetentionMinimum, roundHalfEven, shouldEnableIbsCbs } from './FiscalMath';
 import { assertRegimeTributarioSuportado } from '@/app/utils/regime-tributario';
 export { getFederalRetentionEligibility, getIbsCbsMandatoryDate, getIbsCbsPilotControl, getPisCofinsDueDefaults, isIbsCbsMandatory, meetsFederalRetentionMinimum, retentionType, roundHalfEven, shouldEnableIbsCbs } from './FiscalMath';
@@ -71,6 +72,7 @@ interface ResolveInput {
   itemLc?: string;
   codigoIbge: string;
   regimeTributario: string;
+  ambiente?: string;
   dataCompetencia?: string;
   valor: number;
   codigoNbs?: string;
@@ -118,7 +120,10 @@ function isSpecialOperation(itemLc?: string) {
   return /^(6\.|7\.|12\.|16\.|99\.)/.test(item);
 }
 
-export async function resolveFiscalDecision(input: ResolveInput): Promise<FiscalDecision> {
+export async function resolveFiscalDecision(
+  input: ResolveInput,
+  db: Prisma.TransactionClient = prisma,
+): Promise<FiscalDecision> {
   const cnae = onlyDigits(input.cnae);
   const normalizedRegime = assertRegimeTributarioSuportado(input.regimeTributario);
   const isMei = normalizedRegime === 'MEI';
@@ -126,12 +131,12 @@ export async function resolveFiscalDecision(input: ResolveInput): Promise<Fiscal
   const competenceText = input.dataCompetencia || new Date().toISOString().slice(0, 10);
   const competence = new Date(`${competenceText.slice(0, 10)}T12:00:00.000Z`);
   const [globalCandidate, municipalCandidates, systemConfig] = await Promise.all([
-    prisma.globalCnae.findFirst({ where: { codigo: cnae } }),
-    prisma.tributacaoMunicipal.findMany({
+    db.globalCnae.findFirst({ where: { codigo: cnae } }),
+    db.tributacaoMunicipal.findMany({
       where: { codigoIbge: onlyDigits(input.codigoIbge), ativo: true },
       orderBy: [{ prioridade: 'desc' }, { updatedAt: 'desc' }],
     }),
-    prisma.configuracaoSistema.findUnique({ where: { id: 'config' } }),
+    db.configuracaoSistema.findUnique({ where: { id: 'config' } }),
   ]);
 
   const globalRule = isRuleInForce(globalCandidate, competence) ? globalCandidate : null;
@@ -160,10 +165,23 @@ export async function resolveFiscalDecision(input: ResolveInput): Promise<Fiscal
   }
 
   const exigeCodigoTributacaoMunicipal = !isMei && municipalRule?.exigeCodigoTributacaoMunicipal === true;
+  const codigoMunicipalInformado = onlyDigits(input.codigoTributacaoMunicipal) || undefined;
+  const codigoMunicipalConfigurado = onlyDigits(municipalRule?.codigoTributacaoMunicipal) || undefined;
   const codigoTributacaoMunicipal = isMei
     ? undefined
-    : onlyDigits(input.codigoTributacaoMunicipal || municipalRule?.codigoTributacaoMunicipal) || undefined;
+    : municipalRule
+      ? codigoMunicipalConfigurado
+      : codigoMunicipalInformado;
   if (isMei) source.push('CTM:DISPENSADO_MEI');
+  else if (municipalRule) source.push('CTM:REGRA_MUNICIPAL');
+  else if (codigoMunicipalInformado) source.push('CTM:PAYLOAD_SEM_REGRA_MUNICIPAL');
+  if (!isMei && municipalRule && codigoMunicipalConfigurado && codigoMunicipalInformado && codigoMunicipalInformado !== codigoMunicipalConfigurado) {
+    issues.push({
+      code: 'CODIGO_MUNICIPAL_DIVERGENTE', severity: 'ERROR',
+      message: 'O codigo de tributacao municipal informado diverge da regra fiscal vigente.',
+      userAction: 'Atualize a tela e use o codigo definido na regra municipal. Se a regra estiver incorreta, ajuste-a no painel administrativo antes de emitir.',
+    });
+  }
   if (exigeCodigoTributacaoMunicipal && !codigoTributacaoMunicipal) {
     issues.push({
       code: 'CODIGO_MUNICIPAL_OBRIGATORIO', severity: 'ERROR',
@@ -351,10 +369,16 @@ export async function resolveFiscalDecision(input: ResolveInput): Promise<Fiscal
   }
 
   if (!municipalRule) {
+    const exigePilotagemMunicipalEmProducao = !isMei && String(input.ambiente || '').toUpperCase() === 'PRODUCAO';
     issues.push({
-      code: 'REGRA_MUNICIPAL_AUSENTE', severity: 'WARN',
-      message: 'Nao ha regra municipal vigente para o CNAE e municipio da emissao.',
-      userAction: 'Homologue o municipio e cadastre a regra antes da liberacao em producao.',
+      code: exigePilotagemMunicipalEmProducao ? 'REGRA_MUNICIPAL_NAO_HOMOLOGADA' : 'REGRA_MUNICIPAL_AUSENTE',
+      severity: exigePilotagemMunicipalEmProducao ? 'ERROR' : 'WARN',
+      message: exigePilotagemMunicipalEmProducao
+        ? 'A combinacao de CNAE e municipio ainda nao possui regra fiscal vigente homologada para producao.'
+        : 'Nao ha regra municipal vigente para o CNAE e municipio da emissao.',
+      userAction: exigePilotagemMunicipalEmProducao
+        ? 'Valide esta combinacao em homologacao e cadastre ou ative a regra municipal antes de emitir em producao.'
+        : 'Homologue o municipio e cadastre a regra antes da liberacao em producao.',
     });
   }
 

@@ -25,6 +25,7 @@ import {
 
 type AvisoGlobal = {
   id?: string;
+  version?: number;
   titulo: string;
   mensagem: string;
   tipo: 'INFO' | 'SUCCESS' | 'WARNING' | 'CRITICAL';
@@ -36,6 +37,8 @@ type AvisoGlobal = {
   linkHref?: string;
   anexoNome?: string;
   anexoBase64?: string;
+  hasAttachment?: boolean;
+  attachmentHref?: string | null;
   notificarApp?: boolean;
   runtimeStatus?: string;
   updatedAt?: string;
@@ -66,10 +69,13 @@ export default function AdminConfig() {
   const [activeTab, setActiveTab] = useState<'FISCAL' | 'EMAIL' | 'MANUTENCAO' | 'AVISOS'>('FISCAL');
   const [config, setConfig] = useState<any>({});
   const [avisos, setAvisos] = useState<AvisoGlobal[]>([]);
+  const [avisosMeta, setAvisosMeta] = useState({ page: 1, pages: 1, total: 0 });
   const [avisoForm, setAvisoForm] = useState<AvisoGlobal>(avisoInicial);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [adminPassword, setAdminPassword] = useState('');
+  const [changeJustification, setChangeJustification] = useState('');
   const [salvandoAviso, setSalvandoAviso] = useState(false);
   const [msg, setMsg] = useState<{ texto: string; tipo: 'sucesso' | 'erro' } | null>(null);
 
@@ -78,11 +84,12 @@ export default function AdminConfig() {
     setTimeout(() => setMsg(null), 5000);
   };
 
-  const carregarAvisos = async () => {
-    const res = await fetch('/api/admin/avisos', { cache: 'no-store' });
+  const carregarAvisos = async (page = avisosMeta.page) => {
+    const res = await fetch(`/api/admin/avisos?page=${page}`, { cache: 'no-store' });
     if (!res.ok) throw new Error('Erro ao carregar avisos');
     const data = await res.json();
-    setAvisos(Array.isArray(data) ? data : []);
+    setAvisos(Array.isArray(data.data) ? data.data : []);
+    setAvisosMeta(data.meta && typeof data.meta === 'object' ? data.meta : { page: 1, pages: 1, total: 0 });
   };
 
   useEffect(() => {
@@ -98,12 +105,14 @@ export default function AdminConfig() {
         if (!configRes.ok) throw new Error('Erro ao carregar configuracoes');
 
         const configData = await configRes.json();
-        const avisosData = avisosRes.ok ? await avisosRes.json() : [];
+        const avisosData = avisosRes.ok ? await avisosRes.json() : { data: [], meta: { page: 1, pages: 1, total: 0 } };
         return { configData, avisosData };
       })
       .then(({ configData, avisosData }) => {
         setConfig(configData);
-        setAvisos(Array.isArray(avisosData) ? avisosData : []);
+        setAvisos(Array.isArray(avisosData.data) ? avisosData.data : []);
+        setAvisosMeta(avisosData.meta && typeof avisosData.meta === 'object'
+          ? avisosData.meta : { page: 1, pages: 1, total: 0 });
       })
       .catch((err) => {
         console.error(err);
@@ -119,6 +128,7 @@ export default function AdminConfig() {
   const editarAviso = (aviso: AvisoGlobal) => {
     setAvisoForm({
       ...aviso,
+      status: aviso.runtimeStatus === 'AGENDADO' ? 'AGENDADO' : aviso.status,
       iniciaEm: aviso.iniciaEm ? new Date(aviso.iniciaEm).toISOString().slice(0, 16) : '',
       terminaEm: aviso.terminaEm ? new Date(aviso.terminaEm).toISOString().slice(0, 16) : '',
       linkLabel: aviso.linkLabel || '',
@@ -155,25 +165,46 @@ export default function AdminConfig() {
 
     setSalvandoAviso(true);
     try {
+      const toIso = (value?: string) => value ? new Date(value).toISOString() : null;
+      const payload = {
+        ...(avisoForm.id ? { id: avisoForm.id } : {}),
+        expectedVersion: avisoForm.id ? avisoForm.version : null,
+        titulo: avisoForm.titulo,
+        mensagem: avisoForm.mensagem,
+        tipo: avisoForm.tipo,
+        status: avisoForm.status,
+        publico: avisoForm.publico,
+        iniciaEm: toIso(avisoForm.iniciaEm),
+        terminaEm: toIso(avisoForm.terminaEm),
+        linkLabel: avisoForm.linkLabel || null,
+        linkHref: avisoForm.linkHref || null,
+        anexoNome: avisoForm.anexoNome || null,
+        anexoBase64: avisoForm.anexoBase64 || null,
+        removerAnexo: Boolean(avisoForm.id && avisoForm.hasAttachment && !avisoForm.anexoNome),
+        notificarApp: Boolean(avisoForm.notificarApp),
+        adminPassword,
+        justification: changeJustification,
+      };
       const res = await fetch('/api/admin/avisos', {
         method: avisoForm.id ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(avisoForm),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Erro ao salvar aviso.');
-      await carregarAvisos();
+      await carregarAvisos(avisoForm.id ? avisosMeta.page : 1);
       resetAvisoForm();
       showMessage('Aviso salvo com sucesso.', 'sucesso');
     } catch (error: any) {
       showMessage(error.message || 'Erro ao salvar aviso.', 'erro');
     } finally {
+      setAdminPassword('');
       setSalvandoAviso(false);
     }
   };
 
-  const arquivarAviso = async (id?: string) => {
-    if (!id) return;
+  const arquivarAviso = async (aviso: AvisoGlobal) => {
+    if (!aviso.id || !Number.isSafeInteger(aviso.version)) return;
     if (!await dialog.showConfirm({
       type: 'warning',
       title: 'Arquivar aviso?',
@@ -183,14 +214,20 @@ export default function AdminConfig() {
     })) return;
 
     try {
-      const res = await fetch(`/api/admin/avisos?id=${id}`, { method: 'DELETE' });
+      const res = await fetch('/api/admin/avisos', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: aviso.id, expectedVersion: aviso.version, adminPassword, justification: changeJustification }),
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Erro ao arquivar aviso.');
       await carregarAvisos();
-      if (avisoForm.id === id) resetAvisoForm();
+      if (avisoForm.id === aviso.id) resetAvisoForm();
       showMessage('Aviso arquivado.', 'sucesso');
     } catch (error: any) {
       showMessage(error.message || 'Erro ao arquivar aviso.', 'erro');
+    } finally {
+      setAdminPassword('');
     }
   };
 
@@ -201,10 +238,30 @@ export default function AdminConfig() {
   ) => {
     setSaving(true);
     try {
+      const payload = {
+        expectedVersion: nextConfig.version ?? null,
+        smtpHost: nextConfig.smtpHost || null,
+        smtpPort: Number(nextConfig.smtpPort) || 587,
+        smtpUser: nextConfig.smtpUser || null,
+        smtpPass: nextConfig.smtpPass || '',
+        smtpSecure: Boolean(nextConfig.smtpSecure),
+        emailRemetente: nextConfig.emailRemetente || null,
+        ibsCbsPilotoAtivo: Boolean(nextConfig.ibsCbsPilotoAtivo),
+        ibsCbsMeiAtivo: Boolean(nextConfig.ibsCbsMeiAtivo),
+        ibsCbsSimplesAtivo: Boolean(nextConfig.ibsCbsSimplesAtivo),
+        ibsCbsLucroPresumidoAtivo: Boolean(nextConfig.ibsCbsLucroPresumidoAtivo),
+        manutencaoAtiva: Boolean(nextConfig.manutencaoAtiva),
+        manutencaoTitulo: nextConfig.manutencaoTitulo || null,
+        manutencaoMensagem: nextConfig.manutencaoMensagem || null,
+        manutencaoPrevisao: nextConfig.manutencaoPrevisao || null,
+        confirmarAlteracaoManutencao,
+        adminPassword,
+        justification: changeJustification,
+      };
       const res = await fetch('/api/admin/config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...nextConfig, confirmarAlteracaoManutencao }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (res.ok) {
@@ -218,6 +275,7 @@ export default function AdminConfig() {
       showMessage('Erro de conexao com o servidor.', 'erro');
       return false;
     } finally {
+      setAdminPassword('');
       setSaving(false);
     }
   };
@@ -255,19 +313,20 @@ export default function AdminConfig() {
       const res = await fetch('/api/admin/config/test-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config),
+        body: JSON.stringify({ adminPassword, justification: changeJustification }),
       });
       const data = await res.json();
       if (res.ok) {
         await dialog.showAlert({ type: 'success', title: 'Teste SMTP concluído', description: data.message });
         showMessage(data.message, 'sucesso');
       } else {
-        await dialog.showAlert({ type: 'danger', title: 'Falha no teste SMTP', description: data.details || data.error || 'O provedor não retornou detalhes.' });
+        await dialog.showAlert({ type: 'danger', title: 'Falha no teste SMTP', description: data.error || 'O provedor não aceitou a mensagem.' });
         showMessage(`Falha: ${data.error}`, 'erro');
       }
     } catch {
       await dialog.showAlert({ type: 'danger', title: 'Falha de conexão com o SMTP', description: 'O teste não chegou ao serviço de e-mail. Verifique a rede e a configuração.' });
     } finally {
+      setAdminPassword('');
       setTesting(false);
     }
   };
@@ -316,6 +375,27 @@ export default function AdminConfig() {
           </div>
         )}
 
+        {(
+          <div className="mb-7 grid gap-4 rounded-2xl border border-amber-200 bg-amber-50 p-5 md:grid-cols-2">
+            <div className="md:col-span-2">
+              <p className="text-xs font-black uppercase tracking-[0.16em] text-amber-800">Confirmação de operação sensível</p>
+              <p className="mt-1 text-sm text-amber-950">Salvar ou testar exige sua senha atual e uma justificativa auditável. O teste usa somente a configuração já salva.</p>
+            </div>
+            <div>
+              <label htmlFor="config-admin-password" className="mb-1 block text-xs font-bold text-slate-700">Senha administrativa atual</label>
+              <input id="config-admin-password" type="password" autoComplete="current-password" maxLength={72}
+                value={adminPassword} onChange={(event) => setAdminPassword(event.target.value)}
+                className="w-full rounded-xl border border-amber-300 bg-white px-4 py-3 text-sm outline-none focus:border-amber-600 focus:ring-4 focus:ring-amber-100" />
+            </div>
+            <div>
+              <label htmlFor="config-justification" className="mb-1 block text-xs font-bold text-slate-700">Justificativa (mínimo 10 caracteres)</label>
+              <input id="config-justification" maxLength={2000} value={changeJustification}
+                onChange={(event) => setChangeJustification(event.target.value)} placeholder="Ex.: atualização aprovada para a janela operacional"
+                className="w-full rounded-xl border border-amber-300 bg-white px-4 py-3 text-sm outline-none focus:border-amber-600 focus:ring-4 focus:ring-amber-100" />
+            </div>
+          </div>
+        )}
+
         {activeTab === 'EMAIL' && (
           <EmailSettings
             config={config}
@@ -357,6 +437,8 @@ export default function AdminConfig() {
             handleAvisoFile={handleAvisoFile}
             salvarAviso={salvarAviso}
             arquivarAviso={arquivarAviso}
+            avisosMeta={avisosMeta}
+            carregarAvisos={carregarAvisos}
           />
         )}
       </div>
@@ -705,6 +787,8 @@ function AvisosSettings({
   handleAvisoFile,
   salvarAviso,
   arquivarAviso,
+  avisosMeta,
+  carregarAvisos,
 }: {
   avisos: AvisoGlobal[];
   avisoForm: AvisoGlobal;
@@ -714,7 +798,9 @@ function AvisosSettings({
   editarAviso: (aviso: AvisoGlobal) => void;
   handleAvisoFile: (file?: File | null) => void;
   salvarAviso: () => void;
-  arquivarAviso: (id?: string) => void;
+  arquivarAviso: (aviso: AvisoGlobal) => void;
+  avisosMeta: { page: number; pages: number; total: number };
+  carregarAvisos: (page?: number) => Promise<void>;
 }) {
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
@@ -844,7 +930,7 @@ function AvisosSettings({
             <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Historico</p>
             <h3 className="text-lg font-black text-slate-900">Avisos cadastrados</h3>
           </div>
-          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-500">{avisos.length}</span>
+          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-500">{avisosMeta.total}</span>
         </div>
         <div className="divide-y divide-slate-100">
           {avisos.length === 0 ? (
@@ -854,7 +940,7 @@ function AvisosSettings({
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className={`rounded-full px-2.5 py-1 text-[11px] font-black ${getNoticeTone(aviso.tipo).badge}`}>{aviso.tipo}</span>
-                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-black text-slate-600">{aviso.status}</span>
+                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-black text-slate-600">{aviso.runtimeStatus || aviso.status}</span>
                   <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-black text-slate-600">{aviso.publico}</span>
                   {aviso.notificarApp && <span className="rounded-full bg-blue-100 px-2.5 py-1 text-[11px] font-black text-blue-700">APP</span>}
                 </div>
@@ -867,7 +953,7 @@ function AvisosSettings({
                   <Edit3 size={16} /> Editar
                 </button>
                 {aviso.status !== 'ARQUIVADO' && (
-                  <button onClick={() => arquivarAviso(aviso.id)} className="inline-flex items-center gap-2 rounded-xl border border-red-100 px-3 py-2 text-sm font-bold text-red-600 hover:bg-red-50">
+                  <button onClick={() => arquivarAviso(aviso)} className="inline-flex items-center gap-2 rounded-xl border border-red-100 px-3 py-2 text-sm font-bold text-red-600 hover:bg-red-50">
                     <Trash2 size={16} /> Arquivar
                   </button>
                 )}
@@ -875,6 +961,15 @@ function AvisosSettings({
             </div>
           ))}
         </div>
+        {avisosMeta.pages > 1 && (
+          <div className="flex items-center justify-between gap-3 border-t border-slate-100 p-4">
+            <button type="button" disabled={avisosMeta.page <= 1} onClick={() => void carregarAvisos(avisosMeta.page - 1)}
+              className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-bold text-slate-600 disabled:opacity-40">Anterior</button>
+            <span className="text-xs font-bold text-slate-500">Página {avisosMeta.page} de {avisosMeta.pages}</span>
+            <button type="button" disabled={avisosMeta.page >= avisosMeta.pages} onClick={() => void carregarAvisos(avisosMeta.page + 1)}
+              className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-bold text-slate-600 disabled:opacity-40">Próxima</button>
+          </div>
+        )}
       </div>
     </div>
   );

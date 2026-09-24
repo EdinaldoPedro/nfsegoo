@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { 
   Building2, Save, ArrowLeft, Search, MapPin, Briefcase, 
   Lock, CheckCircle, Trash2, Info, Upload, FileKey, Settings, Loader2, AlertCircle
@@ -10,6 +10,9 @@ import { useRouter } from 'next/navigation';
 import AppHeader from '@/components/AppHeader';
 import { useDialog } from '@/app/contexts/DialogContext';
 import { normalizarRegimeTributario } from '@/app/utils/regime-tributario';
+import { companyProfileFormFields } from '@/app/utils/company-profile-form';
+import { MAX_STORED_DPS_NUMBER, nextDpsCandidate, normalizeDpsEnvironment, normalizeDpsNumber, normalizeDpsSeries } from '@/app/utils/dps-identity';
+import { formatCnpjInput, normalizeCnpj, validarCNPJ } from '@/app/utils/cnpj';
 
 export default function ConfiguracoesEmpresa() {
   const router = useRouter();
@@ -27,6 +30,8 @@ export default function ConfiguracoesEmpresa() {
 
   const [certFile, setCertFile] = useState<string | null>(null);
   const [certSenha, setCertSenha] = useState('');
+  const [savedEnvironment, setSavedEnvironment] = useState('HOMOLOGACAO');
+  const [companyContext, setCompanyContext] = useState<{ id: string | null; updatedAt: string | null }>({ id: null, updatedAt: null });
   const [validandoCertificado, setValidandoCertificado] = useState(false);
   const [certificadoCheck, setCertificadoCheck] = useState<{
     status: 'idle' | 'ok' | 'erro';
@@ -36,6 +41,9 @@ export default function ConfiguracoesEmpresa() {
   const [dadosCertificado, setDadosCertificado] = useState<{ativo: boolean, vencimento: string | null}>({ ativo: false, vencimento: null });
   const [modoEdicaoCertificado, setModoEdicaoCertificado] = useState(false);
   const [sincronizandoDps, setSincronizandoDps] = useState(false);
+  const [carregandoDps, setCarregandoDps] = useState(false);
+  const [ultimoReservadoDps, setUltimoReservadoDps] = useState(0);
+  const dpsRequestVersion = useRef(0);
   const [dpsStatus, setDpsStatus] = useState<{
     tipo: 'idle' | 'sucesso' | 'parcial' | 'erro';
     mensagem: string;
@@ -60,12 +68,12 @@ export default function ConfiguracoesEmpresa() {
     email: '',
     ambiente: 'HOMOLOGACAO',
     serieDPS: '900',
-    ultimoDPS: 0
+    ultimoDPS: 0 as number | string
   });
 
   const showMessage = (texto: string, tipo: 'sucesso' | 'erro') => {
       setMsg({ texto, tipo });
-      setTimeout(() => setMsg(null), 3000);
+      if (tipo === 'sucesso') setTimeout(() => setMsg(current => current?.texto === texto ? null : current), 5000);
   };
 
   const manterIbgeSeConsultaVierVazia = (codigoNovo: string | null | undefined, codigoAtual: string | null | undefined) => {
@@ -83,8 +91,6 @@ export default function ConfiguracoesEmpresa() {
       setErroCarregamento('');
       try {
         const contextId = localStorage.getItem('empresaContextId');
-        if (contextId) setIsContador(true);
-
         const res = await fetch(`/api/perfil?t=${Date.now()}`, {
             cache: 'no-store',
             headers: { 
@@ -95,12 +101,18 @@ export default function ConfiguracoesEmpresa() {
 
         if (res.ok) {
           const dados = await res.json();
+          setIsContador(dados.role === 'CONTADOR');
+          setCompanyContext({ id: dados.empresaContextoId, updatedAt: dados.empresaAtualizadaEm });
           const ambienteCarregado = dados.ambiente || 'HOMOLOGACAO';
-          const serieCarregada = dados.serieDPS || '900';
+          setSavedEnvironment(ambienteCarregado);
+          const serieOriginal = dados.serieDPS || '900';
+          const serieCarregada = /^[0-9]{1,5}$/.test(serieOriginal) ? normalizeDpsSeries(serieOriginal) : serieOriginal;
           const sequenciaAtual = (dados.sequenciasDps || []).find((item: any) => item.ambiente === ambienteCarregado && item.serie === serieCarregada);
+          setUltimoReservadoDps(sequenciaAtual?.ultimoReservado ?? 0);
           setEmpresa(prev => ({ 
               ...prev, 
               ...dados,
+              ...companyProfileFormFields(dados),
               regimeTributario: normalizarRegimeTributario(dados.regimeTributario) || '',
               // Garante que o IBGE vindo do banco seja lido corretamente
               codigoIbge: dados.codigoIbge || '',
@@ -120,7 +132,7 @@ export default function ConfiguracoesEmpresa() {
           });
 
           if (!dados.temCertificado) setModoEdicaoCertificado(true);
-          if (dados.cadastroCompleto) setIsLocked(true);
+          if (dados.empresaContextoId) setIsLocked(true);
         } else if (res.status === 401) {
             router.push('/login');
         } else {
@@ -138,11 +150,15 @@ export default function ConfiguracoesEmpresa() {
   }, [router]);
 
   const consultarCNPJ = async (forcarAtualizacao = false) => {
-    const docLimpo = empresa.documento.replace(/\D/g, '');
+    const docLimpo = normalizeCnpj(empresa.documento);
     
     if (isLocked && !forcarAtualizacao) return; 
-    if (docLimpo.length !== 14) {
-      await dialog.showAlert({ type: 'warning', title: 'Revise o CNPJ', description: 'Informe os 14 dígitos do CNPJ para continuar.' });
+    if (!docLimpo || !validarCNPJ(docLimpo)) {
+      await dialog.showAlert({ type: 'warning', title: 'Revise o CNPJ', description: 'Informe um CNPJ válido para continuar.' });
+      return;
+    }
+    if (/[A-Z]/.test(docLimpo)) {
+      await dialog.showAlert({ type: 'info', title: 'Preenchimento manual', description: 'As consultas públicas ainda não atendem CNPJ alfanumérico. Preencha os dados cadastrais manualmente.' });
       return;
     }
 
@@ -183,6 +199,11 @@ export default function ConfiguracoesEmpresa() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (file) {
+          if (file.size > 1024 * 1024 || !/\.(pfx|p12)$/i.test(file.name)) {
+              setCertFile(null); e.target.value = '';
+              setCertificadoCheck({ status: 'erro', mensagem: 'Selecione um arquivo .pfx ou .p12 de até 1 MiB.' });
+              return;
+          }
           setCertificadoCheck({ status: 'idle', mensagem: '' });
           const reader = new FileReader();
           reader.onloadend = () => {
@@ -196,8 +217,8 @@ export default function ConfiguracoesEmpresa() {
   const validarCertificadoAntesDeSalvar = async () => {
       if (!certFile || !certSenha) return;
 
-      const cnpjLimpo = empresa.documento.replace(/\D/g, '');
-      if (cnpjLimpo.length !== 14) {
+      const cnpjLimpo = normalizeCnpj(empresa.documento);
+      if (!cnpjLimpo || !validarCNPJ(cnpjLimpo)) {
           setCertificadoCheck({ status: 'erro', mensagem: 'Informe o CNPJ da empresa antes de validar o certificado.' });
           return;
       }
@@ -218,6 +239,7 @@ export default function ConfiguracoesEmpresa() {
               },
               body: JSON.stringify({
                   documento: empresa.documento,
+                  ambiente: empresa.ambiente,
                   certificadoArquivo: certFile,
                   certificadoSenha: certSenha
               })
@@ -244,39 +266,57 @@ export default function ConfiguracoesEmpresa() {
   };
 
   const handleDeletarCertificado = async () => {
-      if (!await dialog.showConfirm({
-        type: 'danger',
+      const password = await dialog.showPrompt({
         title: 'Remover certificado digital?',
-        description: 'Sem o certificado A1, novas notas fiscais não poderão ser emitidas até que outro certificado seja cadastrado.',
+        description: 'Digite a senha da sua conta para confirmar. Sem o A1, novas notas não poderão ser emitidas até cadastrar outro certificado.',
+        inputType: 'password', placeholder: 'Senha de acesso à conta',
         confirmText: 'Remover certificado',
         cancelText: 'Manter certificado',
-      })) return;
-      await handleSalvar(null, { deletarCertificado: true });
-      window.location.reload();
+      });
+      if (password === null) return;
+      if (!password) { showMessage('Informe a senha de acesso à conta para remover o certificado.', 'erro'); return; }
+      await handleSalvar(null, { deletarCertificado: true, accountPassword: password });
   };
 
   const carregarSequenciaDps = async (ambiente: string, serie: string) => {
-      const serieNormalizada = String(serie || '').trim().toUpperCase();
-      if (!/^[A-Z0-9]{1,5}$/.test(serieNormalizada)) return;
+      const version = ++dpsRequestVersion.current;
       const userId = localStorage.getItem('userId');
       const contextId = localStorage.getItem('empresaContextId');
       try {
+          const serieNormalizada = normalizeDpsSeries(serie);
+          normalizeDpsEnvironment(ambiente);
+          setCarregandoDps(true);
+          setEmpresa((atual) => ({ ...atual, ambiente, serieDPS: serieNormalizada, ultimoDPS: '' }));
+          setUltimoReservadoDps(0);
+          if (!companyContext.id) {
+              setEmpresa(atual => ({ ...atual, ultimoDPS: 0 }));
+              setDpsStatus({ tipo: 'idle', mensagem: 'Salve a nova empresa antes de consultar sua sequência.' });
+              return;
+          }
           const res = await fetch(`/api/dps/sincronizar?ambiente=${encodeURIComponent(ambiente)}&serie=${encodeURIComponent(serieNormalizada)}`, {
               cache: 'no-store',
               headers: { 'x-user-id': userId || '', 'x-empresa-id': contextId || '' },
           });
           const data = await res.json();
+          if (version !== dpsRequestVersion.current) return;
           if (!res.ok) throw new Error(data.error || 'Não foi possível carregar a sequência.');
           setEmpresa((atual) => ({ ...atual, ambiente, serieDPS: serieNormalizada, ultimoDPS: data.ultimoConfirmado || 0 }));
+          setUltimoReservadoDps(data.ultimoReservado ?? 0);
           setDpsStatus(data.sincronizadoEm
               ? { tipo: data.statusSincronizacao === 'PARCIAL' ? 'parcial' : 'sucesso', mensagem: `Última sincronização: ${new Date(data.sincronizadoEm).toLocaleString('pt-BR')}.`, sincronizadoEm: data.sincronizadoEm }
               : { tipo: 'idle', mensagem: 'Esta combinação de ambiente e série ainda não foi sincronizada.' });
       } catch (error: any) {
-          setDpsStatus({ tipo: 'erro', mensagem: error.message });
+          if (version === dpsRequestVersion.current) setDpsStatus({ tipo: 'erro', mensagem: error.message });
+      } finally {
+          if (version === dpsRequestVersion.current) setCarregandoDps(false);
       }
   };
 
   const sincronizarNumeracaoDps = async () => {
+      if (sincronizandoDps || carregandoDps) return false;
+      try {
+          normalizeDpsEnvironment(empresa.ambiente); normalizeDpsSeries(empresa.serieDPS); normalizeDpsNumber(empresa.ultimoDPS, true);
+      } catch (error) { showMessage((error as Error).message, 'erro'); return false; }
       if (!dadosCertificado.ativo && !certFile) {
           showMessage('Cadastre e salve o certificado A1 antes de sincronizar.', 'erro');
           return false;
@@ -284,7 +324,7 @@ export default function ConfiguracoesEmpresa() {
       const confirmado = await dialog.showConfirm({
         type: 'info',
         title: 'Sincronizar numeração da DPS?',
-        description: `Vamos consultar no Portal Nacional o último número da série ${empresa.serieDPS}, no ambiente de ${empresa.ambiente === 'PRODUCAO' ? 'produção' : 'homologação'}. A consulta não emite nota fiscal.`,
+        description: `Vamos consultar números consecutivos da série ${empresa.serieDPS}, no ambiente de ${empresa.ambiente === 'PRODUCAO' ? 'produção' : 'homologação'}. Lacunas posteriores não são detectadas. A consulta não emite nota fiscal nem reserva o próximo número.`,
         confirmText: 'Sincronizar agora',
         cancelText: 'Agora não',
       });
@@ -303,6 +343,7 @@ export default function ConfiguracoesEmpresa() {
           const data = await res.json();
           if (!res.ok && res.status !== 206) throw new Error(data.error || 'Não foi possível sincronizar a DPS.');
           setEmpresa((atual) => ({ ...atual, ultimoDPS: data.ultimoConfirmado }));
+          setUltimoReservadoDps(data.ultimoReservado ?? 0);
           setDpsStatus({ tipo: data.completo ? 'sucesso' : 'parcial', mensagem: data.message, sincronizadoEm: data.sincronizadoEm || new Date().toISOString() });
           showMessage(data.completo ? 'Numeração DPS sincronizada com sucesso.' : 'Sincronização parcial. Você pode continuar pelo mesmo botão.', 'sucesso');
           return true;
@@ -315,8 +356,12 @@ export default function ConfiguracoesEmpresa() {
       }
   };
 
-  const handleSalvar = async (e: React.FormEvent | null, extraData: any = {}) => {
+  const handleSalvar = async (e: React.FormEvent | null, extraData: { deletarCertificado?: boolean; accountPassword?: string } = {}) => {
     if (e) e.preventDefault();
+    if (loading || carregandoDps || sincronizandoDps) return;
+    try {
+      normalizeDpsEnvironment(empresa.ambiente); normalizeDpsSeries(empresa.serieDPS); normalizeDpsNumber(empresa.ultimoDPS, true);
+    } catch (error) { showMessage((error as Error).message, 'erro'); return; }
     
     // Trava que obriga a seleção do regime
     if (!empresa.regimeTributario) {
@@ -324,10 +369,20 @@ export default function ConfiguracoesEmpresa() {
         return;
     }
 
-    if (certFile && certificadoCheck.status !== 'ok') {
+    if (!extraData.deletarCertificado && certFile && certificadoCheck.status !== 'ok') {
         showMessage('Valide o certificado digital antes de salvar.', 'erro');
         return;
     }
+
+    const requiresPassword = extraData.deletarCertificado || !!certFile || (empresa.ambiente === 'PRODUCAO' && savedEnvironment !== 'PRODUCAO');
+    let password = extraData.accountPassword;
+    if (requiresPassword && !password) {
+        password = await dialog.showPrompt({ title: 'Confirmar senha de acesso',
+            description: certFile ? 'Digite a senha da sua conta para salvar o certificado. Não é a senha do arquivo A1.' : 'Digite a senha da sua conta para ativar o ambiente de produção.',
+            inputType: 'password', placeholder: 'Senha de acesso à conta', confirmText: 'Confirmar e salvar' }) ?? undefined;
+        if (password === undefined) return;
+    }
+    if (requiresPassword && !password) { showMessage('Informe a senha de acesso à conta para continuar.', 'erro'); return; }
 
     setLoading(true);
     const userId = localStorage.getItem('userId');
@@ -342,17 +397,26 @@ export default function ConfiguracoesEmpresa() {
             'x-empresa-id': contextId || ''
         },
         body: JSON.stringify({ 
-            ...empresa, 
-            cnaes: atividades,
-            certificadoArquivo: certFile, 
-            certificadoSenha: certSenha,
-            ...extraData
+            escopo: 'EMPRESA', empresaConfirmadaId: companyContext.id, empresaAtualizadaEm: companyContext.updatedAt,
+            documento: empresa.documento, razaoSocial: empresa.razaoSocial, nomeFantasia: empresa.nomeFantasia,
+            inscricaoMunicipal: empresa.inscricaoMunicipal, regimeTributario: empresa.regimeTributario,
+            cep: empresa.cep, logradouro: empresa.logradouro, numero: empresa.numero, complemento: empresa.complemento,
+            bairro: empresa.bairro, cidade: empresa.cidade, uf: empresa.uf, codigoIbge: empresa.codigoIbge,
+            emailComercial: empresa.email, ambiente: empresa.ambiente, serieDPS: empresa.serieDPS, ultimoDPS: empresa.ultimoDPS,
+            cnaes: atividades.map(item => ({ codigo: item.codigo, descricao: item.descricao, principal: item.principal === true })),
+            certificadoArquivo: extraData.deletarCertificado ? undefined : certFile,
+            certificadoSenha: extraData.deletarCertificado ? undefined : certFile ? certSenha : undefined,
+            deletarCertificado: extraData.deletarCertificado === true, accountPassword: password,
         }),
       });
 
       const resposta = await res.json();
 
       if (res.ok) {
+        setCompanyContext({ id: resposta.empresaId, updatedAt: resposta.empresaAtualizadaEm });
+        setSavedEnvironment(empresa.ambiente);
+        setIsLocked(true);
+        await carregarSequenciaDps(empresa.ambiente, empresa.serieDPS);
         showMessage('✅ Cadastro salvo com sucesso!', 'sucesso');
         if (resposta.primeiroCertificadoCadastrado) {
             setDadosCertificado({ ativo: true, vencimento: certificadoCheck.vencimento || null });
@@ -375,6 +439,10 @@ export default function ConfiguracoesEmpresa() {
 
   const codigoIbgeLimpo = String(empresa.codigoIbge || '').replace(/\D/g, '');
   const ibgeValido = codigoIbgeLimpo.length >= 7;
+  const proximoCandidatoDps = (() => {
+    try { return nextDpsCandidate(normalizeDpsNumber(empresa.ultimoDPS, true), ultimoReservadoDps)?.toString() ?? 'limite esgotado — solicite análise'; }
+    catch { return 'informe um número inteiro válido'; }
+  })();
 
   return (
     <div className="saas-shell">
@@ -456,7 +524,7 @@ export default function ConfiguracoesEmpresa() {
                 <div className="flex gap-2 tour-cnpj-search">
                   <div className="relative flex-1">
                     <Building2 className="absolute left-3 top-3 text-gray-400" size={20} />
-                    <input type="text" className={`w-full pl-10 p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono ${isLocked ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-white'}`} placeholder="00000000000191" value={empresa.documento || ''} onChange={e => setEmpresa({...empresa, documento: e.target.value})} maxLength={18} disabled={isLocked} />
+                    <input type="text" className={`w-full pl-10 p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono ${isLocked ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-white'}`} placeholder="00.AAA.000/0000-00" value={empresa.documento || ''} onChange={e => setEmpresa({...empresa, documento: formatCnpjInput(e.target.value)})} maxLength={18} disabled={isLocked} />
                   </div>
                   {!isLocked && (
                       <button type="button" onClick={() => consultarCNPJ(false)} disabled={buscando} className="bg-blue-100 text-blue-700 px-6 py-2 rounded-lg font-medium hover:bg-blue-200 transition flex items-center gap-2 disabled:opacity-50">
@@ -466,8 +534,8 @@ export default function ConfiguracoesEmpresa() {
                 </div>
               </div>
 
-              <div><label className="block text-sm font-medium text-gray-700 mb-2">Razão Social</label><input type="text" className="w-full p-3 border rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed" value={empresa.razaoSocial || ''} readOnly /></div>
-              <div><label className="block text-sm font-medium text-gray-700 mb-2">Nome Fantasia</label><input type="text" className="w-full p-3 border rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed" value={empresa.nomeFantasia || ''} readOnly /></div>
+              <div><label className="block text-sm font-medium text-gray-700 mb-2">Razão Social</label><input type="text" className="w-full p-3 border rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none" value={empresa.razaoSocial || ''} onChange={e => setEmpresa({...empresa, razaoSocial: e.target.value})} /></div>
+              <div><label className="block text-sm font-medium text-gray-700 mb-2">Nome Fantasia</label><input type="text" className="w-full p-3 border rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none" value={empresa.nomeFantasia || ''} onChange={e => setEmpresa({...empresa, nomeFantasia: e.target.value})} /></div>
 
               <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6 tour-tributacao">
                   <div>
@@ -526,7 +594,7 @@ export default function ConfiguracoesEmpresa() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">Ambiente de Emissão</label>
-                    <select className="w-full p-3 border rounded-lg bg-white text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none" value={empresa.ambiente} onChange={e => void carregarSequenciaDps(e.target.value, empresa.serieDPS)}>
+                    <select disabled={carregandoDps || sincronizandoDps || loading} className="w-full p-3 border rounded-lg bg-white text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none" value={empresa.ambiente} onChange={e => void carregarSequenciaDps(e.target.value, empresa.serieDPS)}>
                         <option value="HOMOLOGACAO">Homologação (Teste)</option>
                         <option value="PRODUCAO">Produção (Valendo)</option>
                     </select>
@@ -536,13 +604,13 @@ export default function ConfiguracoesEmpresa() {
                 </div>
                 <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">Série do DPS</label>
-                    <input type="text" className="w-full p-3 border rounded-lg bg-white text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none" value={empresa.serieDPS} onChange={e => setEmpresa({...empresa, serieDPS: e.target.value.toUpperCase()})} onBlur={() => void carregarSequenciaDps(empresa.ambiente, empresa.serieDPS)} placeholder="Ex: 900" maxLength={5}/>
-                    <p className="text-xs text-slate-500 mt-1">Série usada na numeração da DPS. Geralmente "900" para testes ou "1" para produção.</p>
+                    <input type="text" inputMode="numeric" pattern="[0-9]{1,5}" disabled={carregandoDps || sincronizandoDps || loading} className="w-full p-3 border rounded-lg bg-white text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none" value={empresa.serieDPS} onChange={e => { ++dpsRequestVersion.current; setEmpresa({...empresa, serieDPS: e.target.value, ultimoDPS: ''}); setUltimoReservadoDps(0); }} onBlur={() => void carregarSequenciaDps(empresa.ambiente, empresa.serieDPS)} placeholder="Ex: 900" maxLength={5}/>
+                    <p className="text-xs text-slate-500 mt-1">De 1 a 5 dígitos. Zeros à esquerda não criam outra série: 900 e 00900 compartilham a numeração.</p>
                 </div>
                 <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">Último Número Confirmado</label>
-                    <input type="number" className="w-full p-3 border rounded-lg bg-white text-blue-700 font-bold focus:ring-2 focus:ring-blue-500 outline-none" value={empresa.ultimoDPS} onChange={e => setEmpresa({...empresa, ultimoDPS: parseInt(e.target.value)})}/>
-                    <p className="text-xs text-slate-500 mt-1">Controle separado por ambiente e série. Próxima DPS: <strong>{Math.max(0, Number(empresa.ultimoDPS || 0)) + 1}</strong>.</p>
+                    <input type="number" min={0} max={MAX_STORED_DPS_NUMBER} step={1} disabled={carregandoDps || sincronizandoDps || loading} className="w-full p-3 border rounded-lg bg-white text-blue-700 font-bold focus:ring-2 focus:ring-blue-500 outline-none" value={empresa.ultimoDPS} onChange={e => setEmpresa({...empresa, ultimoDPS: e.target.value})}/>
+                    <p className="text-xs text-slate-500 mt-1">Maior número reservado: <strong>{ultimoReservadoDps}</strong>. Próximo candidato local: <strong>{carregandoDps ? 'consultando...' : proximoCandidatoDps}</strong>. A reserva ocorre no processamento; números usados não são reutilizados.</p>
                 </div>
             </div>
             <div className="mt-6 rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
@@ -554,7 +622,7 @@ export default function ConfiguracoesEmpresa() {
                     <p className="mt-1 text-sm text-slate-600">Consulta a existência das DPS sem transmitir XML e sem emitir nota fiscal.</p>
                   </div>
                 </div>
-                <button type="button" onClick={() => void sincronizarNumeracaoDps()} disabled={sincronizandoDps || (!dadosCertificado.ativo && !certFile)} className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
+                <button type="button" onClick={() => void sincronizarNumeracaoDps()} disabled={sincronizandoDps || carregandoDps || loading || (!dadosCertificado.ativo && !certFile)} className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
                   {sincronizandoDps ? <Loader2 size={17} className="animate-spin"/> : <RefreshCw size={17}/>} {sincronizandoDps ? 'Sincronizando...' : 'Sincronizar numeração'}
                 </button>
               </div>
@@ -587,6 +655,14 @@ export default function ConfiguracoesEmpresa() {
                 <div className="md:col-span-2">
                   <label className="block text-sm font-medium text-slate-700 mb-2">Bairro</label>
                   <input className="saas-input" placeholder="Bairro" value={empresa.bairro || ''} onChange={e => setEmpresa({...empresa, bairro: e.target.value})}/>
+                </div>
+                <div className="md:col-span-2">
+                  <label htmlFor="company-complement" className="block text-sm font-medium text-slate-700 mb-2">Complemento</label>
+                  <input id="company-complement" className="saas-input" maxLength={100} value={empresa.complemento || ''} onChange={e => setEmpresa({...empresa, complemento: e.target.value})}/>
+                </div>
+                <div className="md:col-span-4">
+                  <label htmlFor="company-contact-email" className="block text-sm font-medium text-slate-700 mb-2">E-mail comercial da empresa</label>
+                  <input id="company-contact-email" type="email" className="saas-input" maxLength={254} value={empresa.email || ''} onChange={e => setEmpresa({...empresa, email: e.target.value})}/>
                 </div>
                 <div className="md:col-span-2">
                   <label className="block text-sm font-medium text-slate-700 mb-2">Cidade</label>
@@ -701,7 +777,7 @@ export default function ConfiguracoesEmpresa() {
 
           <div className="bg-gray-50 p-6 flex flex-col items-center gap-4 border-t sticky bottom-0 z-10 shadow-inner">
             {msg && (
-              <div className={`px-6 py-3 rounded-lg text-sm font-bold shadow-md ${msg.tipo === 'sucesso' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+              <div role={msg.tipo === 'erro' ? 'alert' : 'status'} className={`px-6 py-3 rounded-lg text-sm font-bold shadow-md ${msg.tipo === 'sucesso' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                 {msg.texto}
               </div>
             )}

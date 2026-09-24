@@ -23,12 +23,14 @@
 
 # production
 /build
+/dist/
 
 # misc
 .DS_Store
 *.pem
 
 # debug
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -69,4 +71,19 @@ prisma/dev.db-journal
 # Ignorar pasta de backups do banco de dados
 /backups
 *.sql
+*.dump
+*.backup
 !prisma/migrations/**/migration.sql
+
+# Evidencias reais de operacao ficam fora do repositorio. Os arquivos
+# *.example.json continuam versionados como modelos sem dados operacionais.
+/config/capacity-evidence.json
+/config/manual-acceptance-evidence.json
+/config/public-launch-evidence.json
+/config/fiscal-homologation.json
+/config/infrastructure.json
+/config/legal-governance.json
+
+# Bundle publico e versionado da cadeia ICP-Brasil. A regra geral de PEM
+# continua protegendo certificados e chaves privadas em qualquer outro local.
+!/resources/fiscal/icp-brasil-roots-20260826.pem

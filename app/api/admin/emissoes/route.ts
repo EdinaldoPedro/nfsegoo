@@ -1,3 +1,4 @@
+import { withApiGuard } from '@/app/utils/api-route';
 import { NextResponse } from 'next/server';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 import { isSupportRole } from '@/app/utils/access-control';
@@ -6,7 +7,7 @@ import { stripEmpresaSecrets } from '@/app/utils/safe-data';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: Request) {
+export const GET = withApiGuard(async function GET(request: Request) {
   const user = await getAuthenticatedUser(request);
   if (!user) return unauthorized();
   if (!isSupportRole(user.role)) return forbidden();
@@ -79,4 +80,4 @@ export async function GET(request: Request) {
   } catch {
     return NextResponse.json({ error: 'Erro interno ao listar.' }, { status: 500 });
   }
-}
+});

@@ -1,11 +1,13 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { 
     Search, LogIn, CreditCard, Edit, Save, X, Building2, Unlink, 
-    RefreshCw, KeyRound, AtSign, AlertTriangle, ShieldCheck, 
+    RefreshCw, KeyRound, AlertTriangle, ShieldCheck,
     History, Clock, CheckCircle, UserCog, User, PackagePlus, FileCheck2, Download, XCircle
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import AdminAccountCompaniesPanel from '@/components/AdminAccountCompaniesPanel';
 import { useDialog } from '@/app/contexts/DialogContext';
 
 export default function GestaoClientes() {
@@ -14,27 +16,29 @@ export default function GestaoClientes() {
   
   const [clientes, setClientes] = useState<any[]>([]);
   const [planosDisponiveis, setPlanosDisponiveis] = useState<any[]>([]);
-  const [solicitacoesPendentes, setSolicitacoesPendentes] = useState<any[]>([]);
-  const [loadingSolicitacoes, setLoadingSolicitacoes] = useState(true);
   const [term, setTerm] = useState('');
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [listError, setListError] = useState('');
   
   const [editingUser, setEditingUser] = useState<any>(null);
-  const [novoCnpj, setNovoCnpj] = useState(''); 
   
   // === ESTADOS PARA MODAL DE CONFIRMAÇÃO (AUDITORIA) ===
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [justificativa, setJustificativa] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
+  const [operationId, setOperationId] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [pendingContractAction, setPendingContractAction] = useState<'plano' | 'pacote' | null>(null);
-  const [pedidoEmEdicao, setPedidoEmEdicao] = useState<any>(null);
-  const [recusaPedido, setRecusaPedido] = useState<any>(null);
-  const [motivoRecusa, setMotivoRecusa] = useState('');
 
   // === ESTADOS PARA HISTÓRICO DE PLANOS ===
   const [historyUser, setHistoryUser] = useState<any>(null);
   const [historyData, setHistoryData] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyTotal, setHistoryTotal] = useState(0);
+  const [historyError, setHistoryError] = useState('');
+  const historyRequest = useRef(0);
   const opcoesPlanoBase = (planosDisponiveis || []).flatMap((p: any) => {
       if (p.tipo && p.tipo !== 'PLANO') return [];
       if (Number(p.priceMonthly) === 0 && Number(p.priceYearly) > 0) {
@@ -51,9 +55,6 @@ export default function GestaoClientes() {
   });
 
   useEffect(() => {
-    carregarUsuarios();
-    carregarSolicitacoes();
-    
     // Busca planos com proteção contra erro
     fetch('/api/plans?visao=admin', { 
         cache: 'no-store'
@@ -68,22 +69,20 @@ export default function GestaoClientes() {
   }, []);
 
   const carregarUsuarios = () => {
-    fetch('/api/admin/users').then(r => r.json()).then(data => {
-        if(Array.isArray(data)) {
-            const listaClientes = data.filter((u: any) => !['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI', 'CONTADOR'].includes(u.role));
-            setClientes(listaClientes);
-        }
-    });
+    const query = new URLSearchParams({ roles: 'COMUM', limit: '25', page: String(page) });
+    if (term.trim()) query.set('search', term.trim());
+    setListError('');
+    fetch(`/api/admin/users?${query}`, { cache: 'no-store' }).then(async r => {
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Não foi possível carregar as contas.');
+      if (Array.isArray(data?.data)) { setClientes(data.data); setTotalPages(data.meta?.totalPages || 1); }
+    }).catch(error => { setClientes([]); setListError(error instanceof Error ? error.message : 'Falha ao carregar.'); });
   };
-
-  const carregarSolicitacoes = () => {
-    setLoadingSolicitacoes(true);
-    fetch('/api/admin/pedidos', { cache: 'no-store' })
-      .then(r => r.json())
-      .then(data => setSolicitacoesPendentes(Array.isArray(data) ? data : []))
-      .catch(() => setSolicitacoesPendentes([]))
-      .finally(() => setLoadingSolicitacoes(false));
-  };
+  useEffect(() => {
+    const timer = setTimeout(carregarUsuarios, 250);
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, term]);
 
   // --- 1. ABRIR MODAL DE CONFIRMAÇÃO ---
   const handlePreSaveUser = (action: 'plano' | 'pacote') => {
@@ -94,17 +93,14 @@ export default function GestaoClientes() {
       }
 
       setPendingContractAction(action);
+      setOperationId(crypto.randomUUID());
       setShowConfirmModal(true);
   };
 
   // --- 2. SALVAR COM AUDITORIA ---
   const handleConfirmChange = async () => {
-      if(!justificativa || justificativa.length < 5) return dialog.showAlert({type:'warning', description: 'Digite uma justificativa válida.'});
+      if(!justificativa || justificativa.trim().length < 10) return dialog.showAlert({type:'warning', description: 'Digite uma justificativa com pelo menos dez caracteres.'});
       if(!adminPassword) return dialog.showAlert({type:'warning', description: 'Digite sua senha.'});
-      if (pedidoEmEdicao && !pedidoEmEdicao.temComprovante && justificativa.length < 10) {
-          return dialog.showAlert({type:'warning', description: 'Sem comprovante, informe uma justificativa mais detalhada.'});
-      }
-
       if (!pendingContractAction) return;
 
       setIsProcessing(true);
@@ -119,11 +115,11 @@ export default function GestaoClientes() {
               },
               body: JSON.stringify({ 
                   id: editingUser.id, 
+                  operationId,
                   plano: slug,
                   planoCiclo: ciclo,
                   justification: justificativa,
-                  adminPassword: adminPassword,
-                  pedidoId: pedidoEmEdicao?.id || null
+                  adminPassword: adminPassword
               })
           });
 
@@ -131,11 +127,9 @@ export default function GestaoClientes() {
               setShowConfirmModal(false);
               setPendingContractAction(null);
               setEditingUser(null);
-              setPedidoEmEdicao(null);
               setJustificativa('');
               setAdminPassword('');
               carregarUsuarios();
-              carregarSolicitacoes();
               dialog.showAlert({ type: 'success', title: pendingContractAction === 'pacote' ? 'Pacote adicionado' : 'Plano atualizado', description: pendingContractAction === 'pacote' ? 'O pacote foi adicionado e registrado no histórico.' : 'O plano foi atualizado e registrado no histórico.' });
           } else {
               const err = await res.json();
@@ -149,123 +143,51 @@ export default function GestaoClientes() {
   };
 
   // --- FUNÇÕES UTILITÁRIAS ---
-  const handleUnlinkCompany = async () => { 
-      const res = await fetch('/api/admin/users', { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ id: editingUser.id, unlinkCompany: true }) });
-      if(res.ok) { dialog.showAlert("Empresa desvinculada."); setEditingUser(null); carregarUsuarios(); }
+  const solicitarAutorizacaoAdministrativa = async (acao: string) => {
+      const justification = await dialog.showPrompt({
+          title: 'Justificativa obrigatoria',
+          description: `Descreva o motivo para ${acao}. Esta operacao sera auditada.`,
+          placeholder: 'Informe o motivo com ao menos 10 caracteres',
+          confirmText: 'Continuar',
+      });
+      if (!justification) return null;
+      if (justification.trim().length < 10) {
+          await dialog.showAlert({ type: 'warning', description: 'A justificativa precisa ter ao menos 10 caracteres.' });
+          return null;
+      }
+      const password = await dialog.showPrompt({
+          title: 'Confirme sua identidade',
+          description: 'Digite sua senha administrativa para autorizar esta operacao.',
+          placeholder: 'Senha administrativa',
+          inputType: 'password',
+          confirmText: 'Autorizar',
+      });
+      if (!password) return null;
+      return { justification: justification.trim(), adminPassword: password };
   };
-  const handleUpdateCnpj = async () => { 
-      const res = await fetch('/api/admin/users', { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ id: editingUser.id, empresaId: editingUser.empresa?.id, newCnpj: novoCnpj }) });
-      if(res.ok) { dialog.showAlert("CNPJ atualizado."); setEditingUser(null); carregarUsuarios(); }
-  };
+
   const handleSendReset = async () => { await fetch('/api/auth/forgot-password', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ email: editingUser.email }) }); dialog.showAlert("Email enviado."); };
-  const handleResetEmail = async () => { 
-      const res = await fetch('/api/admin/users', { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ id: editingUser.id, resetEmail: true }) });
-      if(res.ok) { dialog.showAlert("Email resetado."); setEditingUser(null); carregarUsuarios(); }
-  };
   
   const abrirEdicao = (user: any) => {
-      const ciclo = user.planoCiclo || 'MENSAL';
-      const slug = user.plano === 'SEM_PLANO' ? 'SUSPENDED' : (user.plano || 'GRATUITO');
-      setEditingUser({ ...user, planoCombinado: `${slug}|${ciclo}`, pacoteCombinado: '' });
-      setNovoCnpj(user.empresa ? user.empresa.documento : '');
+      // Opening a dialog is never a request to suspend, renew or grant a plan.
+      setEditingUser({ ...user, planoCombinado: '', pacoteCombinado: '' });
       setJustificativa(''); setAdminPassword(''); setPendingContractAction(null);
-      setPedidoEmEdicao(null);
   }
 
-  const abrirEdicaoPorSolicitacao = (pedido: any) => {
-      const cliente = clientes.find((item: any) => item.id === pedido.user?.id);
-      if (!cliente) {
-          return dialog.showAlert({ type: 'warning', description: 'Cliente nao encontrado na lista atual.' });
-      }
-
-      const ciclo = pedido.ciclo || cliente.planoCiclo || 'MENSAL';
-      const slug = pedido.planoSlug === 'SEM_PLANO' ? (cliente.plano || 'GRATUITO') : pedido.planoSlug;
-      setEditingUser({ ...cliente, planoCombinado: `${slug}|${ciclo}`, pacoteCombinado: '' });
-      setPedidoEmEdicao(pedido);
-      setNovoCnpj(cliente.empresa ? cliente.empresa.documento : '');
-      setJustificativa(pedido.temComprovante ? 'Pagamento manual conferido para ativacao do pedido.' : '');
-      setAdminPassword('');
-      setPendingContractAction(null);
-  };
-
-  const marcarSolicitacao = async (pedidoId: string) => {
-      try {
-          const res = await fetch('/api/admin/pedidos', {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                  id: pedidoId,
-                  status: 'ATIVADO_MANUALMENTE'
-              })
-          });
-
-          const data = await res.json();
-          if (!res.ok) {
-              return dialog.showAlert({ type: 'danger', title: 'Falha ao atualizar solicitação', description: data.error || 'A API não concluiu a operação.' });
-          }
-
-          dialog.showAlert({ type: 'success', title: 'Solicitação atendida', description: 'O status foi atualizado e registrado no histórico.' });
-          carregarSolicitacoes();
-      } catch (error) {
-          dialog.showAlert("Erro de conexao.");
-      }
-  };
-
-  const atualizarStatusPedido = async (pedidoId: string, status: string, extra: any = {}) => {
-      try {
-          const res = await fetch('/api/admin/pedidos', {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ id: pedidoId, status, ...extra })
-          });
-
-          const data = await res.json().catch(() => ({}));
-          if (!res.ok) {
-              return dialog.showAlert({ type: 'danger', title: 'Falha ao atualizar solicitação', description: data.error || 'A API não concluiu a operação.' });
-          }
-
-          dialog.showAlert({ type: 'success', title: 'Atualizado', description: 'Solicitacao atualizada com sucesso.' });
-          carregarSolicitacoes();
-      } catch (error) {
-          dialog.showAlert("Erro de conexao.");
-      }
-  };
-
-  const baixarComprovante = async (anexo: any) => {
-      try {
-          const res = await fetch(anexo.downloadUrl);
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error || 'Falha ao baixar comprovante.');
-          const link = document.createElement('a');
-          link.href = data.conteudoBase64;
-          link.download = data.nomeArquivo || 'comprovante';
-          link.click();
-      } catch (error: any) {
-          dialog.showAlert({ type: 'danger', title: 'Comprovante', description: error.message || 'Nao foi possivel baixar.' });
-      }
-  };
-
   // === 3. ABRIR HISTÓRICO ===
-  const abrirHistorico = (user: any) => {
-      setHistoryUser(user);
-      setLoadingHistory(true);
-      setHistoryData([]); 
-
-      fetch(`/api/admin/users/${user.id}/history`)
-      .then(async (r) => {
-          if (r.status === 404) {
-              console.error("Rota de histórico não encontrada (404).");
-              return []; 
-          }
-          const json = await r.json();
-          return Array.isArray(json) ? json : [];
-      })
-      .then(setHistoryData)
-      .catch((err) => {
-          console.error(err);
-          setHistoryData([]);
-      })
-      .finally(() => setLoadingHistory(false));
+  const abrirHistorico = async (user: any, page = 1) => {
+      const requestId = ++historyRequest.current;
+      setHistoryUser(user); setHistoryPage(page); setLoadingHistory(true); setHistoryError(''); setHistoryData([]);
+      try {
+          const res = await fetch(`/api/admin/users/${user.id}/history?page=${page}`);
+          const json = await res.json();
+          if (!res.ok) throw new Error(json.error || 'Falha ao carregar histórico.');
+          if (requestId !== historyRequest.current) return;
+          setHistoryTotal(Number(res.headers.get('X-Total-Count') || 0));
+          setHistoryData(Array.isArray(json) ? json : []);
+      } catch (error) {
+          if (requestId === historyRequest.current) setHistoryError(error instanceof Error ? error.message : 'Falha de conexão.');
+      } finally { if (requestId === historyRequest.current) setLoadingHistory(false); }
   };
 
   const acessarSuporte = async (targetId: string) => {
@@ -282,13 +204,33 @@ export default function GestaoClientes() {
         if (adminRole) localStorage.setItem('adminBackUpRole', adminRole);
     }
 
+    const reason = await dialog.showPrompt({
+      title: 'Justificativa do acesso',
+      description: 'Informe por que precisa visualizar a conta. O acesso sera somente leitura e auditado.',
+      placeholder: 'Ex.: investigar o ticket 1234 informado pelo cliente',
+      confirmText: 'Continuar',
+    });
+    if (!reason) return;
+    if (reason.trim().length < 10) {
+      return dialog.showAlert({ type: 'warning', description: 'Informe uma justificativa com ao menos 10 caracteres.' });
+    }
+
+    const password = await dialog.showPrompt({
+      title: 'Confirme sua identidade',
+      description: 'Digite sua senha administrativa para iniciar a sessao de suporte por 30 minutos.',
+      placeholder: 'Senha administrativa',
+      inputType: 'password',
+      confirmText: 'Iniciar acesso',
+    });
+    if (!password) return;
+
     try {
         const res = await fetch('/api/admin/impersonate', { 
             method: 'POST', 
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ targetUserId: targetId }) 
+            body: JSON.stringify({ targetUserId: targetId, reason: reason.trim(), password })
         });
 
         if (res.status === 401) {
@@ -303,6 +245,7 @@ export default function GestaoClientes() {
             localStorage.setItem('userId', data.fakeSession.id); 
             localStorage.setItem('userRole', data.fakeSession.role); 
             localStorage.setItem('isSupportMode', 'true'); 
+            localStorage.setItem('supportModeExpiresAt', data.expiresAt);
             
             // Remove contexto de empresa antiga para forçar o reload dos dados do cliente
             localStorage.removeItem('empresaContextId');
@@ -325,159 +268,14 @@ export default function GestaoClientes() {
         <h1 className="text-2xl font-bold text-slate-800">Clientes (SaaS)</h1>
         <div className="relative">
             <Search className="absolute left-3 top-3 text-slate-400" size={18} />
-            <input placeholder="Buscar cliente..." className="pl-10 p-2 border rounded-lg w-64" onChange={e => setTerm(e.target.value)} />
+            <input aria-label="Buscar cliente" value={term} placeholder="Buscar cliente..." className="pl-10 p-2 border rounded-lg w-64" onChange={e => { setTerm(e.target.value); setPage(1); }} />
         </div>
       </div>
 
-      {/* === MODAL DE HISTÓRICO === */}
-      <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-5">
-        <div className="flex items-center justify-between gap-4 mb-4">
-          <div>
-            <h2 className="text-lg font-bold text-amber-900">Solicitacoes de contratacao</h2>
-            <p className="text-sm text-amber-800">
-              Pedidos enviados pelo cliente para conferencia manual. Analise comprovante, suporte e libere o plano pelo cadastro do cliente.
-            </p>
-          </div>
-          <button
-            onClick={carregarSolicitacoes}
-            className="px-3 py-2 rounded-lg border border-amber-300 bg-white text-amber-800 text-sm font-bold hover:bg-amber-100 transition"
-          >
-            Atualizar
-          </button>
-        </div>
-
-        {loadingSolicitacoes ? (
-          <div className="text-sm text-amber-700">Carregando solicitacoes...</div>
-        ) : solicitacoesPendentes.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-amber-300 bg-white/70 p-4 text-sm text-amber-700">
-            Nenhuma solicitacao manual pendente no momento.
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {solicitacoesPendentes.map((pedido: any) => (
-              <div key={pedido.id} className="rounded-lg border border-amber-200 bg-white p-4 shadow-sm">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="space-y-2">
-                    <div className="flex flex-wrap items-center gap-2 text-xs">
-                      <span className="rounded-full bg-amber-100 px-2 py-1 font-bold text-amber-800">Contratacao manual</span>
-                      <span className="rounded-full bg-blue-50 px-2 py-1 font-bold text-blue-700">{pedido.statusLabel || pedido.status}</span>
-                      <span className="font-mono text-amber-700">{pedido.id.slice(0, 8)}</span>
-                      <span className="text-slate-500">{new Date(pedido.createdAt).toLocaleString()}</span>
-                    </div>
-                    <div>
-                      <p className="font-bold text-slate-800">{pedido.user?.nome}</p>
-                      <p className="text-sm text-slate-500">{pedido.user?.email}</p>
-                      <p className="text-xs text-slate-500">
-                        {pedido.user?.empresa?.razaoSocial || 'Sem empresa vinculada'}{pedido.user?.empresa?.documento ? ` • ${pedido.user.empresa.documento}` : ''}
-                      </p>
-                    </div>
-                    <div className="text-sm text-slate-700">
-                      <p><strong>Plano:</strong> {pedido.detalhes?.planoNome || pedido.planoSlug} ({pedido.ciclo})</p>
-                      <p><strong>Ciclos:</strong> {pedido.detalhes?.qtdCiclos || 1}</p>
-                      <p><strong>Pacotes:</strong> {pedido.detalhes?.pacotes?.length ? pedido.detalhes.pacotes.map((pacote: any) => `${pacote.quantidade}x ${pacote.nome}`).join(', ') : 'Nenhum pacote adicional'}</p>
-                      <p><strong>Valor estimado:</strong> {Number(pedido.valorTotal).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
-                      <p className="flex items-center gap-1">
-                        <strong>Comprovante:</strong>
-                        {pedido.temComprovante ? (
-                          <span className="inline-flex items-center gap-1 text-green-700"><FileCheck2 size={14}/> {pedido.anexos?.length || 1} arquivo(s)</span>
-                        ) : (
-                          <span className="text-amber-700">Ainda nao enviado</span>
-                        )}
-                      </p>
-                      {pedido.anexos?.length > 0 && (
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {pedido.anexos.map((anexo: any) => (
-                            <button
-                              key={anexo.id}
-                              onClick={() => baixarComprovante(anexo)}
-                              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-bold text-slate-700 hover:bg-slate-100"
-                            >
-                              <Download size={13}/> {anexo.nomeArquivo}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col gap-2 lg:w-52">
-                    {pedido.status !== 'EM_ANALISE' && (
-                      <button
-                        onClick={() => atualizarStatusPedido(pedido.id, 'EM_ANALISE')}
-                        className="rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 text-sm font-bold text-blue-700 hover:bg-blue-100 transition"
-                      >
-                        Iniciar analise
-                      </button>
-                    )}
-                    <button
-                      onClick={() => abrirEdicaoPorSolicitacao(pedido)}
-                      className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-bold text-white hover:bg-blue-700 transition"
-                    >
-                      Gerenciar cliente
-                    </button>
-                    {pedido.detalhes?.ticketId && (
-                      <button
-                        onClick={() => router.push(`/admin/suporte/${pedido.detalhes.ticketId}`)}
-                        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 transition"
-                      >
-                        Abrir ticket
-                      </button>
-                    )}
-                    <button
-                      onClick={() => setRecusaPedido(pedido)}
-                      className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm font-bold text-red-700 hover:bg-red-100 transition"
-                    >
-                      Recusar pedido
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+      <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 p-5">
+        <p className="mb-2 text-sm text-blue-900">Concessões administrativas não quitam pedidos. Pagamentos devem ser conferidos na área comercial.</p>
+        <Link href="/admin/contratacoes" className="font-semibold text-blue-700 underline">Contratações e pagamentos</Link>
       </div>
-
-      {recusaPedido && (
-        <div className="fixed inset-0 bg-black/50 z-[75] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
-          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl">
-            <div className="mb-4 flex items-center gap-3 text-red-600">
-              <XCircle size={26} />
-              <div>
-                <h3 className="font-bold text-lg text-slate-900">Recusar solicitacao</h3>
-                <p className="text-sm text-slate-500">Informe o motivo para o cliente acompanhar pelo suporte.</p>
-              </div>
-            </div>
-            <textarea
-              value={motivoRecusa}
-              onChange={(e) => setMotivoRecusa(e.target.value)}
-              rows={4}
-              className="w-full rounded-lg border border-slate-300 p-3 text-sm outline-none focus:ring-2 focus:ring-red-200"
-              placeholder="Ex: comprovante ilegivel, valor divergente, dados incompletos..."
-            />
-            <div className="mt-5 flex gap-2">
-              <button
-                onClick={() => {
-                  setRecusaPedido(null);
-                  setMotivoRecusa('');
-                }}
-                className="flex-1 rounded-lg border border-slate-200 px-4 py-2 font-bold text-slate-600 hover:bg-slate-50"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={async () => {
-                  await atualizarStatusPedido(recusaPedido.id, 'RECUSADO', { motivo: motivoRecusa });
-                  setRecusaPedido(null);
-                  setMotivoRecusa('');
-                }}
-                className="flex-1 rounded-lg bg-red-600 px-4 py-2 font-bold text-white hover:bg-red-700"
-              >
-                Confirmar recusa
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {historyUser && (
         <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
@@ -488,19 +286,24 @@ export default function GestaoClientes() {
                             <History className="text-blue-600"/> Histórico de Assinaturas
                         </h3>
                         <p className="text-sm text-slate-500">Cliente: <strong>{historyUser.nome}</strong></p>
+                        <div className="flex items-center gap-3 mt-2 text-sm">
+                          <button disabled={loadingHistory || historyPage <= 1} onClick={() => abrirHistorico(historyUser, historyPage - 1)} className="border rounded px-2 py-1 disabled:opacity-40">Anterior</button>
+                          <span>Página {historyPage} de {Math.max(1, Math.ceil(historyTotal / 30))}</span>
+                          <button disabled={loadingHistory || historyPage * 30 >= historyTotal} onClick={() => abrirHistorico(historyUser, historyPage + 1)} className="border rounded px-2 py-1 disabled:opacity-40">Próxima</button>
+                        </div>
                     </div>
                     <button onClick={() => setHistoryUser(null)}><X size={24} className="text-slate-400 hover:text-red-500"/></button>
                 </div>
                 
                 <div className="flex-1 overflow-y-auto p-6 bg-slate-50/50">
-                    {loadingHistory ? (
+                    {historyError ? <p role="alert" className="text-red-700">{historyError}</p> : loadingHistory ? (
                         <div className="flex items-center justify-center py-10 text-slate-400 gap-2">
                             <RefreshCw className="animate-spin"/> Carregando...
                         </div>
                     ) : historyData.length === 0 ? (
                         <div className="text-center text-slate-400 py-10 flex flex-col items-center">
                             <p>Nenhum registro de histórico encontrado.</p>
-                            <p className="text-xs mt-1">(Verifique se a API /history retornou 404)</p>
+                            <p className="text-xs mt-1">Não há contrato verificável nesta página.</p>
                         </div>
                     ) : (
                         <div className="space-y-4">
@@ -520,7 +323,7 @@ export default function GestaoClientes() {
                                             {item.dataFim ? (
                                                 <span>Fim: {new Date(item.dataFim).toLocaleDateString()}</span>
                                             ) : (
-                                                <span className="text-green-600 font-bold">Vitalício</span>
+                                                <span className="text-slate-600">Sem vencimento informado</span>
                                             )}
                                         </div>
                                     </div>
@@ -534,7 +337,7 @@ export default function GestaoClientes() {
                                             )}
                                             <div>
                                                 <p className="text-[10px] font-bold text-slate-500 uppercase mb-1">
-                                                    {item.origem === 'MANUAL_ADMIN' ? `Alterado por: ${item.adminNome}` : 'Via Sistema'}
+                                                    {item.origem === 'MANUAL_ADMIN' ? `Alterado por: ${item.adminNome}` : item.origem}
                                                 </p>
                                                 <p className="text-sm text-slate-700 leading-snug italic bg-slate-50 p-2 rounded border border-slate-100">
                                                     "{item.justificativa}"
@@ -570,7 +373,7 @@ export default function GestaoClientes() {
                           <textarea 
                               className="w-full p-2 border rounded text-sm focus:ring-2 focus:ring-amber-500 outline-none"
                               rows={3}
-                              placeholder="Ex: Pagamento via PIX manual, Cortesia por erro..."
+                              placeholder="Ex.: cortesia aprovada por falha no serviço (pagamentos são conciliados em Contratações)"
                               value={justificativa}
                               onChange={e => setJustificativa(e.target.value)}
                           />
@@ -620,19 +423,9 @@ export default function GestaoClientes() {
             <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
                 <div className="flex justify-between mb-4">
                     <h3 className="font-bold text-lg text-slate-800">Gerenciar Cliente</h3>
-                    <button onClick={() => { setEditingUser(null); setPedidoEmEdicao(null); }}><X size={20}/></button>
+                    <button aria-label="Fechar gerenciamento" onClick={() => { setEditingUser(null); }}><X size={20}/></button>
                 </div>
 
-                {pedidoEmEdicao && (
-                    <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
-                        <p className="font-bold">Pedido #{pedidoEmEdicao.id.slice(0, 8)} vinculado</p>
-                        <p className="mt-1 text-xs leading-5">
-                            Plano e ciclo foram preselecionados pela solicitacao. Ao confirmar o plano, o pedido sera marcado como ativado.
-                            {!pedidoEmEdicao.temComprovante && ' Sem comprovante, a justificativa precisa explicar a liberacao.'}
-                        </p>
-                    </div>
-                )}
-                
                 <div className="space-y-6">
                     {/* DADOS PESSOAIS */}
                     <div className="bg-gray-50 p-3 rounded border">
@@ -640,72 +433,35 @@ export default function GestaoClientes() {
                         <p className="font-bold text-slate-700">{editingUser.nome}</p>
                         <p className="text-xs text-slate-500">{editingUser.email}</p>
                         
-                        <div className="grid grid-cols-2 gap-2 mt-3">
+                        <div className="mt-3">
                              <button onClick={handleSendReset} className="bg-white border border-blue-200 text-blue-600 text-xs font-bold py-2 rounded hover:bg-blue-50 flex items-center justify-center gap-2 transition">
                                 <KeyRound size={14}/> Reset Senha
-                            </button>
-                            <button onClick={handleResetEmail} className="bg-white border border-orange-200 text-orange-600 text-xs font-bold py-2 rounded hover:bg-orange-50 flex items-center justify-center gap-2 transition">
-                                <AtSign size={14}/> Reset Email
                             </button>
                         </div>
                     </div>
 
-                    {/* ÁREA DA EMPRESA */}
-                    <div className="border-t pt-4">
-                        <label className="block text-xs font-bold text-blue-700 uppercase mb-2 flex items-center gap-2">
-                            <Building2 size={16}/> Empresa Vinculada
-                        </label>
-                        
-                        {editingUser.empresa ? (
-                            <div className="space-y-3">
-                                <div className="p-2 bg-blue-50 border border-blue-100 rounded text-sm">
-                                    <p className="font-bold text-blue-900 line-clamp-1">{editingUser.empresa.razaoSocial}</p>
-                                    <p className="text-xs text-blue-600 font-mono mt-1">Atual: {editingUser.empresa.documento}</p>
-                                </div>
-
-                                <div>
-                                    <label className="block text-[10px] text-gray-500 mb-1">Trocar CNPJ (Apenas se livre)</label>
-                                    <div className="flex gap-2">
-                                        <input 
-                                            className="flex-1 p-2 border rounded text-sm font-mono"
-                                            value={novoCnpj}
-                                            onChange={e => setNovoCnpj(e.target.value)}
-                                            placeholder="Novo CNPJ..."
-                                        />
-                                        <button onClick={handleUpdateCnpj} className="bg-slate-800 text-white px-3 rounded hover:bg-slate-700" title="Salvar Novo CNPJ">
-                                            <RefreshCw size={16}/>
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <button onClick={handleUnlinkCompany} className="w-full text-red-600 text-xs border border-red-200 hover:bg-red-50 p-2 rounded flex items-center justify-center gap-2 transition">
-                                    <Unlink size={14}/> Desvincular (Resetar)
-                                </button>
-                            </div>
-                        ) : (
-                            <div className="text-center p-4 border-2 border-dashed border-gray-200 rounded text-gray-400 text-sm">
-                                Nenhuma empresa vinculada.
-                            </div>
-                        )}
-                    </div>
+                    <AdminAccountCompaniesPanel key={editingUser.id} userId={editingUser.id} onChanged={carregarUsuarios} />
 
                     {/* PLANO */}
                     <div className="border-t pt-4">
-                        <label className="block text-xs font-bold text-green-700 uppercase mb-2 flex items-center gap-2">
+                        <label htmlFor="admin-plan-action" className="block text-xs font-bold text-green-700 uppercase mb-2 flex items-center gap-2">
                             <CreditCard size={16}/> Plano base
                         </label>
                         <select 
+                            id="admin-plan-action"
                             className="w-full p-2 border rounded bg-white text-slate-800 focus:ring-2 focus:ring-green-500 text-sm"
                             value={editingUser.planoCombinado}
                             onChange={e => setEditingUser({...editingUser, planoCombinado: e.target.value})}
                         >
-                            <option value="SUSPENDED|DEFAULT" className="text-red-600 font-bold bg-red-50">⛔ SUSPENDER ACESSO / SEM PLANO</option>
+                            <option value="">Selecione explicitamente uma ação ou plano</option>
+                            <option value="SUSPENDED|MENSAL" className="text-red-600 font-bold bg-red-50">Suspender operações (preservar contrato)</option>
+                            <option value="REACTIVATE|MENSAL">Reativar acesso (sem renovar prazo)</option>
                             {opcoesPlanoBase.map((opcao: any) => (
                                 <option key={opcao.value} value={opcao.value}>{opcao.label}</option>
                             ))}
                         </select>
                         <p className="text-[11px] text-slate-500 mt-2">
-                            Esta acao substitui o plano principal atual do cliente.
+                            Escolher uma empresa não altera o contrato. Concessões, suspensão e reativação exigem uma ação separada e confirmada.
                         </p>
                     </div>
 
@@ -752,7 +508,7 @@ export default function GestaoClientes() {
                     </div>
 
                     <div className="flex justify-end gap-2 mt-6 pt-4 border-t">
-                        <button onClick={() => handlePreSaveUser('plano')} className="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700 flex items-center gap-2 font-bold shadow-lg shadow-green-100 transition">
+                        <button disabled={!editingUser.planoCombinado} onClick={() => handlePreSaveUser('plano')} className="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700 flex items-center gap-2 font-bold shadow-lg shadow-green-100 transition disabled:opacity-50">
                             <Save size={18}/> Salvar plano
                         </button>
                     </div>
@@ -762,6 +518,7 @@ export default function GestaoClientes() {
       )}
 
       {/* TABELA */}
+      {listError && <p role="alert" className="mb-3 rounded-xl border border-red-300 bg-red-50 p-3 text-red-800">{listError}</p>}
       <div className="saas-table-scroll rounded-xl border bg-white shadow-sm">
         <table className="min-w-[760px] w-full text-left text-sm">
             <thead className="bg-slate-50 border-b">
@@ -823,6 +580,11 @@ export default function GestaoClientes() {
                 ))}
             </tbody>
         </table>
+      </div>
+      <div className="mt-4 flex items-center justify-end gap-3 text-sm">
+        <button disabled={page <= 1} onClick={() => setPage(value => value - 1)} className="rounded border px-3 py-2 disabled:opacity-40">Anterior</button>
+        <span>Página {page} de {totalPages}</span>
+        <button disabled={page >= totalPages} onClick={() => setPage(value => value + 1)} className="rounded border px-3 py-2 disabled:opacity-40">Próxima</button>
       </div>
     </div>
   );

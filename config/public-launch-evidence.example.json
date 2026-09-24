@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "status": "PENDING",
+  "releaseId": "substituir-pelo-release-id-exato",
+  "pilotStartedAt": "2026-09-01T12:00:00.000Z",
+  "pilotEndedAt": "2026-09-20T12:00:00.000Z",
+  "approvedAt": "2026-09-21T12:00:00.000Z",
+  "expiresAt": "2026-10-15T12:00:00.000Z",
+  "sample": {
+    "activeCompanies": 3,
+    "customersWithCompletedFlow": 3,
+    "successfulProductionEmissions": 10,
+    "supportInteractionsReviewed": 1
+  },
+  "metrics": {
+    "availabilityPercent": 99.5,
+    "httpErrorRatePercent": 1,
+    "crossTenantIncidents": 0,
+    "duplicateEmissionIncidents": 0,
+    "documentLossIncidents": 0,
+    "unresolvedSeverityOneOrTwo": 0,
+    "openManualReconciliations": 0,
+    "highPrioritySupportBacklog": 0,
+    "supportMedianFirstResponseHours": 24,
+    "fiscalFailuresReviewed": true
+  },
+  "approvals": [
+    { "role": "PRODUCT_OWNER", "approverRef": "pessoa/proprietario", "evidenceRef": "abertura/produto" },
+    { "role": "TECHNICAL", "approverRef": "pessoa/tecnico", "evidenceRef": "abertura/tecnica" },
+    { "role": "OPERATIONS", "approverRef": "pessoa/operacao", "evidenceRef": "abertura/operacao" }
+  ],
+  "evidenceRef": "piloto/relatorio-final"
+}

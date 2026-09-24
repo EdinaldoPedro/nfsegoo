@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { 
     Ticket, Plus, Trash2, Calendar, Users, 
     CheckCircle2, Loader2, Tag, Percent, DollarSign, 
@@ -8,11 +8,15 @@ import {
     Eye, Receipt, X // <--- Adicione estes 3 aqui!
 } from 'lucide-react';
 import { useDialog } from '@/app/contexts/DialogContext';
+import { useAdminAuthorization } from '@/app/hooks/useAdminAuthorization';
 
 interface Plano { id: string; name: string; tipo: string; }
 
 export default function AdminCuponsPage() {
     const dialog = useDialog();
+    const authorize = useAdminAuthorization();
+    const [page, setPage] = useState(1);
+    const [total, setTotal] = useState(0);
     const [activeTab, setActiveTab] = useState<'CREATE' | 'CONSULT'>('CREATE');
     // Estado para o Modal de Raio-X
     const [cupomDetalhe, setCupomDetalhe] = useState<any | null>(null);
@@ -38,13 +42,14 @@ export default function AdminCuponsPage() {
     // Estado do Container Dinâmico
     const [selectedPlanIds, setSelectedPlanIds] = useState<string[]>([]);
 
-    const carregarDados = async () => {
+    const carregarDados = useCallback(async () => {
         setLoading(true);
         try {
             // Busca Cupons
-            const resCupons = await fetch('/api/admin/cupons');
+            const resCupons = await fetch(`/api/admin/cupons?page=${page}`);
             const dataCupons = await resCupons.json();
             if (Array.isArray(dataCupons)) setCupons(dataCupons);
+            setTotal(Number(resCupons.headers.get('X-Total-Count')) || 0);
 
             // Busca Planos e Pacotes para o Container
             const resPlanos = await fetch('/api/plans');
@@ -56,9 +61,9 @@ export default function AdminCuponsPage() {
         } finally {
             setLoading(false);
         }
-    };
+    }, [page]);
 
-    useEffect(() => { carregarDados(); }, []);
+    useEffect(() => { carregarDados(); }, [carregarDados]);
 
     // Lógica do Container "Click to Move"
     const togglePlanSelection = (planoId: string) => {
@@ -71,10 +76,12 @@ export default function AdminCuponsPage() {
 
     const handleCreate = async (e: React.FormEvent) => {
         e.preventDefault();
+        const authorization = await authorize('criar um cupom de desconto');
+        if (!authorization) return;
         setSaving(true);
         try {
             const payload = {
-                ...formData,
+                ...formData, ...authorization,
                 planosValidos: selectedPlanIds.length > 0 ? selectedPlanIds.join(',') : null,
                 aplicarEm: selectedPlanIds.length > 0 ? 'PLANOS_SELECIONADOS' : 'CARRINHO_TOTAL'
             };
@@ -103,10 +110,11 @@ export default function AdminCuponsPage() {
     };
 
     const handleDelete = async (id: string) => {
-        if (!await dialog.showConfirm({ type: 'danger', title: 'Excluir cupom?', description: 'A exclusão é permanente. Contratações futuras não poderão mais usar este código.', confirmText: 'Excluir cupom', cancelText: 'Cancelar' })) return;
+        const authorization = await authorize('desativar o cupom para novas cotações, preservando reservas e histórico');
+        if (!authorization) return;
         
         try {
-            const res = await fetch(`/api/admin/cupons?id=${id}`, { method: 'DELETE' });
+            const res = await fetch('/api/admin/cupons', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, ...authorization }) });
             if (res.ok) {
                 carregarDados(); // Recarrega a tabela automaticamente
             } else {
@@ -120,6 +128,8 @@ export default function AdminCuponsPage() {
     return (
         <div className="min-h-screen bg-slate-50">
             <div className="mx-auto max-w-6xl">
+                <p className="mb-4 text-sm text-slate-600">Validade até 23:59:59 no horário de Brasília. Meses de desconto são proporcionais no ciclo anual. Desativar preserva reservas vigentes e registros financeiros.</p>
+                {activeTab === 'CONSULT' && <div className="mb-4 flex items-center justify-between"><button disabled={page <= 1 || loading} onClick={() => setPage((p) => p - 1)} className="rounded-lg border p-3 disabled:opacity-40">Anterior</button><span>Página {page} · {total} cupons · últimos 20 usos por cupom</span><button disabled={page * 50 >= total || loading} onClick={() => setPage((p) => p + 1)} className="rounded-lg border p-3 disabled:opacity-40">Próxima</button></div>}
                 {/* CABEÇALHO E ABAS */}
                 <div className="mb-8">
                     <h1 className="text-2xl md:text-3xl font-black text-slate-800 flex items-center gap-3 mb-6">
@@ -321,7 +331,7 @@ export default function AdminCuponsPage() {
                                                 <td className="px-6 py-4">
                                                     <div className="flex flex-col">
                                                         <span className="text-sm font-black text-slate-700">{cupom.vezesUsado} resgates</span>
-                                                        <span className="text-[10px] text-slate-400 font-medium">Limite: {cupom.limiteUsos ? cupom.limiteUsos : 'Ilimitado'}</span>
+                                                        <span className="text-[10px] text-slate-400 font-medium">Limite: {cupom.limiteUsos ?? 'Ilimitado'}</span>
                                                     </div>
                                                 </td>
                                                 <td className="px-6 py-4">{statusBadge}</td>

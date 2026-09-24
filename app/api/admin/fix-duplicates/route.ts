@@ -1,17 +1,17 @@
+import { withApiGuard } from '@/app/utils/api-route';
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
-import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
+import { prisma } from '@/app/utils/prisma';
+import { authorizeMaintenance } from '@/app/utils/maintenance-security';
+import { createLog } from '@/app/services/logger';
 
-const prisma = new PrismaClient();
-
-export async function GET(request: Request) {
-  const user = await getAuthenticatedUser(request);
-  if (!user) return unauthorized();
-  if (!['MASTER', 'ADMIN'].includes(user.role)) return forbidden();
+export const POST = withApiGuard(async function POST(request: Request) {
+  const { actor, body, error } = await authorizeMaintenance(request, 'FIX_DUPLICATE_CNAES', 'REMOVER CNAES DUPLICADOS');
+  if (error) return error;
+  if (!actor || !body) return NextResponse.json({ error: 'Nao autorizado.' }, { status: 401 });
 
   try {
     // 1. Pega todos os CNAEs do sistema
-    const allCnaes = await prisma.cnae.findMany();
+    const allCnaes = await prisma.cnae.findMany({ orderBy: [{ principal: 'desc' }, { id: 'asc' }] });
     
     const vistos = new Set();
     const paraDeletar = [];
@@ -30,7 +30,8 @@ export async function GET(request: Request) {
     }
 
     // 3. Deleta as duplicatas
-    if (paraDeletar.length > 0) {
+    const dryRun = body.dryRun !== false;
+    if (!dryRun && paraDeletar.length > 0) {
       await prisma.cnae.deleteMany({
         where: {
           id: { in: paraDeletar }
@@ -38,13 +39,21 @@ export async function GET(request: Request) {
       });
     }
 
+    await createLog({
+      level: 'ALERTA', action: 'DUPLICATE_CNAES_MAINTENANCE', module: 'SEGURANCA', userId: actor.id,
+      message: dryRun ? 'Simulacao de deduplicacao de CNAEs.' : 'CNAEs duplicados removidos.',
+      details: { dryRun, count: paraDeletar.length, justification: body.justification },
+    });
+
     return NextResponse.json({
-      message: "Limpeza concluída",
+      message: dryRun ? 'Simulacao concluida; nenhum registro alterado.' : 'Limpeza concluida',
+      dryRun,
       totalAnalisado: allCnaes.length,
-      duplicatasRemovidas: paraDeletar.length
+      duplicatasEncontradas: paraDeletar.length,
+      duplicatasRemovidas: dryRun ? 0 : paraDeletar.length
     });
 
   } catch (error) {
     return NextResponse.json({ error: 'Erro ao limpar' }, { status: 500 });
   }
-}
+});

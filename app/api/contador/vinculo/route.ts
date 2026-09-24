@@ -1,18 +1,23 @@
+import { withApiGuard } from '@/app/utils/api-route';
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '@/app/utils/prisma';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 import { upsertEmpresaAndLinkUser } from '@/app/services/empresaService';
 import { stripEmpresaSecrets } from '@/app/utils/safe-data';
-import { createLog } from '@/app/services/logger';
+import { decideAccountantLink } from '@/app/services/accountantLinkService';
+import { requireAdminReauthentication } from '@/app/utils/admin-security';
+import { CommercialError } from '@/app/utils/commercial-pricing';
+import { normalizeCnpj } from '@/app/utils/cnpj';
+import { currentFiscalMonth, reportPeriod } from '@/app/utils/fiscal-report';
+import { noteEnvironmentWhere } from '@/app/services/fiscalReportService';
 
-const prisma = new PrismaClient();
 const PENDING_LINK_STATUSES = ['PENDENTE', 'PENDENTE_DONO', 'PENDENTE_CUSTODIANTE'];
 
 // GET
-export async function GET(request: Request) {
+export const GET = withApiGuard(async function GET(request: Request) {
   const user = await getAuthenticatedUser(request);
   if (!user) return unauthorized();
-  
+
   const { searchParams } = new URL(request.url);
   const mode = searchParams.get('mode');
 
@@ -25,31 +30,37 @@ export async function GET(request: Request) {
             orderBy: { updatedAt: 'desc' }
         });
 
-        const inicioMes = new Date();
-        inicioMes.setDate(1);
-        inicioMes.setHours(0, 0, 0, 0);
+        const month = currentFiscalMonth();
+        const { startsAt: inicioMes, endsAt: fimPeriodo } = reportPeriod(month.startDate, month.endDate);
 
         const vinculosComResumo = await Promise.all(vinculos.map(async (vinculo) => {
-            const [notasMes, ultimaNota, clientesCarteira] = await Promise.all([
+            if (vinculo.status !== 'APROVADO') return {
+                id: vinculo.id, status: vinculo.status, empresaId: vinculo.empresaId, createdAt: vinculo.createdAt, updatedAt: vinculo.updatedAt,
+                empresa: { id: vinculo.empresa.id, documento: vinculo.empresa.documento, razaoSocial: vinculo.empresa.razaoSocial }, resumo: null,
+            };
+            const [notasMes, ultimaNota, clientesCarteira, notasSemAmbiente, notasHomologacao] = await Promise.all([
                 prisma.notaFiscal.count({
                     where: {
                         empresaId: vinculo.empresaId,
                         status: 'AUTORIZADA',
+                        ambiente: 'PRODUCAO',
                         arquivadoEm: null,
                         OR: [
-                            { dataEmissao: { gte: inicioMes } },
-                            { dataEmissao: null, createdAt: { gte: inicioMes } }
+                            { dataEmissao: { gte: inicioMes, lt: fimPeriodo } },
+                            { dataEmissao: null, createdAt: { gte: inicioMes, lt: fimPeriodo } }
                         ]
                     } as any
                 }),
                 prisma.notaFiscal.findFirst({
-                    where: { empresaId: vinculo.empresaId, status: 'AUTORIZADA', arquivadoEm: null } as any,
+                    where: { empresaId: vinculo.empresaId, status: 'AUTORIZADA', ambiente: 'PRODUCAO', arquivadoEm: null } as any,
                     orderBy: [{ dataEmissao: 'desc' }, { createdAt: 'desc' }],
                     select: { dataEmissao: true, createdAt: true, valor: true }
                 }),
                 prisma.vinculoCarteira.count({
                     where: { empresaId: vinculo.empresaId, arquivadoEm: null } as any
-                })
+                }),
+                prisma.notaFiscal.count({ where: { empresaId: vinculo.empresaId, arquivadoEm: null, AND: [noteEnvironmentWhere('LEGADO')] } }),
+                prisma.notaFiscal.count({ where: { empresaId: vinculo.empresaId, arquivadoEm: null, ambiente: 'HOMOLOGACAO' } }),
             ]);
 
             return {
@@ -57,6 +68,7 @@ export async function GET(request: Request) {
                 empresa: stripEmpresaSecrets(vinculo.empresa),
                 resumo: {
                     notasMes,
+                    ambiente: 'PRODUCAO', notasSemAmbiente, notasHomologacao,
                     clientesCarteira,
                     ultimaEmissao: ultimaNota?.dataEmissao || ultimaNota?.createdAt || null,
                     valorUltimaNota: ultimaNota?.valor || null
@@ -70,22 +82,7 @@ export async function GET(request: Request) {
         if (!['CONTADOR', 'MASTER', 'ADMIN'].includes(user.role)) return forbidden();
 
         const empresasCustodiadas = await prisma.empresa.findMany({
-            where: {
-                OR: [
-                    { contadorCustodianteId: user.id },
-                    {
-                        contadoresLink: {
-                            some: {
-                                contadorId: user.id,
-                                status: 'APROVADO',
-                                arquivadoEm: null,
-                            } as any,
-                        },
-                    },
-                ],
-                arquivadoEm: null,
-            } as any,
-            select: { id: true },
+          where: { contadorCustodianteId: user.id, arquivadoEm: null }, select: { id: true },
         });
         const empresaIds = empresasCustodiadas.map((empresa) => empresa.id);
 
@@ -125,34 +122,28 @@ export async function GET(request: Request) {
         if (empresaIds.length === 0) return NextResponse.json([]);
 
         const solicitacoes = await prisma.contadorVinculo.findMany({
-            where: { empresaId: { in: empresaIds }, status: { in: ['PENDENTE', 'PENDENTE_DONO'] }, arquivadoEm: null } as any,
+            where: { empresaId: { in: empresaIds }, status: { in: ['PENDENTE', 'PENDENTE_DONO', 'APROVADO'] }, arquivadoEm: null } as any,
             include: { contador: { select: { nome: true, email: true } } }
         });
         return NextResponse.json(solicitacoes);
     }
     return NextResponse.json([]);
   } catch (e) { return NextResponse.json({ error: 'Erro ao buscar dados.' }, { status: 500 }); }
-}
+});
 
 // POST
-export async function POST(request: Request) {
+export const POST = withApiGuard(async function POST(request: Request) {
   const user = await getAuthenticatedUser(request);
   if (!user) return unauthorized();
   
-  if (user.role !== 'CONTADOR' && !['MASTER','ADMIN'].includes(user.role)) {
+  if (user.role !== 'CONTADOR') {
       return NextResponse.json({ error: 'Apenas contadores.' }, { status: 403 });
   }
 
   try {
     const { cnpj } = await request.json();
     if (!cnpj) return NextResponse.json({ error: 'CNPJ obrigatório.' }, { status: 400 });
-    const cnpjLimpo = cnpj.replace(/\D/g, '');
-
-    const dadosContador = await prisma.user.findUnique({ where: { id: user.id }, include: { empresasContabeis: true } });
-    if (dadosContador) {
-        const limite = dadosContador.limiteEmpresas || 100;
-        if (dadosContador.empresasContabeis.length >= limite) return NextResponse.json({ error: `Limite atingido.` }, { status: 403 });
-    }
+    const cnpjLimpo = normalizeCnpj(cnpj);
 
     // Chama Service
     const resultado: any = await upsertEmpresaAndLinkUser(cnpjLimpo, user.id, null, 'CONTADOR');
@@ -173,204 +164,50 @@ export async function POST(request: Request) {
     });
 
   } catch (e: any) { 
-      console.error("[CONTADOR] Erro:", e);
-      if (e.message && (e.message.includes("Empresa") && e.message.toLowerCase().includes("vinculada"))) {
-          return NextResponse.json({ error: "Esta empresa já está na sua lista (ou aguardando aprovação)." }, { status: 409 });
-      }
-      return NextResponse.json({ error: 'Erro: ' + e.message }, { status: 500 }); 
+      if (e instanceof CommercialError) return NextResponse.json({ error: e.message }, { status: e.status });
+      throw e;
   }
-}
+});
 
 // PUT
-export async function PUT(request: Request) {
-    const user = await getAuthenticatedUser(request);
-    if (!user) return unauthorized();
-    try {
-        const { vinculoId, acao } = await request.json();
-        const vinculo = await prisma.contadorVinculo.findUnique({
-            where: { id: vinculoId },
-            include: {
-                empresa: {
-                    select: {
-                        id: true,
-                        contadorCustodianteId: true,
-                        donoFaturamentoId: true,
-                        proprietarioUserId: true,
-                    } as any,
-                },
-            },
-        });
-        if (!vinculo) return forbidden();
+export const PUT = withApiGuard(async function PUT(request: Request) {
+  const user = await getAuthenticatedUser(request);
+  if (!user) return unauthorized();
 
-        const isCustodiaTransferencia = vinculo.status === 'PENDENTE_CUSTODIANTE';
-        if (isCustodiaTransferencia) {
-            const empresa = (vinculo as any).empresa;
-            const isCustodianteDireto = empresa?.contadorCustodianteId === user.id;
-            const vinculoAprovadoDoUsuario = await prisma.contadorVinculo.findFirst({
-                where: {
-                    empresaId: vinculo.empresaId,
-                    contadorId: user.id,
-                    status: 'APROVADO',
-                    arquivadoEm: null,
-                } as any,
-                select: { id: true },
-            });
-            if (!isCustodianteDireto && !vinculoAprovadoDoUsuario && !['MASTER', 'ADMIN'].includes(user.role)) return forbidden();
+  const body = await request.json();
+  const customerMode = request.headers.get('x-portal-mode') === 'customer';
+  const admin = ['MASTER', 'ADMIN'].includes(user.role) && !customerMode;
+  if (admin) {
+    const denied = await requireAdminReauthentication({ actorId: user.id, password: body.adminPassword,
+      justification: body.justification, action: 'ACCOUNTANT_LINK_DECISION' });
+    if (denied) return denied;
+  }
+  try {
+    return NextResponse.json(await decideAccountantLink({ actorId: user.id, linkId: body.vinculoId,
+      action: body.acao === 'NEGAR' ? 'REJEITAR' : body.acao, adminReauthenticated: admin,
+      customerMode, justification: admin ? body.justification : undefined }));
+  } catch (error) {
+    if (error instanceof CommercialError) return NextResponse.json({ error: error.message }, { status: error.status });
+    throw error;
+  }
+}, { maxBodyBytes: 16 * 1024 });
 
-            if (acao === 'REJEITAR') {
-                await prisma.contadorVinculo.update({
-                    where: { id: vinculoId },
-                    data: { status: 'REJEITADO', arquivadoEm: new Date(), arquivadoPor: user.id, motivoArquivamento: 'Solicitacao rejeitada pelo contador custodiante.' } as any
-                });
-                await createLog({
-                    level: 'INFO',
-                    action: 'VINCULO_CUSTODIA_REJEITADO',
-                    message: 'Solicitacao de vinculo rejeitada pelo contador custodiante.',
-                    empresaId: vinculo.empresaId,
-                    userId: user.id,
-                    module: 'VINCULOS',
-                    details: { vinculoId, contadorSolicitanteId: vinculo.contadorId },
-                });
-                return NextResponse.json({ success: true, message: 'Solicitacao recusada.' });
-            }
-
-            if (acao === 'LIBERAR_ACESSO') {
-                await prisma.contadorVinculo.update({
-                    where: { id: vinculoId },
-                    data: {
-                        status: 'APROVADO',
-                        arquivadoEm: null,
-                        arquivadoPor: null,
-                        motivoArquivamento: null,
-                    } as any,
-                });
-                await createLog({
-                    level: 'INFO',
-                    action: 'VINCULO_ACESSO_LIBERADO_CUSTODIANTE',
-                    message: 'Acesso contabil liberado sem transferir custodia.',
-                    empresaId: vinculo.empresaId,
-                    userId: user.id,
-                    module: 'VINCULOS',
-                    details: { vinculoId, contadorSolicitanteId: vinculo.contadorId },
-                });
-                return NextResponse.json({ success: true, message: 'Acesso concedido. A custodia principal foi mantida.' });
-            }
-
-            const custodianteAnteriorId = empresa?.contadorCustodianteId || user.id;
-            const trocarCobranca = !empresa?.donoFaturamentoId || empresa.donoFaturamentoId === custodianteAnteriorId;
-
-            await prisma.$transaction([
-                prisma.contadorVinculo.updateMany({
-                    where: {
-                        empresaId: vinculo.empresaId,
-                        contadorId: { not: vinculo.contadorId },
-                        status: 'APROVADO',
-                        arquivadoEm: null,
-                    } as any,
-                    data: {
-                        status: 'DESVINCULADO',
-                        arquivadoEm: new Date(),
-                        arquivadoPor: user.id,
-                        motivoArquivamento: 'Custodia transferida pelo contador atual.',
-                    } as any,
-                }),
-                prisma.contadorVinculo.update({
-                    where: { id: vinculoId },
-                    data: { status: 'APROVADO', arquivadoEm: null, arquivadoPor: null, motivoArquivamento: null } as any,
-                }),
-                prisma.empresa.update({
-                    where: { id: vinculo.empresaId },
-                    data: {
-                        contadorCustodianteId: vinculo.contadorId,
-                        statusPropriedade: 'CUSTODIADA',
-                        ...(trocarCobranca ? { donoFaturamentoId: vinculo.contadorId } : {}),
-                    } as any,
-                }),
-            ]);
-
-            await createLog({
-                level: 'INFO',
-                action: 'VINCULO_CUSTODIA_TRANSFERIDA',
-                message: 'Custodia contabil transferida pelo contador atual.',
-                empresaId: vinculo.empresaId,
-                userId: user.id,
-                module: 'VINCULOS',
-                details: {
-                    vinculoId,
-                    contadorSolicitanteId: vinculo.contadorId,
-                    custodianteAnteriorId,
-                    cobrancaTransferida: trocarCobranca,
-                },
-            });
-
-            return NextResponse.json({ success: true, message: 'Vinculo liberado e custodia transferida.' });
-        }
-
-        const empresa = (vinculo as any).empresa;
-        const podeResolverComoDono =
-            empresa?.proprietarioUserId === user.id ||
-            vinculo.empresaId === user.empresaId ||
-            ['MASTER', 'ADMIN'].includes(user.role);
-
-        if (!vinculo || !podeResolverComoDono) return forbidden();
-        
-        if (acao === 'REJEITAR') {
-            await prisma.contadorVinculo.update({
-                where: { id: vinculoId },
-                data: { status: 'REJEITADO', arquivadoEm: new Date(), arquivadoPor: user.id, motivoArquivamento: 'Solicitacao rejeitada pelo cliente.' } as any
-            });
-            await createLog({
-                level: 'INFO',
-                action: 'VINCULO_DONO_REJEITADO',
-                message: 'Solicitacao de contador rejeitada pelo proprietario.',
-                empresaId: vinculo.empresaId,
-                userId: user.id,
-                module: 'VINCULOS',
-                details: { vinculoId, contadorSolicitanteId: vinculo.contadorId },
-            });
-            return NextResponse.json({ success: true, message: 'Recusado.' });
-        }
-        await prisma.contadorVinculo.update({
-            where: { id: vinculoId },
-            data: { status: 'APROVADO', arquivadoEm: null, arquivadoPor: null, motivoArquivamento: null } as any,
-        });
-        await createLog({
-            level: 'INFO',
-            action: 'VINCULO_DONO_APROVADO',
-            message: 'Solicitacao de contador aprovada pelo proprietario.',
-            empresaId: vinculo.empresaId,
-            userId: user.id,
-            module: 'VINCULOS',
-            details: { vinculoId, contadorSolicitanteId: vinculo.contadorId },
-        });
-        return NextResponse.json({ success: true, message: 'Aprovado!' });
-    } catch (e) { return NextResponse.json({ error: 'Erro interno.' }, { status: 500 }); }
-}
-
-// DELETE
-export async function DELETE(request: Request) {
-    const user = await getAuthenticatedUser(request);
-    if (!user) return unauthorized();
-    try {
-        const { searchParams } = new URL(request.url);
-        const id = searchParams.get('id');
-        if (!id) return NextResponse.json({ error: 'ID necessário' }, { status: 400 });
-        const vinculo = await prisma.contadorVinculo.findUnique({ where: { id } });
-        if (!vinculo) return NextResponse.json({ error: 'Vínculo não encontrado' }, { status: 404 });
-        if (vinculo.contadorId !== user.id && !['MASTER', 'ADMIN'].includes(user.role)) return forbidden();
-        await prisma.contadorVinculo.update({
-            where: { id },
-            data: { status: 'DESVINCULADO', arquivadoEm: new Date(), arquivadoPor: user.id, motivoArquivamento: 'Desvinculo solicitado pelo usuario.' } as any
-        });
-        await createLog({
-            level: 'INFO',
-            action: 'VINCULO_CONTADOR_DESVINCULADO',
-            message: 'Vinculo contabil desvinculado pelo usuario.',
-            empresaId: vinculo.empresaId,
-            userId: user.id,
-            module: 'VINCULOS',
-            details: { vinculoId: id, contadorId: vinculo.contadorId },
-        });
-        return NextResponse.json({ success: true });
-    } catch (e) { return NextResponse.json({ error: 'Erro ao desvincular.' }, { status: 500 }); }
-}
+export const DELETE = withApiGuard(async function DELETE(request: Request) {
+  const user = await getAuthenticatedUser(request);
+  if (!user) return unauthorized();
+  const customerMode = request.headers.get('x-portal-mode') === 'customer';
+  const admin = ['MASTER', 'ADMIN'].includes(user.role) && !customerMode;
+  const body = admin ? await request.json() : {};
+  if (admin) {
+    const denied = await requireAdminReauthentication({ actorId: user.id, password: body.adminPassword,
+      justification: body.justification, action: 'ACCOUNTANT_LINK_REVOKE' });
+    if (denied) return denied;
+  }
+  try {
+    return NextResponse.json(await decideAccountantLink({ actorId: user.id, linkId: new URL(request.url).searchParams.get('id'),
+      action: 'REVOGAR', adminReauthenticated: admin, customerMode, justification: admin ? body.justification : undefined }));
+  } catch (error) {
+    if (error instanceof CommercialError) return NextResponse.json({ error: error.message }, { status: error.status });
+    throw error;
+  }
+}, { maxBodyBytes: 16 * 1024 });

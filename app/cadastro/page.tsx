@@ -1,9 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import Image from 'next/image';
 import { validarCPF } from '@/app/utils/cpf';
+import { privacyVersion, termsVersion } from '@/app/legal-content';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -43,6 +45,16 @@ export default function Cadastro() {
   const [showSenha, setShowSenha] = useState(false);
   const [showConfirmSenha, setShowConfirmSenha] = useState(false);
   const [acceptedPolicies, setAcceptedPolicies] = useState(false);
+  const [registrationOpen, setRegistrationOpen] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetch('/api/system/status', { cache: 'no-store' })
+      .then(async response => response.ok ? response.json() : Promise.reject(new Error('STATUS_UNAVAILABLE')))
+      .then(status => { if (active) setRegistrationOpen(status.publicRegistration?.open !== false); })
+      .catch(() => { if (active) setRegistrationOpen(true); });
+    return () => { active = false; };
+  }, []);
 
   const inputBase = 'w-full rounded-2xl border bg-white px-4 py-3.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:ring-4';
   const inputDefault = 'border-slate-200 focus:border-blue-500 focus:ring-blue-100';
@@ -53,9 +65,10 @@ export default function Cadastro() {
     let error = '';
 
     if (name === 'nome') {
-      const regexNome = /^[a-zA-ZÀ-ÿ\s^~]+$/;
-      if (value.length > 0 && value.trim().length < 15) error = 'Mínimo 15 caracteres.';
-      else if (value.length > 0 && !regexNome.test(value)) error = 'Apenas letras e acentos permitidos.';
+      const normalized = value.trim().replace(/\s+/g, ' ');
+      const regexNome = /^[\p{L}\p{M}][\p{L}\p{M} .'-]*[\p{L}\p{M}]$/u;
+      if (value.length > 0 && normalized.length < 2) error = 'Informe seu nome.';
+      else if (value.length > 0 && !regexNome.test(normalized)) error = 'Use letras, espaços, apóstrofo ou hífen.';
     }
 
     if (name === 'senha') {
@@ -124,7 +137,9 @@ export default function Cadastro() {
       });
       const data = await res.json();
       if (data.errors?.cpf) setErrors((prev: any) => ({ ...prev, cpf: data.errors.cpf }));
-    } catch (e) {}
+    } catch {
+      // A validacao definitiva ocorre no envio; indisponibilidade nao bloqueia a digitacao.
+    }
   };
 
   const checkEmailExist = async () => {
@@ -139,15 +154,17 @@ export default function Cadastro() {
       });
       const data = await res.json();
       if (data.errors?.email) setErrors((prev: any) => ({ ...prev, email: data.errors.email }));
-    } catch (e) {}
+    } catch {
+      // A validacao definitiva ocorre no envio; indisponibilidade nao bloqueia a digitacao.
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (errors.nome || errors.email || errors.senha || errors.cpf || errors.confirmEmail || errors.confirmSenha) return;
-    if (form.nome.length < 15) {
-      setErrors((p: any) => ({ ...p, nome: 'Mínimo 15 caracteres.' }));
+    if (form.nome.trim().length < 2) {
+      setErrors((p: any) => ({ ...p, nome: 'Informe seu nome.' }));
       return;
     }
 
@@ -173,7 +190,9 @@ export default function Cadastro() {
       const res = await fetch('/api/auth/cadastro', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(dadosParaEnviar),
+        body: JSON.stringify({ ...dadosParaEnviar, legalAcceptance: {
+          accepted: true, termsVersion, privacyVersion,
+        } }),
       });
 
       const data = await res.json();
@@ -238,7 +257,7 @@ export default function Cadastro() {
 
           <div className="relative z-10">
             <Link href="/login" className="inline-flex items-center gap-3">
-              <img src="/icons/G.png" alt="NFSe Goo" className="h-11 w-11 rounded-2xl bg-white p-1.5 shadow-lg" />
+              <Image src="/icons/G.png" alt="NFSe Goo" width={44} height={44} className="h-11 w-11 rounded-2xl bg-white p-1.5 shadow-lg" />
               <div>
                 <p className="text-lg font-black leading-none">NFSe Goo</p>
                 <p className="mt-1 text-xs font-semibold uppercase tracking-[0.24em] text-blue-200">Emissão simples</p>
@@ -289,7 +308,7 @@ export default function Cadastro() {
           <div className="w-full max-w-3xl">
             <div className="mb-7 flex items-center justify-between gap-4 lg:hidden">
               <Link href="/login" className="inline-flex items-center gap-3">
-                <img src="/icons/G.png" alt="NFSe Goo" className="h-10 w-10 rounded-2xl bg-white p-1.5 shadow-sm" />
+                <Image src="/icons/G.png" alt="NFSe Goo" width={40} height={40} className="h-10 w-10 rounded-2xl bg-white p-1.5 shadow-sm" />
                 <span className="font-black">NFSe Goo</span>
               </Link>
               <Link href="/login" className="text-sm font-bold text-blue-700 hover:text-blue-800">
@@ -340,6 +359,11 @@ export default function Cadastro() {
               </div>
 
               <div className="p-5 sm:p-8">
+                {registrationOpen === false && step === 1 && (
+                  <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold leading-6 text-amber-900">
+                    Estamos em um piloto acompanhado e não estamos abrindo novas contas neste momento. Se você já possui cadastro, use a opção Entrar.
+                  </div>
+                )}
                 {serverError && (
                   <div className="mb-6 flex items-center gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">
                     <AlertTriangle size={16} /> {serverError}
@@ -356,6 +380,8 @@ export default function Cadastro() {
                           <input
                             type="text"
                             name="nome"
+                            autoComplete="name"
+                            maxLength={160}
                             required
                             className={`${inputBase} pl-12 ${errors.nome ? inputError : inputDefault}`}
                             placeholder="Seu nome completo"
@@ -373,6 +399,7 @@ export default function Cadastro() {
                           <input
                             type="text"
                             name="cpf"
+                            autoComplete="off"
                             required
                             className={`${inputBase} pl-12 ${errors.cpf ? inputError : inputDefault}`}
                             placeholder="000.000.000-00"
@@ -391,6 +418,8 @@ export default function Cadastro() {
                           <input
                             type="email"
                             name="email"
+                            autoComplete="email"
+                            maxLength={254}
                             required
                             className={`${inputBase} pl-12 ${errors.email ? inputError : inputDefault}`}
                             placeholder="seu@email.com"
@@ -409,6 +438,8 @@ export default function Cadastro() {
                           <input
                             type="email"
                             name="confirmEmail"
+                            autoComplete="email"
+                            maxLength={254}
                             required
                             className={`${inputBase} pl-12 ${errors.confirmEmail ? inputError : inputDefault}`}
                             placeholder="Repita seu e-mail"
@@ -426,6 +457,8 @@ export default function Cadastro() {
                           <input
                             type={showSenha ? 'text' : 'password'}
                             name="senha"
+                            autoComplete="new-password"
+                            maxLength={72}
                             required
                             className={`${inputBase} pl-12 pr-12 ${errors.senha ? inputError : inputDefault}`}
                             placeholder="••••••••"
@@ -452,6 +485,8 @@ export default function Cadastro() {
                           <input
                             type={showConfirmSenha ? 'text' : 'password'}
                             name="confirmSenha"
+                            autoComplete="new-password"
+                            maxLength={72}
                             required
                             className={`${inputBase} pl-12 pr-12 ${errors.confirmSenha ? inputError : inputDefault}`}
                             placeholder="Repita sua senha"
@@ -495,7 +530,7 @@ export default function Cadastro() {
                     </label>
 
                     <button
-                      disabled={loading || !acceptedPolicies}
+                      disabled={loading || !acceptedPolicies || registrationOpen !== true}
                       className="flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-4 text-sm font-black text-white shadow-xl shadow-blue-600/20 transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
                     >
                       {loading ? <Loader2 className="animate-spin" /> : 'Continuar'} <ArrowRight size={20} />

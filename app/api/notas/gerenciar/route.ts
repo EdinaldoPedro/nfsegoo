@@ -1,294 +1,38 @@
 import { NextResponse } from 'next/server';
-import { createLog } from '@/app/services/logger';
-import { EmissorFactory } from '@/app/services/emissor/factories/EmissorFactory';
-import { processarCancelamentoNota } from '@/app/services/notaProcessor';
-import { checkPlanLimits } from '@/app/services/planService';
-import { notifyFiscalEvent } from '@/app/services/notificationService';
+import { withApiGuard } from '@/app/utils/api-route';
 import { validateRequest } from '@/app/utils/api-security';
-import { hasEmpresaAccess } from '@/app/utils/access-control';
+import { hasCustomerCompanyAccess } from '@/app/utils/access-control';
 import { prisma } from '@/app/utils/prisma';
+import { enqueueFiscalNoteOperation, fiscalError } from '@/app/services/fiscalNoteService';
+import { archiveSale } from '@/app/services/saleArchiveService';
+import { checkRateLimit } from '@/app/utils/rate-limit';
 
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function erroTransitavel(motivo?: string | null) {
-  const texto = (motivo || '').toLowerCase();
-  return [
-    '503',
-    '502',
-    '504',
-    'service unavailable',
-    'bad gateway',
-    'gateway timeout',
-    'econnreset',
-    'timeout',
-    'timed out',
-    'socket',
-    'network',
-  ].some((sinal) => texto.includes(sinal));
-}
-
-function temEventoCancelamentoLocal(nota: any) {
-  return Boolean(nota?.xmlCancelamentoEventoBase64) || nota?.status === 'CANCELADA';
-}
-
-async function executarComRetry<T extends { sucesso: boolean; motivo?: string }>(
-  fn: () => Promise<T>,
-  attempts = 5,
-) {
-  let ultimaResposta: T | null = null;
-
-  for (let tentativa = 1; tentativa <= attempts; tentativa += 1) {
-    try {
-      const resposta = await fn();
-      ultimaResposta = resposta;
-      if (resposta.sucesso || !erroTransitavel(resposta.motivo)) {
-        return { resposta, tentativas: tentativa };
-      }
-    } catch (error: any) {
-      ultimaResposta = { sucesso: false, motivo: error.message || 'Erro temporario no Portal.' } as T;
-      if (!erroTransitavel(ultimaResposta.motivo)) {
-        return { resposta: ultimaResposta, tentativas: tentativa };
-      }
-    }
-
-    if (tentativa < attempts) {
-      await sleep(2000 + tentativa * 1500);
-    }
-  }
-
-  return { resposta: ultimaResposta as T, tentativas: attempts };
-}
-
-export async function POST(request: Request) {
+export const POST = withApiGuard(async function POST(request: Request) {
+  const { user, errorResponse } = await validateRequest(request);
+  if (errorResponse) return errorResponse;
+  if (!user) return NextResponse.json({ error: 'Autenticação necessária.' }, { status: 401 });
+  const body = await request.json();
+  if (typeof body.vendaId !== 'string' || body.vendaId.length > 100) return NextResponse.json({ error: 'Venda inválida.' }, { status: 400 });
   try {
-    const { user, targetId, errorResponse } = await validateRequest(request);
-    if (errorResponse) return errorResponse;
-    const userId = targetId;
-    if (!userId || !user) return NextResponse.json({ error: 'Auth required' }, { status: 401 });
-
-    const { acao, vendaId, motivo } = await request.json();
-
-    if (acao === 'CANCELAR') {
-      const planCheck = await checkPlanLimits(userId, 'EMITIR');
-      if (!planCheck.allowed) {
-        return NextResponse.json(
-          {
-            error: `AÃ§Ã£o bloqueada: ${planCheck.reason}`,
-            code: planCheck.status,
-          },
-          { status: 403 },
-        );
-      }
+    const sale = await prisma.venda.findUnique({ where: { id: body.vendaId }, select: { id: true, empresaId: true } });
+    if (!sale || !await hasCustomerCompanyAccess(user, sale.empresaId)) fiscalError('Venda não disponível.', 403);
+    if (body.acao === 'CANCELAR') {
+      if (!await checkRateLimit('cancel_note_' + user.id, 10, 60_000)) return NextResponse.json({ error: 'Aguarde antes de enviar novas solicitações.' }, { status: 429 });
+      const notes = await prisma.notaFiscal.findMany({ where: { vendaId: sale.id, empresaId: sale.empresaId, chaveAcesso: { not: null }, arquivadoEm: null }, select: { id: true }, take: 2 });
+      if (notes.length !== 1) fiscalError('A venda precisa ter uma única nota identificada para esta operação.');
+      const operation = await enqueueFiscalNoteOperation({ actorId: user.id, notaId: notes[0].id, tipo: 'CANCELAR',
+        idempotencyKey: body.idempotencyKey, reasonCode: body.reasonCode, justification: body.justification });
+      return NextResponse.json({ accepted: true, operation, message: 'Solicitação registrada. O cancelamento ainda depende de confirmação fiscal.' }, { status: 202 });
     }
-
-    const venda = await prisma.venda.findUnique({
-      where: { id: vendaId },
-      include: { notas: true, empresa: true },
-    });
-
-    if (!venda) return NextResponse.json({ error: 'Venda nÃ£o encontrada' }, { status: 404 });
-
-    const hasAccess = await hasEmpresaAccess(user, venda.empresaId);
-    if (!hasAccess) return NextResponse.json({ error: 'Acesso proibido' }, { status: 403 });
-
-    if (acao === 'EXCLUIR_VENDA') {
-      const notaValida = venda.notas.find((nota) =>
-        ['AUTORIZADA', 'CANCELADA'].includes(nota.status) || Boolean(nota.chaveAcesso),
-      );
-
-      if (notaValida) {
-        return NextResponse.json(
-          { error: 'Esta venda possui uma nota fiscal válida e não pode ser excluída. Use o cancelamento fiscal quando aplicável.' },
-          { status: 409 },
-        );
-      }
-
-      const agora = new Date();
-      await prisma.$transaction([
-        prisma.notaFiscal.updateMany({
-          where: { vendaId: venda.id },
-          data: {
-            arquivadoEm: agora,
-            arquivadoPor: userId,
-            motivoArquivamento: 'Venda sem nota válida excluída pelo usuário.',
-          } as any,
-        }),
-        prisma.venda.update({
-          where: { id: venda.id },
-          data: {
-            status: 'DESCARTADA',
-            arquivadoEm: agora,
-            arquivadoPor: userId,
-            motivoArquivamento: 'Venda sem nota válida excluída pelo usuário.',
-          } as any,
-        }),
-      ]);
-
-      await createLog({
-        level: 'INFO',
-        action: 'VENDA_EXCLUIDA_USUARIO',
-        message: 'Venda sem nota fiscal válida removida do histórico pelo usuário.',
-        empresaId: venda.empresaId,
-        vendaId: venda.id,
-        userId,
-      });
-
-      return NextResponse.json({ success: true, message: 'Venda excluída do histórico.' });
+    if (body.acao === 'EXCLUIR_VENDA') {
+      await archiveSale(user.id, sale.id);
+      return NextResponse.json({ success: true, message: 'Venda arquivada no histórico.' });
     }
-
-    if (acao === 'CANCELAR') {
-      const notaAtiva = venda.notas.find((n) => n.status === 'AUTORIZADA' || n.status === 'CANCELADA');
-
-      if (!notaAtiva || !notaAtiva.chaveAcesso) {
-        return NextResponse.json({ error: 'NÃ£o hÃ¡ nota autorizada vÃ¡lida para processar.' }, { status: 400 });
-      }
-
-      if (temEventoCancelamentoLocal(notaAtiva)) {
-        await prisma.notaFiscal.update({
-          where: { id: notaAtiva.id },
-          data: { status: 'CANCELADA' },
-        });
-        await prisma.venda.update({ where: { id: vendaId }, data: { status: 'CANCELADA' } });
-        if (!notaAtiva.pdfBase64) {
-          await processarCancelamentoNota(notaAtiva.id, venda.empresaId, venda.id);
-        }
-        await notifyFiscalEvent({
-          type: 'NOTA_CANCELADA',
-          vendaId: venda.id,
-          notaId: notaAtiva.id,
-          actorUserId: userId,
-          title: 'Nota cancelada',
-          message: 'A NFS-e ja constava como cancelada e o SaaS sincronizou o status.',
-          priority: 'NORMAL',
-          eventKeySuffix: `cancelada-local-${notaAtiva.id}`,
-          payload: { notaId: notaAtiva.id, chaveAcesso: notaAtiva.chaveAcesso },
-        });
-        return NextResponse.json({ success: true, message: 'Nota ja estava cancelada. Status sincronizado.' });
-      }
-
-      const chaveAcesso = notaAtiva.chaveAcesso;
-      const strategy = EmissorFactory.getStrategy(venda.empresa);
-      let protocoloParaCancelar = notaAtiva.protocolo;
-
-      const { resposta: consulta, tentativas: tentativasConsulta } = await executarComRetry(
-        () => strategy.consultar(chaveAcesso, venda.empresa),
-        5,
-      );
-
-      if (consulta.sucesso && consulta.protocolo && !protocoloParaCancelar) {
-        protocoloParaCancelar = consulta.protocolo;
-        await prisma.notaFiscal.update({
-          where: { id: notaAtiva.id },
-          data: { protocolo: protocoloParaCancelar },
-        });
-      }
-
-      if (consulta.sucesso && consulta.situacao === 'CANCELADA') {
-        const notaAtivaComXml = notaAtiva as any;
-        await prisma.notaFiscal.update({
-          where: { id: notaAtiva.id },
-          data: {
-            status: 'CANCELADA',
-            xmlAutorizadoBase64: notaAtivaComXml.xmlAutorizadoBase64 || notaAtiva.xmlBase64,
-            pdfBase64: null,
-          } as any,
-        });
-        await prisma.venda.update({ where: { id: vendaId }, data: { status: 'CANCELADA' } });
-        await processarCancelamentoNota(notaAtiva.id, venda.empresaId, venda.id);
-        await notifyFiscalEvent({
-          type: 'NOTA_CANCELADA',
-          vendaId: venda.id,
-          notaId: notaAtiva.id,
-          actorUserId: userId,
-          title: 'Nota cancelada',
-          message: 'A NFS-e foi identificada como cancelada no Portal Nacional.',
-          priority: 'NORMAL',
-          eventKeySuffix: `cancelada-portal-${notaAtiva.id}`,
-          payload: { notaId: notaAtiva.id, chaveAcesso: notaAtiva.chaveAcesso },
-        });
-        return NextResponse.json({ success: true, message: 'Nota sincronizada! Status atualizado para Cancelada.' });
-      }
-
-      if (!protocoloParaCancelar) {
-        return NextResponse.json(
-          { error: 'Erro: Protocolo nÃ£o encontrado e status nÃ£o Ã© cancelado.' },
-          { status: 400 },
-        );
-      }
-
-      const justificativa = motivo || 'Erro na emissÃ£o';
-      const { resposta: resultado, tentativas: tentativasCancelamento } = await executarComRetry(
-        () => strategy.cancelar(
-          chaveAcesso,
-          protocoloParaCancelar,
-          justificativa,
-          venda.empresa,
-        ),
-        5,
-      );
-
-      if (!resultado.sucesso) {
-        return NextResponse.json({
-          error: erroTransitavel(resultado.motivo)
-            ? `Portal Nacional indisponivel para cancelamento apos ${tentativasCancelamento} tentativa(s). Tente novamente em alguns instantes.`
-            : `Erro Sefaz: ${resultado.motivo}`,
-        }, { status: 400 });
-      }
-
-      const notaAtivaComXml = notaAtiva as any;
-      await prisma.notaFiscal.update({
-        where: { id: notaAtiva.id },
-        data: {
-          status: 'CANCELADA',
-          xmlAutorizadoBase64: notaAtivaComXml.xmlAutorizadoBase64 || notaAtiva.xmlBase64,
-          xmlCancelamentoEventoBase64: resultado.xmlEvento || undefined,
-          pdfBase64: null,
-        } as any,
-      });
-      await prisma.venda.update({ where: { id: vendaId }, data: { status: 'CANCELADA' } });
-      await processarCancelamentoNota(notaAtiva.id, venda.empresaId, venda.id);
-
-      await createLog({
-        level: 'INFO',
-        action: 'CANCELAMENTO_AUTORIZADO',
-        message: 'Cancelamento autorizado pelo Portal Nacional.',
-        empresaId: venda.empresaId,
-        vendaId: venda.id,
-        details: {
-          tentativasConsulta,
-          tentativasCancelamento,
-          protocolo: protocoloParaCancelar,
-        },
-      });
-
-      await notifyFiscalEvent({
-        type: 'NOTA_CANCELADA',
-        vendaId: venda.id,
-        notaId: notaAtiva.id,
-        actorUserId: userId,
-        title: 'Nota cancelada',
-        message: 'Cancelamento da NFS-e autorizado pelo Portal Nacional.',
-        priority: 'NORMAL',
-        eventKeySuffix: `cancelamento-autorizado-${notaAtiva.id}`,
-        payload: {
-          notaId: notaAtiva.id,
-          chaveAcesso: notaAtiva.chaveAcesso,
-          protocolo: protocoloParaCancelar,
-        },
-      });
-
-      return NextResponse.json({ success: true, message: 'Nota cancelada com sucesso.' });
-    }
-
-    if (acao === 'CORRIGIR') {
-      await prisma.venda.update({ where: { id: vendaId }, data: { status: 'PENDENTE' } });
-      return NextResponse.json({ success: true, message: 'Venda liberada.' });
-    }
-
-    return NextResponse.json({ error: 'AÃ§Ã£o invÃ¡lida.' }, { status: 400 });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    if (body.acao === 'CORRIGIR') return NextResponse.json({ error: 'Revise a venda no formulário de emissão. Esta ação não altera mais a situação fiscal.' }, { status: 410 });
+    return NextResponse.json({ error: 'Ação inválida.' }, { status: 400 });
+  } catch (error) {
+    const failure = error as Error & { status?: number };
+    if (failure.status && failure.status < 500) return NextResponse.json({ error: failure.message }, { status: failure.status });
+    throw error;
   }
-}
+});

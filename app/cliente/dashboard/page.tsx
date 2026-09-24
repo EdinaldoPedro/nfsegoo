@@ -1,6 +1,8 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
+import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { ArrowRight, Bell, CalendarDays, CheckCircle2, Clock, FileText, Info, Lock, MapPin, Megaphone, Server, Settings, ShieldCheck, TriangleAlert, XCircle } from 'lucide-react';
 import AppHeader from '@/components/AppHeader';
@@ -9,6 +11,7 @@ import ListaVendas from '@/components/ListaVendas';
 import Vitrine from './Vitrine';
 
 export default function ClienteDashboard() {
+  const router = useRouter();
   const [nomeUsuario, setNomeUsuario] = useState('');
   const [planoDetalhes, setPlanoDetalhes] = useState<any>(null);
   const [perfilEmpresa, setPerfilEmpresa] = useState<any>(null);
@@ -31,7 +34,7 @@ export default function ClienteDashboard() {
         })
         .then(res => {
             if (res.status === 401) {
-                window.location.href = '/login';
+                router.replace('/login');
                 return null;
             }
             return res.json();
@@ -68,13 +71,13 @@ export default function ClienteDashboard() {
         .then(data => setPedidoContratacao(data?.pedido || null))
         .catch(() => setPedidoContratacao(null));
     }
-  }, []);
+  }, [router]);
   
   const diasRestantes = planoDetalhes?.dataFim 
     ? Math.ceil((new Date(planoDetalhes.dataFim).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
     : null;
 
-  const isAdminPlan = planoDetalhes?.slug === 'ADMIN_ACCESS';
+  const isAdminPlan = planoDetalhes?.slug === 'ADMIN_UNLIMITED';
   
   // === LÓGICA DE TRAVAMENTO ===
   const isBloqueado = planoDetalhes?.status === 'EXPIRADO' || planoDetalhes?.status === 'INATIVO' || (diasRestantes !== null && diasRestantes < 0);
@@ -208,7 +211,7 @@ export default function ClienteDashboard() {
       <header className="flex justify-between items-center p-6 border-b bg-white sticky top-0 z-30 shadow-sm">
         <div>
           <div className="flex items-center gap-3">
-                <img src="/icons/G.png" alt="NFSeGoo" className="w-8 h-8 object-contain" />
+                <Image src="/icons/G.png" alt="NFSeGoo" width={32} height={32} className="h-8 w-8 object-contain" />
                 <div>
                     <h1 className="text-xl font-bold bg-gradient-to-r from-blue-700 to-emerald-400 bg-clip-text text-transparent leading-none tracking-tight">
                         NFSe<span className="font-light">Goo</span>
@@ -231,7 +234,7 @@ export default function ClienteDashboard() {
         <aside className="w-full min-w-0">
             <div className="space-y-5 min-[1440px]:sticky min-[1440px]:top-[calc(var(--saas-context-offset)+7rem)] min-[1440px]:space-y-8">
               <div>
-                <Vitrine />
+                <Vitrine unlimitedPlan={isAdminPlan} />
               </div>
               {perfilCarregado && <CentralAvisos avisos={avisosDashboard} />}
             </div>
@@ -439,9 +442,9 @@ function AvisoAction({ aviso }: { aviso: any }) {
   const label = aviso.action || 'Ver aviso';
   const href = aviso.href || '#';
 
-  if (aviso.attachmentBase64) {
+  if (aviso.attachmentHref) {
     return (
-      <a href={aviso.attachmentBase64} download={aviso.attachmentName || 'anexo'} className={commonClass}>
+      <a href={aviso.attachmentHref} download={aviso.attachmentName || 'anexo'} className={commonClass}>
         {label}
         <ArrowRight size={14} />
       </a>
@@ -493,13 +496,7 @@ function ProximaAcaoCard({ data, bloqueado }: { data: any; bloqueado: boolean })
       </div>
 
       <Link
-        href={data.href}
-        onClick={(e) => {
-          if (bloqueado && data.href === '/emitir') {
-            e.preventDefault();
-            window.location.href = '/configuracoes/minha-conta';
-          }
-        }}
+        href={bloqueado && data.href === '/emitir' ? '/configuracoes/minha-conta' : data.href}
         className={`mt-6 inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-black transition w-full sm:w-fit ${buttonTones[data.tone] || buttonTones.blue}`}
       >
         {data.action}
@@ -517,7 +514,7 @@ function MinhasNotasCard({ variant = 'wide' }: { variant?: 'hero' | 'wide' }) {
       <div className={`tour-minhas-notas group p-8 border border-slate-200 rounded-2xl bg-white hover:border-blue-300 hover:shadow-md cursor-pointer transition flex flex-col justify-between ${sizing}`}>
         <div>
           <h2 className="text-2xl font-bold text-slate-800 mb-2">Minhas Notas</h2>
-          <p className="text-slate-500 text-sm">Consulte histórico completo. (Visualização liberada)</p>
+          <p className="text-slate-500 text-sm">Consulte suas notas fiscais de produção.</p>
         </div>
         <div className="mt-6 text-blue-600 font-bold group-hover:underline">
           Ver todas as notas ➜

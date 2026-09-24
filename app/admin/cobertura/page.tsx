@@ -110,7 +110,7 @@ export default function GestaoCobertura() {
 
   const ufsDisponiveis = meta.ufs || [];
   const regimesDisponiveis = meta.regimes || [];
-  const statusCounts = meta.statusCounts || {};
+  const statusCounts = useMemo(() => meta.statusCounts || {}, [meta.statusCounts]);
 
   const resumo = useMemo(() => ({
     total: meta.totalGeral ?? cidades.length,

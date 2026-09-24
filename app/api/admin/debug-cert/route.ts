@@ -1,9 +1,10 @@
+import { withApiGuard } from '@/app/utils/api-route';
 import { NextResponse } from 'next/server';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 import { openEmpresaCertificate } from '@/app/services/certificateVault';
 import { prisma } from '@/app/utils/prisma';
 
-export async function GET(request: Request) {
+export const GET = withApiGuard(async function GET(request: Request) {
   if (process.env.NODE_ENV === 'production' || process.env.ENABLE_CERT_DEBUG !== 'true') {
     return NextResponse.json({ error: 'Nao encontrado.' }, { status: 404 });
   }
@@ -22,7 +23,7 @@ export async function GET(request: Request) {
   try {
     const empresa = await prisma.empresa.findUnique({
       where: { id: empresaId },
-      select: { id: true, certificadoA1: true, senhaCertificado: true },
+      select: { id: true, documento: true, certificadoA1: true, senhaCertificado: true },
     });
 
     if (!empresa || !empresa.certificadoA1) {
@@ -33,14 +34,16 @@ export async function GET(request: Request) {
       empresaId: empresa.id,
       certificadoA1: empresa.certificadoA1,
       senhaCertificado: empresa.senhaCertificado,
+      expectedCnpj: empresa.documento,
       purpose: 'VALIDATE_CERT',
     });
 
     return NextResponse.json({
       status: 'OK',
       fingerprintSha256: credenciais.fingerprintSha256,
+      chainStatus: credenciais.chainStatus,
     });
   } catch {
     return NextResponse.json({ status: 'CERT_ERROR' }, { status: 400 });
   }
-}
+});

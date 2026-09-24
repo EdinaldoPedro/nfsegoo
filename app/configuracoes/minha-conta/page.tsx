@@ -3,11 +3,14 @@
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { User, Save, ArrowLeft, Mail, CreditCard, Settings, Monitor, X, Calendar, TrendingUp, Building2, Plus, KeyRound, Lock, CheckCircle, Loader2 } from 'lucide-react';
+import { User, Save, ArrowLeft, Mail, CreditCard, Settings, Monitor, X, Calendar, TrendingUp, Building2, Plus, KeyRound, Lock, CheckCircle, Loader2, ShieldCheck } from 'lucide-react';
 import PlanSelector from '@/components/PlanSelector';
 import { useAppConfig } from '@/app/contexts/AppConfigContext';
 import AppHeader from '@/components/AppHeader';
 import { useDialog } from '@/app/contexts/DialogContext';
+import { redirectToLogin } from '@/app/utils/client-session';
+import { checkIsStaff } from '@/app/utils/permissions';
+import AdminAccountNav from '@/components/AdminAccountNav';
 
 export default function MinhaContaPage() {
   const router = useRouter();
@@ -15,6 +18,7 @@ export default function MinhaContaPage() {
   const { darkMode, toggleDarkMode, language, changeLanguage } = useAppConfig();
 
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
   const [showPlans, setShowPlans] = useState(false);
@@ -29,6 +33,9 @@ export default function MinhaContaPage() {
   const [showPasswordForm, setShowPasswordForm] = useState(false);
   const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
   const [pedidoContratacao, setPedidoContratacao] = useState<any>(null);
+  const [securitySummary, setSecuritySummary] = useState<null | {
+    enabled: boolean; required: boolean; recoveryCodesRemaining: number; sessions: number; trustedDevices: number;
+  }>(null);
   
   // === ESTADOS PARA NOVA EMPRESA ===
   const [showAddPJ, setShowAddPJ] = useState(false);
@@ -36,6 +43,7 @@ export default function MinhaContaPage() {
   const [newPJ, setNewPJ] = useState({ razaoSocial: '', documento: '' });
 
   const [data, setData] = useState({
+    role: '',
     nome: '', email: '', cpf: '', telefone: '',
     perfil: { cargo: '', empresa: '', avatarUrl: '' },
     configuracoes: { darkMode: false, idioma: 'pt-BR', notificacoesEmail: true },
@@ -44,10 +52,13 @@ export default function MinhaContaPage() {
         nome: '', slug: '', status: '', 
         usoEmissoes: 0, limiteEmissoes: 0, 
         usoClientes: 0, limiteClientes: 0, 
-        dataInicio: '', dataFim: '' 
+        dataInicio: '', dataFim: '', unlimited: false
     },
     planoCiclo: 'MENSAL',
     empresasAdicionais: 0,
+    limiteEmpresasTotal: 0,
+    empresasUsadas: 0,
+    podeCadastrarEmpresa: false,
     listaEmpresas: [] as any[]
   });
 
@@ -56,17 +67,20 @@ export default function MinhaContaPage() {
 
     if (!userId) { router.push('/login'); return; }
 
-    fetch('/api/perfil', { 
+    fetch('/api/perfil?escopo=CONTA', {
         headers: { 'x-user-id': userId } 
     })
-      .then(res => {
+      .then(async res => {
           if (res.status === 401) { throw new Error("Sessão expirada"); }
-          return res.json();
+          const result = await res.json();
+          if (!res.ok) throw new Error(result.error || 'Não foi possível carregar a conta.');
+          return result;
       })
       .then(apiData => {
         setData(prev => ({
             ...prev,
             ...apiData,
+            nome: apiData.nome || '', email: apiData.email || '', cpf: apiData.cpf || '', telefone: apiData.telefone || '',
             perfil: {
                 cargo: apiData.cargo || '', 
                 empresa: apiData.razaoSocial || '',
@@ -75,6 +89,9 @@ export default function MinhaContaPage() {
             planoDetalhado: apiData.planoDetalhado || prev.planoDetalhado,
             planoCiclo: apiData.planoCiclo || 'MENSAL',
             empresasAdicionais: apiData.empresasAdicionais || 0,
+            limiteEmpresasTotal: apiData.limiteEmpresasTotal ?? 0,
+            empresasUsadas: apiData.empresasUsadas ?? 0,
+            podeCadastrarEmpresa: apiData.podeCadastrarEmpresa === true,
             listaEmpresas: apiData.listaEmpresas || []
         }));
 
@@ -86,6 +103,7 @@ export default function MinhaContaPage() {
       })
       .catch(err => { 
           if(err.message === "Sessão expirada") router.push('/login');
+          setLoadError(err.message || 'Falha de conexão ao carregar a conta.');
           setLoading(false); 
       });
 
@@ -93,37 +111,34 @@ export default function MinhaContaPage() {
       .then(res => res.ok ? res.json() : null)
       .then(result => setPedidoContratacao(result?.pedido || null))
       .catch(() => setPedidoContratacao(null));
-  }, [router]);
+
+    Promise.all([
+      fetch('/api/auth/mfa', { cache: 'no-store' }),
+      fetch('/api/auth/sessions', { cache: 'no-store' }),
+      fetch('/api/auth/trusted-devices', { cache: 'no-store' }),
+    ]).then(async ([mfaResponse, sessionsResponse, devicesResponse]) => {
+      if (!mfaResponse.ok || !sessionsResponse.ok || !devicesResponse.ok) return;
+      const [mfa, sessions, devices] = await Promise.all([mfaResponse.json(), sessionsResponse.json(), devicesResponse.json()]);
+      setSecuritySummary({
+        enabled: mfa.enabled === true,
+        required: mfa.required === true,
+        recoveryCodesRemaining: Number(mfa.recoveryCodesRemaining || 0),
+        sessions: Array.isArray(sessions) ? sessions.length : 0,
+        trustedDevices: Array.isArray(devices) ? devices.length : 0,
+      });
+    }).catch(() => setSecuritySummary(null));
+  }, [changeLanguage, router, toggleDarkMode]);
   
-  const handlePlanChange = async (newSlug: string, newCiclo: string) => {
-    const userId = localStorage.getItem('userId');
-    try {
-        const res = await fetch('/api/admin/users', { 
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json', 'x-user-id': userId || ''},
-            body: JSON.stringify({ id: userId, plano: newSlug, planoCiclo: newCiclo }) 
-        });
-        
-        if(res.ok) {
-            setShowPlans(false);
-            setMsg('✅ Plano atualizado! Recarregando...');
-            setTimeout(() => window.location.reload(), 1500);
-        } else {
-            await dialog.showAlert({ type: 'danger', title: 'Não foi possível alterar o plano', description: 'A alteração não foi concluída. Confira os dados e tente novamente.' });
-        }
-    } catch(e) { await dialog.showAlert({ type: 'danger', title: 'Falha de conexão', description: 'Não foi possível alterar o plano. Verifique sua internet e tente novamente.' }); }
-  };
 
   const handleSalvar = async (e: React.FormEvent) => {
       e.preventDefault();
+      if (loading || saving || loadError) return;
       setSaving(true);
       const userId = localStorage.getItem('userId');
       try {
-        const { planoDetalhado, planoCiclo, listaEmpresas, empresasAdicionais, ...restData } = data;
         const payload = {
-            ...restData,
-            cargo: restData.perfil.cargo, 
-            configuracoes: { ...restData.configuracoes, darkMode: darkMode, idioma: language }
+            escopo: 'CONTA', nome: data.nome, telefone: data.telefone || '', cargo: data.perfil.cargo,
+            configuracoes: { ...data.configuracoes, darkMode, idioma: language }
         };
 
         const res = await fetch('/api/perfil', {
@@ -172,6 +187,7 @@ export default function MinhaContaPage() {
               return;
           }
 
+          setEmailForm(previous => ({ ...previous, password: '' }));
           setEmailStep('confirm');
       } catch {
           setEmailError('Erro de conexao.');
@@ -198,10 +214,10 @@ export default function MinhaContaPage() {
               return;
           }
 
-          setData(prev => ({ ...prev, email: emailForm.newEmail.trim().toLowerCase() }));
-          setMsg('Email atualizado com sucesso!');
+          setEmailForm({ newEmail: '', password: '', code: '' });
           setShowEmailModal(false);
-          setTimeout(() => setMsg(''), 3000);
+          await dialog.showAlert({ type: 'success', description: response.message || 'E-mail atualizado. Entre novamente.' });
+          redirectToLogin('logout');
       } catch {
           setEmailError('Erro de conexao.');
       } finally {
@@ -235,6 +251,11 @@ export default function MinhaContaPage() {
 
           setPasswordSuccess(response.message || 'Senha alterada com sucesso.');
           setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+          if (response.requiresLogin) {
+              await dialog.showAlert({ type: 'success', description: response.message });
+              redirectToLogin('logout');
+              return;
+          }
           setTimeout(() => setPasswordSuccess(''), 4000);
       } catch {
           setPasswordError('Erro de conexao.');
@@ -267,13 +288,11 @@ export default function MinhaContaPage() {
   };
 
   const p = data.planoDetalhado;
-  const isIlimitado = p.limiteEmissoes === 0;
-  const percentUso = isIlimitado ? 0 : Math.min(100, (p.usoEmissoes / p.limiteEmissoes) * 100);
-  const dataFimFormatada = p.dataFim ? new Date(p.dataFim).toLocaleDateString() : 'Vitalício / Recorrente';
+  const percentUso = p.limiteEmissoes > 0 ? Math.min(100, (p.usoEmissoes / p.limiteEmissoes) * 100) : 0;
+  const dataFimFormatada = p.dataFim ? new Date(p.dataFim).toLocaleDateString('pt-BR') : 'Sem vencimento informado';
 
   // Lógica de limite de PJs
-  const empresasExtrasUsadas = data.listaEmpresas.filter(e => !e.isPrimary).length;
-  const limiteAtingido = empresasExtrasUsadas >= data.empresasAdicionais;
+  const limiteAtingido = !data.podeCadastrarEmpresa || (!p.unlimited && data.empresasUsadas >= data.limiteEmpresasTotal);
   const senhaForte = passwordForm.newPassword.length >= 8 && /[A-Z]/.test(passwordForm.newPassword) && /[0-9]/.test(passwordForm.newPassword) && /[^A-Za-z0-9]/.test(passwordForm.newPassword);
   const senhaPodeSalvar = Boolean(passwordForm.currentPassword && senhaForte && passwordForm.newPassword === passwordForm.confirmPassword);
 
@@ -283,15 +302,21 @@ export default function MinhaContaPage() {
     </div>
   );
 
+  if (loadError) return <main className="max-w-xl mx-auto p-8" role="alert">
+    <h1 className="text-xl font-bold">Não foi possível carregar sua conta</h1><p className="my-4">{loadError}</p>
+    <button type="button" onClick={() => window.location.reload()} className="saas-btn-primary">Tentar novamente</button>
+  </main>;
+
   return (
     <div className="saas-shell relative transition-colors duration-300">
       <AppHeader
         title="Minha conta"
         subtitle="Gerencie assinatura, dados pessoais e preferências de uso."
         eyebrow="Configurações"
-        backHref="/cliente/dashboard"
+        backHref={checkIsStaff(data.role) ? '/admin/minha-conta' : '/cliente/dashboard'}
       />
-      
+      {checkIsStaff(data.role) && <div className="saas-container !pt-0"><AdminAccountNav active="profile" /></div>}
+
       {/* MODAL PLANOS */}
       {showPlans && (
          <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
@@ -306,7 +331,7 @@ export default function MinhaContaPage() {
                     </button>
                 </div>
                 <div className="p-8 bg-gray-50 dark:bg-slate-900">
-                    <PlanSelector currentPlan={p.slug} currentCycle={data.planoCiclo} onSelectPlan={handlePlanChange} />
+                    <PlanSelector currentPlan={p.slug} currentCycle={data.planoCiclo} />
                 </div>
             </div>
          </div>
@@ -369,7 +394,7 @@ export default function MinhaContaPage() {
                         <>
                             <div>
                                 <label className="block text-xs font-bold text-gray-500 uppercase mb-1">E-mail atual</label>
-                                <input className="w-full p-2.5 border rounded-lg bg-slate-50 text-slate-500 dark:bg-slate-900 dark:border-slate-600" disabled value={data.email} />
+                                <input aria-label="E-mail atual" className="w-full p-2.5 border rounded-lg bg-slate-50 text-slate-500 dark:bg-slate-900 dark:border-slate-600" disabled value={data.email} />
                             </div>
                             <div>
                                 <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Novo e-mail</label>
@@ -497,22 +522,20 @@ export default function MinhaContaPage() {
                     <div>
                         <div className="flex justify-between items-center mb-1">
                             <span className="text-xs font-bold text-slate-500 flex items-center gap-1"><TrendingUp size={12}/> Emissões de Notas</span>
-                            <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{p.usoEmissoes} / {isIlimitado ? '∞' : p.limiteEmissoes}</span>
+                            <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{p.usoEmissoes} / {p.unlimited ? 'Ilimitado' : p.limiteEmissoes}</span>
                         </div>
-                        {!isIlimitado && (
-                            <div className="w-full bg-slate-200 rounded-full h-2 dark:bg-slate-700">
-                                <div className={`h-2 rounded-full transition-all duration-500 ${percentUso > 80 ? 'bg-red-500' : 'bg-blue-500'}`} style={{width: `${percentUso}%`}}></div>
-                            </div>
-                        )}
+                        {!p.unlimited && <div className="w-full bg-slate-200 rounded-full h-2 dark:bg-slate-700">
+                            <div className={`h-2 rounded-full transition-all duration-500 ${percentUso > 80 ? 'bg-red-500' : 'bg-blue-500'}`} style={{width: `${percentUso}%`}}></div>
+                        </div>}
                     </div>
 
                     {/* BARRA 2: LIMITE DE CLIENTES */}
                     <div>
                         <div className="flex justify-between items-center mb-1">
                             <span className="text-xs font-bold text-slate-500 flex items-center gap-1"><User size={12}/> Limite de Clientes</span>
-                            <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{p.usoClientes} / {p.limiteClientes === 0 ? '∞' : p.limiteClientes}</span>
+                            <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{p.usoClientes} / {p.unlimited ? 'Ilimitado' : p.limiteClientes}</span>
                         </div>
-                        {p.limiteClientes > 0 && (
+                        {!p.unlimited && p.limiteClientes > 0 && (
                             <div className="w-full bg-slate-200 rounded-full h-2 dark:bg-slate-700">
                                 <div className={`h-2 rounded-full transition-all duration-500 ${Math.min(100, (p.usoClientes / p.limiteClientes) * 100) > 80 ? 'bg-red-500' : 'bg-purple-500'}`} style={{width: `${Math.min(100, (p.usoClientes / p.limiteClientes) * 100)}%`}}></div>
                             </div>
@@ -524,25 +547,25 @@ export default function MinhaContaPage() {
                         <span>Expira em: <strong>{dataFimFormatada}</strong></span>
                     </div>
                 </div>
-                <button type="button" onClick={() => setShowPlans(true)} className="saas-btn-secondary w-full">
+                {!p.unlimited && <button type="button" onClick={() => setShowPlans(true)} className="saas-btn-secondary w-full">
                     Trocar de Plano
-                </button>
+                </button>}
               </div>
 
               {/* === NOVO: CARD DE MÚLTIPLAS EMPRESAS === */}
-              {data.empresasAdicionais > 0 && (
+              {(['COMUM', 'CONTADOR'].includes(data.role) || data.listaEmpresas.length > 0) && (
                   <div className="saas-card p-6 dark:bg-slate-800 dark:border-slate-700 flex flex-col gap-4">
                       <div className="flex justify-between items-start gap-4">
                           <div>
-                            <h3 className="text-sm font-black text-gray-400 uppercase tracking-wider flex items-center gap-2 dark:text-gray-500"><Building2 size={14}/> CNPJs extras</h3>
-                            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Empresas adicionais vinculadas ao plano.</p>
+                            <h3 className="text-sm font-black text-gray-400 uppercase tracking-wider flex items-center gap-2 dark:text-gray-500"><Building2 size={14}/> Empresas</h3>
+                            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{p.unlimited ? 'Benefício administrativo sem limite de empresas.' : 'Limite total da conta, incluindo adicionais contratados.'}</p>
                           </div>
-                          <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">{empresasExtrasUsadas}/{data.empresasAdicionais}</span>
+                          <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">{data.empresasUsadas}/{p.unlimited ? 'Ilimitado' : data.limiteEmpresasTotal}</span>
                       </div>
                       <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 dark:bg-slate-900 dark:border-slate-700">
-                          <div className="h-2 rounded-full bg-slate-200 dark:bg-slate-700">
-                            <div className="h-2 rounded-full bg-blue-600" style={{ width: `${Math.min(100, (empresasExtrasUsadas / Math.max(1, data.empresasAdicionais)) * 100)}%` }}></div>
-                          </div>
+                          {!p.unlimited && <div className="h-2 rounded-full bg-slate-200 dark:bg-slate-700">
+                            <div className="h-2 rounded-full bg-blue-600" style={{ width: `${Math.min(100, (data.empresasUsadas / Math.max(1, data.limiteEmpresasTotal)) * 100)}%` }}></div>
+                          </div>}
                       </div>
                       <button 
                           type="button" 
@@ -552,7 +575,7 @@ export default function MinhaContaPage() {
                       >
                           <Plus size={16}/> Adicionar Empresa
                       </button>
-                      {limiteAtingido && <p className="text-[10px] text-red-500 text-center">Você atingiu o limite de empresas. Adquira mais pacotes para adicionar.</p>}
+                      {limiteAtingido && <p className="text-xs text-red-600 text-center">{data.podeCadastrarEmpresa ? 'Limite de empresas atingido. Consulte os benefícios disponíveis.' : 'É necessária uma assinatura vigente para cadastrar empresas.'}</p>}
                   </div>
               )}
 
@@ -560,9 +583,35 @@ export default function MinhaContaPage() {
 
             <div className="grid grid-cols-1 gap-6">
               <div className="saas-card order-2 p-6 dark:bg-slate-800 dark:border-slate-700">
-                <div className={`flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between ${showPasswordForm ? 'mb-6' : ''}`}>
-                    <h3 className="saas-section-title flex items-center gap-2 dark:text-white"><Lock size={20}/> Segurança da conta</h3>
-                    <p className="text-sm text-slate-500 dark:text-slate-400">Atualize sua senha apenas quando necessário.</p>
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <h3 className="saas-section-title flex items-center gap-2 dark:text-white"><ShieldCheck size={20}/> Segurança da conta</h3>
+                    <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">Gerencie o segundo fator, dispositivos confiáveis e sessões conectadas.</p>
+                  </div>
+                  <Link href="/seguranca" className="saas-btn-secondary justify-center">
+                    <KeyRound size={18}/> Abrir central de segurança
+                  </Link>
+                </div>
+                <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
+                    <p className="text-xs font-black uppercase tracking-wider text-slate-400">Segundo fator</p>
+                    <p className={`mt-1 text-sm font-black ${securitySummary?.enabled ? 'text-emerald-600' : 'text-amber-600'}`}>
+                      {securitySummary ? (securitySummary.enabled ? 'Ativado' : securitySummary.required ? 'Configuração obrigatória' : 'Opcional e desativado') : 'Consulte a central'}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
+                    <p className="text-xs font-black uppercase tracking-wider text-slate-400">Navegadores confiáveis</p>
+                    <p className="mt-1 text-sm font-black text-slate-800 dark:text-white">{securitySummary ? securitySummary.trustedDevices : '—'}</p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
+                    <p className="text-xs font-black uppercase tracking-wider text-slate-400">Sessões ativas</p>
+                    <p className="mt-1 text-sm font-black text-slate-800 dark:text-white">{securitySummary ? securitySummary.sessions : '—'}</p>
+                  </div>
+                </div>
+
+                <div className={`mt-6 border-t border-slate-200 pt-6 dark:border-slate-700 ${showPasswordForm ? 'mb-6' : ''}`}>
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div><p className="font-black text-slate-800 dark:text-white"><Lock size={17} className="mr-2 inline"/>Senha de acesso</p><p className="mt-1 text-sm text-slate-500">Atualize sua senha apenas quando necessário.</p></div>
                     {!showPasswordForm && (
                         <button
                             type="button"
@@ -577,32 +626,9 @@ export default function MinhaContaPage() {
                             Alterar senha
                         </button>
                     )}
+                  </div>
                 </div>
 
-                {false && !showPasswordForm && (
-                    <div className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-[1fr_1fr_auto] md:items-center">
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
-                            <p className="text-xs font-black uppercase tracking-wider text-slate-400">Senha</p>
-                            <p className="mt-1 text-sm font-bold text-slate-800 dark:text-slate-100">Protegida</p>
-                        </div>
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
-                            <p className="text-xs font-black uppercase tracking-wider text-slate-400">Recomendação</p>
-                            <p className="mt-1 text-sm font-bold text-slate-800 dark:text-slate-100">Use uma senha forte</p>
-                        </div>
-                        <button
-                            type="button"
-                            onClick={() => {
-                                setPasswordError('');
-                                setPasswordSuccess('');
-                                setShowPasswordForm(true);
-                            }}
-                            className="saas-btn-secondary justify-center"
-                        >
-                            <KeyRound size={18}/>
-                            Alterar senha
-                        </button>
-                    </div>
-                )}
 
                 {showPasswordForm && (
                 <>
@@ -702,13 +728,13 @@ export default function MinhaContaPage() {
                 {/* ... Campos de dados pessoais (iguais aos que você já tinha) ... */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="md:col-span-2">
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Nome Completo</label>
-                        <input className="saas-input dark:bg-slate-900 dark:border-slate-600 dark:text-white" value={data.nome} onChange={e => setData({...data, nome: e.target.value})} />
+                        <label htmlFor="account-name" className="block text-xs font-bold text-gray-500 uppercase mb-1">Nome Completo</label>
+                        <input id="account-name" className="saas-input dark:bg-slate-900 dark:border-slate-600 dark:text-white" value={data.nome} onChange={e => setData({...data, nome: e.target.value})} />
                     </div>
                     <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Email</label>
+                        <label htmlFor="account-email" className="block text-xs font-bold text-gray-500 uppercase mb-1">Email</label>
                         <div className="flex gap-2">
-                            <input className="saas-input bg-gray-50 text-gray-500 cursor-not-allowed dark:bg-slate-700 dark:border-slate-600" disabled value={data.email} />
+                            <input id="account-email" className="saas-input bg-gray-50 text-gray-500 cursor-not-allowed dark:bg-slate-700 dark:border-slate-600" disabled value={data.email} />
                             <button
                                 type="button"
                                 onClick={abrirTrocaEmail}
@@ -719,16 +745,16 @@ export default function MinhaContaPage() {
                         </div>
                     </div>
                     <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">CPF</label>
-                        <input className="saas-input bg-gray-50 text-gray-500 cursor-not-allowed dark:bg-slate-700 dark:border-slate-600" disabled value={data.cpf} />
+                        <label htmlFor="account-cpf" className="block text-xs font-bold text-gray-500 uppercase mb-1">CPF</label>
+                        <input id="account-cpf" className="saas-input bg-gray-50 text-gray-500 cursor-not-allowed dark:bg-slate-700 dark:border-slate-600" disabled value={data.cpf} />
                     </div>
                     <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Telefone</label>
-                        <input className="saas-input dark:bg-slate-900 dark:border-slate-600 dark:text-white" value={data.telefone || ''} onChange={e => setData({...data, telefone: e.target.value})} />
+                        <label htmlFor="account-phone" className="block text-xs font-bold text-gray-500 uppercase mb-1">Telefone</label>
+                        <input id="account-phone" className="saas-input dark:bg-slate-900 dark:border-slate-600 dark:text-white" value={data.telefone || ''} onChange={e => setData({...data, telefone: e.target.value})} />
                     </div>
                     <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Cargo</label>
-                        <input className="saas-input dark:bg-slate-900 dark:border-slate-600 dark:text-white" value={data.perfil.cargo} onChange={e => setData({...data, perfil: {...data.perfil, cargo: e.target.value}})} />
+                        <label htmlFor="account-job" className="block text-xs font-bold text-gray-500 uppercase mb-1">Cargo</label>
+                        <input id="account-job" className="saas-input dark:bg-slate-900 dark:border-slate-600 dark:text-white" value={data.perfil.cargo} onChange={e => setData({...data, perfil: {...data.perfil, cargo: e.target.value}})} />
                     </div>
                 </div>
               </div>
@@ -736,7 +762,7 @@ export default function MinhaContaPage() {
               <div className="saas-card order-3 p-8 dark:bg-slate-800 dark:border-slate-700">
                 <h3 className="saas-section-title mb-6 flex items-center gap-2 dark:text-white"><Settings size={20}/> Preferências</h3>
                 <div className="space-y-4">
-                    <div className="flex items-center justify-between p-4 border rounded-2xl cursor-pointer hover:bg-slate-50 transition dark:border-slate-600" onClick={() => toggleDarkMode(!darkMode)}>
+                    <button type="button" role="switch" aria-checked={darkMode} aria-label="Modo escuro" className="flex w-full text-left items-center justify-between p-4 border rounded-2xl cursor-pointer hover:bg-slate-50 transition dark:border-slate-600" onClick={() => toggleDarkMode(!darkMode)}>
                         <div className="flex items-center gap-3">
                             <div className="p-2 bg-gray-100 rounded-full dark:bg-slate-600"><Monitor size={18} className="text-gray-600 dark:text-gray-300"/></div>
                             <div>
@@ -746,10 +772,10 @@ export default function MinhaContaPage() {
                         <div className={`w-10 h-5 rounded-full p-1 transition-colors ${darkMode ? 'bg-blue-600' : 'bg-gray-300'}`}>
                             <div className={`bg-white w-3 h-3 rounded-full transform transition-transform ${darkMode ? 'translate-x-5' : ''}`}></div>
                         </div>
-                    </div>
+                    </button>
                     <div className="pt-2">
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Idioma</label>
-                        <select className="saas-input bg-white dark:bg-slate-900 dark:border-slate-600 dark:text-white" value={language} onChange={e => changeLanguage(e.target.value as any)}>
+                        <label htmlFor="account-language" className="block text-xs font-bold text-gray-500 uppercase mb-1">Idioma</label>
+                        <select id="account-language" className="saas-input bg-white dark:bg-slate-900 dark:border-slate-600 dark:text-white" value={language} onChange={e => changeLanguage(e.target.value as any)}>
                             <option value="pt-BR">Português</option>
                             <option value="en-US">English</option>
                         </select>
@@ -758,7 +784,7 @@ export default function MinhaContaPage() {
               </div>
 
               <div className="order-5 sticky bottom-4 z-10 flex flex-col gap-3 rounded-3xl border border-slate-200 bg-white/95 p-4 shadow-xl shadow-slate-200/70 backdrop-blur md:flex-row md:items-center md:justify-between dark:border-slate-700 dark:bg-slate-800/95 dark:shadow-none">
-                <span className={`text-sm font-bold transition-opacity ${msg ? 'opacity-100' : 'opacity-70'} ${msg.toLowerCase().includes('erro') ? 'text-red-600' : 'text-slate-500 dark:text-slate-300'}`}>{msg || 'Altere os dados necessários e confirme para salvar sua conta.'}</span>
+                <span role="status" className={`text-sm font-bold transition-opacity ${msg ? 'opacity-100' : 'opacity-70'} ${msg.toLowerCase().includes('erro') ? 'text-red-600' : 'text-slate-500 dark:text-slate-300'}`}>{msg || 'Altere os dados necessários e confirme para salvar sua conta.'}</span>
                 <button type="submit" disabled={saving} className="saas-btn-primary justify-center disabled:opacity-70 dark:shadow-none">
                   {saving ? 'Salvando...' : <><Save size={20} /> Salvar Alterações</>}
                 </button>

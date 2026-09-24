@@ -12,16 +12,15 @@ import {
   Briefcase,
   Building2,
   Ban,
-  Clock3,
-  RefreshCw,
   Users,
-  FileCheck,
-  Power,
   AlertTriangle,
   CheckCircle2
 } from 'lucide-react';
 import { ROLE_LABELS, STAFF_ROLES } from '@/app/utils/permissions';
 import { useDialog } from '@/app/contexts/DialogContext';
+import AccountantBenefitPanel from './AccountantBenefitPanel';
+import AdminAccountCompaniesPanel from '@/components/AdminAccountCompaniesPanel';
+import Link from 'next/link';
 
 const MANAGED_COLLAB_ROLES = [...STAFF_ROLES, 'CONTADOR'];
 
@@ -38,36 +37,65 @@ export default function GestaoColaboradores() {
   const [searchUser, setSearchUser] = useState('');
   const [roleInput, setRoleInput] = useState('SUPORTE');
   const [filtroCandidato, setFiltroCandidato] = useState('');
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [listError, setListError] = useState('');
+  const [totalManaged, setTotalManaged] = useState(0);
 
   // Estado para Edição
   const [selectedUserFull, setSelectedUserFull] = useState<any>(null); 
   const [editLimit, setEditLimit] = useState(5); // Limite Empresas
-  const [editLimiteNotas, setEditLimiteNotas] = useState<number | ''>(''); // NOVO: Limite Notas
-  const [editLimiteClientes, setEditLimiteClientes] = useState<number | ''>(''); // NOVO: Limite Clientes
-  const [editAssinaturaAtiva, setEditAssinaturaAtiva] = useState(true);
-  const [editRenovacaoAutomatica, setEditRenovacaoAutomatica] = useState(true);
-  const [novaProprietaria, setNovaProprietaria] = useState({ documento: '', razaoSocial: '' });
   const [loadingEdit, setLoadingEdit] = useState(false);
+  const [customerAccess, setCustomerAccess] = useState<{ enabled: boolean } | null>(null);
+  const [customerPlans, setCustomerPlans] = useState<Array<{ slug: string; name: string; tipo: string }>>([]);
+  const [customerPlanSelection, setCustomerPlanSelection] = useState('');
+  const [customerActionPending, setCustomerActionPending] = useState(false);
+
+  const solicitarAutorizacaoAdministrativa = async (acao: string) => {
+    const justification = await dialog.showPrompt({
+      title: 'Justificativa obrigatoria',
+      description: `Descreva o motivo para ${acao}. A operacao ficara registrada na auditoria.`,
+      placeholder: 'Informe o motivo com ao menos 10 caracteres',
+      confirmText: 'Continuar',
+    });
+    if (!justification) return null;
+    if (justification.trim().length < 10) {
+      await dialog.showAlert({ type: 'warning', description: 'A justificativa precisa ter ao menos 10 caracteres.' });
+      return null;
+    }
+
+    const adminPassword = await dialog.showPrompt({
+      title: 'Confirme sua identidade',
+      description: 'Digite sua senha administrativa para autorizar a operacao sensivel.',
+      placeholder: 'Senha administrativa',
+      inputType: 'password',
+      confirmText: 'Autorizar',
+    });
+    if (!adminPassword) return null;
+    return { justification: justification.trim(), adminPassword };
+  };
 
   const getActivePlanHistory = (user: any) => {
-    return user?.planHistories?.find((h: any) => h.status === 'ATIVO' && h.plan) || user?.planHistories?.find((h: any) => h.plan) || null;
+    const now = Date.now();
+    return user?.planHistories?.find((h: any) => h.status === 'ATIVO' && !h.arquivadoEm && ['PLANO', 'CUSTOM'].includes(h.tipoContratado)
+      && new Date(h.dataInicio).getTime() <= now && (!h.dataFim || new Date(h.dataFim).getTime() > now)) || null;
   };
 
   const getPlanInfo = (user: any) => {
     const history = getActivePlanHistory(user);
-    const plan = history?.plan;
-    const slug = plan?.slug || user?.plano || 'SEM_PLANO';
+    const plan = user?.limits?.planoBase ? { ...user.limits.planoBase, name: user.limits.planoBase.nome } : history?.plan;
+    const slug = plan?.slug || 'SEM_PLANO';
     const isLegacy = slug === 'PARCEIRO';
     const isCustom = plan?.tipo === 'CUSTOM' || slug.startsWith('parceiro-contabil-');
     const isContadorPrivate = slug.startsWith('CONTADOR_');
-    const dataFim = history?.dataFim || user?.planoExpiresAt;
+    const dataFim = plan?.dataFim || history?.dataFim;
     const vencimento = dataFim ? new Date(dataFim) : null;
 
     return {
       history,
       plan,
       slug,
-      name: plan?.name || slug,
+      name: history?.nomeContratado || plan?.name || slug,
       origem: isLegacy
         ? 'Legado'
         : isCustom
@@ -79,9 +107,9 @@ export default function GestaoColaboradores() {
               : 'Sem plano',
       isLegacy,
       isCustom,
-      status: history?.status || user?.planoStatus || 'N/A',
-      maxNotas: plan?.maxNotasMensal ?? 0,
-      maxClientes: plan?.maxClientes ?? 0,
+      status: user?.planoStatus === 'suspended' ? 'SUSPENSO' : (user?.limits?.status || history?.status || 'INATIVO'),
+      maxNotas: user?.limits?.limiteNotas ?? history?.limiteNotasContratado ?? 0,
+      maxClientes: user?.limits?.limiteClientes ?? history?.limiteClientesContratado ?? 0,
       vencimento,
     };
   };
@@ -92,48 +120,52 @@ export default function GestaoColaboradores() {
   };
 
   const carregarDados = () => {
-    fetch('/api/admin/users', { headers: {} })
-    .then(r => r.json())
-    .then(data => {
-        if (Array.isArray(data)) {
-            setColabs(data.filter((u: any) => MANAGED_COLLAB_ROLES.includes(u.role)));
-            setCandidatos(data.filter((u: any) => !MANAGED_COLLAB_ROLES.includes(u.role)));
-        }
-    });
+    const candidateQuery = new URLSearchParams({ roles: 'COMUM', limit: '25' });
+    if (filtroCandidato.trim()) candidateQuery.set('search', filtroCandidato.trim());
+    Promise.all([
+      fetch(`/api/admin/users?roles=${localStorage.getItem('userRole') === 'MASTER' ? 'MASTER,' : ''}ADMIN,SUPORTE,SUPORTE_TI,COMERCIAL,CONTADOR&limit=25&page=${page}`).then(async r => { const data = await r.json(); if (!r.ok) throw new Error(data.error); return data; }),
+      fetch(`/api/admin/users?${candidateQuery}`).then(async r => { const data = await r.json(); if (!r.ok) throw new Error(data.error); return data; }),
+    ]).then(([managed, candidates]) => {
+      if (Array.isArray(managed?.data)) { setColabs(managed.data); setTotalPages(managed.meta?.totalPages || 1); setTotalManaged(managed.meta?.total || 0); }
+      if (Array.isArray(candidates?.data)) setCandidatos(candidates.data);
+      setListError('');
+    }).catch(error => { setListError(error instanceof Error ? error.message : 'Falha ao carregar contas.'); });
   };
 
-  useEffect(() => { carregarDados(); }, []);
+  useEffect(() => {
+    const timer = setTimeout(carregarDados, 250);
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, filtroCandidato]);
 
   // --- ABRIR EDIÇÃO ---
   const handleOpenEdit = async (userId: string) => {
       setLoadingEdit(true);
       setModalEditOpen(true);
+      setCustomerAccess(null);
+      setCustomerPlanSelection('');
       
       try {
           const res = await fetch(`/api/admin/users/${userId}`, { headers: {} });
           const data = await res.json();
           
+          if (!res.ok) throw new Error(data.error || 'Erro ao carregar detalhes.');
           setSelectedUserFull(data);
           setRoleInput(data.role);
-          setEditLimit(data.limiteEmpresas || 5);
-          setNovaProprietaria({ documento: '', razaoSocial: '' });
-
-          // Procura o plano ativo do Parceiro para preencher os inputs de notas e clientes
-          const activePlanHistory = data.planHistories?.find((h: any) => h.status === 'ATIVO');
-          const latestPlanHistory = activePlanHistory || data.planHistories?.[0];
-          if (latestPlanHistory && latestPlanHistory.plan) {
-              setEditLimiteNotas(latestPlanHistory.plan.maxNotasMensal);
-              setEditLimiteClientes(latestPlanHistory.plan.maxClientes);
-              setEditAssinaturaAtiva(latestPlanHistory.status === 'ATIVO');
-              const dataFim = latestPlanHistory.dataFim ? new Date(latestPlanHistory.dataFim) : null;
-              const diasRestantes = dataFim ? Math.ceil((dataFim.getTime() - Date.now()) / (1000 * 60 * 60 * 24)) : 9999;
-              setEditRenovacaoAutomatica(!dataFim || diasRestantes > 45);
-          } else {
-              setEditLimiteNotas('');
-              setEditLimiteClientes('');
-              setEditAssinaturaAtiva(false);
-              setEditRenovacaoAutomatica(false);
+          setEditLimit(data.limiteEmpresas ?? 5);
+          if (['SUPORTE', 'SUPORTE_TI', 'COMERCIAL'].includes(data.role)) {
+            const [accessResponse, plansResponse] = await Promise.all([
+              fetch(`/api/admin/users/${userId}/acesso-cliente`, { cache: 'no-store' }),
+              fetch('/api/plans?visao=admin', { cache: 'no-store' }),
+            ]);
+            if (!accessResponse.ok) throw new Error('Falha ao consultar acesso de cliente.');
+            setCustomerAccess(await accessResponse.json());
+            if (plansResponse.ok) {
+              const plans = await plansResponse.json();
+              setCustomerPlans(Array.isArray(plans) ? plans.filter((plan: any) => ['PLANO', 'CUSTOM'].includes(plan.tipo)) : []);
+            }
           }
+
 
       } catch (e) {
           dialog.showAlert("Erro ao carregar detalhes.");
@@ -143,15 +175,56 @@ export default function GestaoColaboradores() {
       }
   };
 
+  const changeCustomerAccess = async () => {
+    if (!selectedUserFull || !customerAccess || customerActionPending) return;
+    const action = customerAccess.enabled ? 'REVOKE' : 'GRANT';
+    const authorization = await solicitarAutorizacaoAdministrativa(action === 'GRANT' ? 'liberar a área do cliente' : 'revogar a área do cliente');
+    if (!authorization) return;
+    setCustomerActionPending(true);
+    try {
+      const response = await fetch(`/api/admin/users/${selectedUserFull.id}/acesso-cliente`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, ...authorization }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Não foi possível alterar a permissão.');
+      setCustomerAccess({ enabled: data.enabled });
+      dialog.showAlert({ type: 'success', description: data.enabled ? 'Área do cliente liberada. O plano continua independente.' : 'Área do cliente bloqueada. O contrato não foi alterado.' });
+    } catch (error) {
+      dialog.showAlert({ type: 'danger', description: error instanceof Error ? error.message : 'Falha na operação.' });
+    } finally { setCustomerActionPending(false); }
+  };
+
+  const grantCustomerPlan = async () => {
+    if (!selectedUserFull || !customerPlanSelection || customerActionPending) return;
+    const authorization = await solicitarAutorizacaoAdministrativa('conceder um plano separado ao colaborador');
+    if (!authorization) return;
+    setCustomerActionPending(true);
+    try {
+      const response = await fetch('/api/admin/users', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: selectedUserFull.id, operationId: crypto.randomUUID(), plano: customerPlanSelection,
+          planoCiclo: 'MENSAL', ...authorization }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Não foi possível conceder o plano.');
+      dialog.showAlert({ type: 'success', description: 'Plano concedido e registrado no histórico, sem criar pagamento.' });
+      setCustomerPlanSelection('');
+      await handleOpenEdit(selectedUserFull.id);
+    } catch (error) {
+      dialog.showAlert({ type: 'danger', description: error instanceof Error ? error.message : 'Falha na operação.' });
+    } finally { setCustomerActionPending(false); }
+  };
+
   // --- PROMOVER (Novo) ---
   const handlePromover = async () => {
     if (!searchUser) return dialog.showAlert("Selecione um usuário.");
+    const authorization = await solicitarAutorizacaoAdministrativa('alterar o papel deste usuario');
+    if (!authorization) return;
 
     try {
         const res = await fetch('/api/admin/users', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json'},
-            body: JSON.stringify({ id: searchUser, role: roleInput })
+            body: JSON.stringify({ id: searchUser, role: roleInput, ...authorization })
         });
 
         if (res.ok) {
@@ -168,15 +241,10 @@ export default function GestaoColaboradores() {
   // --- SALVAR EDIÇÃO ---
   const handleSaveEdit = async () => {
       if(!selectedUserFull) return;
+      const authorization = await solicitarAutorizacaoAdministrativa('salvar os acessos e limites deste usuario');
+      if (!authorization) return;
 
-      // Monta o payload de envio com os novos limites se for contador
-      const payload: any = { role: roleInput, limiteEmpresas: editLimit };
-      if (roleInput === 'CONTADOR') {
-          if (editLimiteNotas !== '') payload.limiteNotas = editLimiteNotas;
-          if (editLimiteClientes !== '') payload.limiteClientes = editLimiteClientes;
-          payload.assinaturaAtiva = editAssinaturaAtiva;
-          payload.renovacaoAutomatica = editRenovacaoAutomatica;
-      }
+      const payload = { role: roleInput, limiteEmpresas: editLimit, ...authorization };
 
       try {
           // 1. Atualiza Limites e Role (PATCH)
@@ -186,50 +254,15 @@ export default function GestaoColaboradores() {
               body: JSON.stringify(payload)
           });
 
-          // 2. Se mudou para Contador do zero (legado), garante o put secundário
-          if(roleInput === 'CONTADOR' && selectedUserFull.role !== 'CONTADOR') {
-               await fetch('/api/admin/users', {
-                   method: 'PUT',
-                   headers: { 'Content-Type': 'application/json'},
-                   body: JSON.stringify({ id: selectedUserFull.id, role: 'CONTADOR' })
-               });
-          }
-
           if(res.ok) {
-              dialog.showAlert({ type: 'success', description: "Dados e limites atualizados!" });
+              dialog.showAlert({ type: 'success', description: "Acesso e limite de empresas atualizados. Contratos preservados." });
               setModalEditOpen(false);
               carregarDados();
+          } else {
+              const error = await res.json();
+              dialog.showAlert({ type: 'danger', description: error.error || 'Não foi possível salvar.' });
           }
       } catch(e) { dialog.showAlert("Erro ao salvar."); }
-  };
-
-  const handleApplyDefaultPlan = async () => {
-      if (!selectedUserFull) return;
-      if (!await dialog.showConfirm({
-          title: 'Aplicar plano padrao?',
-          description: 'O contador passara para o CONTADOR_STARTER. Pacotes avulsos permanecem preservados.',
-          type: 'warning'
-      })) return;
-
-      try {
-          const res = await fetch(`/api/admin/users/${selectedUserFull.id}`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ role: 'CONTADOR', aplicarPlanoPadrao: true })
-          });
-          const data = await res.json().catch(() => ({}));
-
-          if (!res.ok) {
-              dialog.showAlert({ type: 'danger', description: data.error || 'Erro ao aplicar plano padrao.' });
-              return;
-          }
-
-          dialog.showAlert({ type: 'success', description: 'Plano padrao aplicado ao contador.' });
-          await handleOpenEdit(selectedUserFull.id);
-          carregarDados();
-      } catch {
-          dialog.showAlert('Erro de conexao.');
-      }
   };
 
   // --- DESVINCULAR EMPRESA ---
@@ -240,7 +273,15 @@ export default function GestaoColaboradores() {
           type: 'warning'
       })) return;
       
-      await fetch(`/api/contador/vinculo?id=${vinculoId}`, { method: 'DELETE', headers: {} });
+      const authorization = await solicitarAutorizacaoAdministrativa('revogar o vínculo contábil');
+      if (!authorization) return;
+      const res = await fetch(`/api/contador/vinculo?id=${vinculoId}`, { method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(authorization) });
+      if (!res.ok) {
+          const data = await res.json();
+          await dialog.showAlert({ type: 'danger', description: data.error || 'Não foi possível revogar o vínculo.' });
+          return;
+      }
       
       setSelectedUserFull((prev: any) => ({
           ...prev,
@@ -248,68 +289,15 @@ export default function GestaoColaboradores() {
       }));
   };
 
-  const handleAddEmpresaProprietaria = async () => {
-      if (!selectedUserFull) return;
-      const cnpjLimpo = novaProprietaria.documento.replace(/\D/g, '');
-      if (cnpjLimpo.length !== 14) {
-          dialog.showAlert({ type: 'warning', description: 'Informe um CNPJ valido.' });
-          return;
-      }
-
-      try {
-          const res = await fetch(`/api/admin/users/${selectedUserFull.id}`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ addEmpresaProprietaria: novaProprietaria })
-          });
-          const data = await res.json().catch(() => ({}));
-
-          if (!res.ok) {
-              dialog.showAlert({ type: 'danger', description: data.error || 'Erro ao incluir empresa proprietaria.' });
-              return;
-          }
-
-          setSelectedUserFull((prev: any) => ({
-              ...prev,
-              empresasProprietarias: [...(prev.empresasProprietarias || []).filter((e: any) => e.id !== data.empresa.id), data.empresa],
-              empresasContabeis: prev.empresasContabeis || []
-          }));
-          setNovaProprietaria({ documento: '', razaoSocial: '' });
-          dialog.showAlert({ type: 'success', description: 'Empresa proprietaria marcada para o contador.' });
-      } catch {
-          dialog.showAlert('Erro de conexao.');
-      }
-  };
-
-  const handleRemoveEmpresaProprietaria = async (empresaId: string) => {
-      if (!selectedUserFull) return;
-      if (!await dialog.showConfirm({
-          title: 'Remover propriedade?',
-          description: 'A empresa deixara de ser marcada como proprietaria deste contador.',
-          type: 'warning'
-      })) return;
-
-      const res = await fetch(`/api/admin/users/${selectedUserFull.id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ removeEmpresaProprietariaId: empresaId })
-      });
-
-      if (res.ok) {
-          setSelectedUserFull((prev: any) => ({
-              ...prev,
-              empresasProprietarias: (prev.empresasProprietarias || []).filter((e: any) => e.id !== empresaId)
-          }));
-      }
-  };
-
   // --- DEMITIR ---
   const handleDemitir = async (id: string) => {
       if(!await dialog.showConfirm({ type: 'danger', title: 'Remover Acesso', description: 'O usuário voltará a ser um cliente comum.' })) return;
+      const authorization = await solicitarAutorizacaoAdministrativa('remover o acesso interno deste usuario');
+      if (!authorization) return;
       await fetch('/api/admin/users', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json'},
-          body: JSON.stringify({ id, role: 'COMUM' }) 
+          body: JSON.stringify({ id, role: 'COMUM', ...authorization })
       });
       carregarDados();
   }
@@ -317,8 +305,6 @@ export default function GestaoColaboradores() {
   const candidatosFiltrados = candidatos.filter(c => c.nome.toLowerCase().includes(filtroCandidato.toLowerCase()) || c.email.includes(filtroCandidato));
   const totalContadores = colabs.filter((u) => u.role === 'CONTADOR').length;
   const totalEquipeInterna = colabs.filter((u) => u.role !== 'CONTADOR').length;
-  const empresasNaCarteira = selectedUserFull?.empresasContabeis?.length || 0;
-  const limiteEmpresasPct = editLimit ? Math.min(100, Math.round((empresasNaCarteira / editLimit) * 100)) : 0;
   const selectedPlanInfo = selectedUserFull ? getPlanInfo(selectedUserFull) : null;
 
   return (
@@ -339,7 +325,7 @@ export default function GestaoColaboradores() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs font-black uppercase text-slate-400">Colaboradores</p>
-              <p className="mt-2 text-3xl font-black text-slate-950">{colabs.length}</p>
+              <p className="mt-2 text-3xl font-black text-slate-950">{totalManaged}</p>
             </div>
             <Shield className="text-blue-600" size={28} />
           </div>
@@ -380,7 +366,7 @@ export default function GestaoColaboradores() {
                         <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Buscar Usuário</label>
                         <div className="relative">
                             <Search className="absolute left-3 top-3 text-gray-400" size={16}/>
-                            <input className="w-full rounded-xl border border-slate-200 py-3 pl-9 pr-3 text-sm outline-none transition focus:border-blue-300 focus:ring-2 focus:ring-blue-100" placeholder="Nome ou Email..." onChange={e => setFiltroCandidato(e.target.value)}/>
+                            <input aria-label="Buscar conta candidata" value={filtroCandidato} className="w-full rounded-xl border border-slate-200 py-3 pl-9 pr-3 text-sm outline-none transition focus:border-blue-300 focus:ring-2 focus:ring-blue-100" placeholder="Nome ou Email..." onChange={e => setFiltroCandidato(e.target.value)}/>
                         </div>
                     </div>
                     <div className="max-h-48 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-1">
@@ -412,7 +398,7 @@ export default function GestaoColaboradores() {
                 <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-6 py-5">
                     <div>
                       <h3 className="flex items-center gap-2 text-xl font-black text-slate-950"><UserCog size={22}/> Editar Colaborador</h3>
-                      <p className="mt-1 text-sm text-slate-500">Ajuste acesso, assinatura, renovação e limites do parceiro.</p>
+                      <p className="mt-1 text-sm text-slate-500">Acesso e contratos são operações separadas e auditadas.</p>
                     </div>
                     <button onClick={() => setModalEditOpen(false)} className="rounded-xl p-2 text-slate-400 transition hover:bg-white hover:text-red-500"><X size={20}/></button>
                 </div>
@@ -425,15 +411,11 @@ export default function GestaoColaboradores() {
                         </div>
                         <div className="flex flex-wrap gap-2">
                           <span className="rounded-full bg-blue-200 px-3 py-1 text-xs font-black uppercase text-blue-800">{roleInput}</span>
-                          {roleInput === 'CONTADOR' && (
-                            <span className={`rounded-full px-3 py-1 text-xs font-black uppercase ${editAssinaturaAtiva ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>
-                              {editAssinaturaAtiva ? 'Ativo' : 'Inativo'}
-                            </span>
-                          )}
+
                         </div>
                     </div>
 
-                    {roleInput === 'CONTADOR' && selectedPlanInfo && (
+                    {selectedUserFull.role === 'CONTADOR' && selectedPlanInfo && (
                       <div className={`rounded-2xl border p-4 ${selectedPlanInfo.isLegacy ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-white'}`}>
                         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                           <div className="flex items-start gap-3">
@@ -449,15 +431,7 @@ export default function GestaoColaboradores() {
                             </div>
                           </div>
 
-                          {selectedPlanInfo.isLegacy && (
-                            <button
-                              type="button"
-                              onClick={handleApplyDefaultPlan}
-                              className="inline-flex items-center justify-center gap-2 rounded-xl bg-amber-600 px-4 py-3 text-sm font-black text-white transition hover:bg-amber-700"
-                            >
-                              <RefreshCw size={16} /> Aplicar plano padrao
-                            </button>
-                          )}
+
                         </div>
 
                         <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
@@ -477,136 +451,50 @@ export default function GestaoColaboradores() {
                       </div>
                     )}
 
-                    {/* DADOS E LIMITES DO PARCEIRO */}
-                    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                        <div>
-                            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Cargo do Usuário</label>
-                            <select className="w-full rounded-xl border border-slate-200 bg-white p-3 font-semibold outline-none transition focus:border-blue-300 focus:ring-2 focus:ring-blue-100" value={roleInput} onChange={e => setRoleInput(e.target.value)}>
-                                <option value="SUPORTE">Suporte</option>
-                                <option value="SUPORTE_TI">Suporte T.I</option>
-                                <option value="CONTADOR">Contador Parceiro</option>
-                                <option value="ADMIN">Admin</option>
-                            </select>
-                        </div>
-                        
-                        {roleInput === 'CONTADOR' && (
-                            <>
-                                <div className="grid grid-cols-2 gap-3">
-                                  <button
-                                    type="button"
-                                    onClick={() => setEditAssinaturaAtiva(!editAssinaturaAtiva)}
-                                    className={`rounded-2xl border p-4 text-left transition ${
-                                      editAssinaturaAtiva
-                                        ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                                        : 'border-slate-200 bg-slate-50 text-slate-600'
-                                    }`}
-                                  >
-                                    <Power size={18} />
-                                    <p className="mt-2 text-sm font-black">{editAssinaturaAtiva ? 'Ativo' : 'Inativo'}</p>
-                                    <p className="mt-1 text-xs font-medium opacity-80">Controla acesso do parceiro.</p>
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setEditRenovacaoAutomatica(!editRenovacaoAutomatica)}
-                                    disabled={!editAssinaturaAtiva}
-                                    className={`rounded-2xl border p-4 text-left transition disabled:opacity-50 ${
-                                      editRenovacaoAutomatica
-                                        ? 'border-blue-200 bg-blue-50 text-blue-800'
-                                        : 'border-amber-200 bg-amber-50 text-amber-800'
-                                    }`}
-                                  >
-                                    <RefreshCw size={18} />
-                                    <p className="mt-2 text-sm font-black">{editRenovacaoAutomatica ? 'Renovação automática' : '30 dias sem renovação'}</p>
-                                    <p className="mt-1 text-xs font-medium opacity-80">Define validade da assinatura.</p>
-                                  </button>
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-bold text-purple-600 uppercase mb-1">Limite Empresas (CNPJs)</label>
-                                    <input type="number" placeholder="Ex: 5" className="w-full rounded-xl border border-purple-200 bg-purple-50/50 p-3 outline-none transition focus:border-purple-500 focus:ring-2 focus:ring-purple-100" value={editLimit} onChange={e => setEditLimit(Number(e.target.value))}/>
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-bold text-green-600 uppercase mb-1">Limite NFS-e (Global/Mês)</label>
-                                    <input type="number" placeholder="Ex: 5000" className="w-full rounded-xl border border-green-200 bg-green-50/50 p-3 outline-none transition focus:border-green-500 focus:ring-2 focus:ring-green-100" value={editLimiteNotas} onChange={e => setEditLimiteNotas(e.target.value !== '' ? Number(e.target.value) : '')}/>
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-bold text-blue-600 uppercase mb-1">Limite Clientes (Carteira)</label>
-                                    <input type="number" placeholder="Ex: 100" className="w-full rounded-xl border border-blue-200 bg-blue-50/50 p-3 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100" value={editLimiteClientes} onChange={e => setEditLimiteClientes(e.target.value !== '' ? Number(e.target.value) : '')}/>
-                                </div>
-                            </>
-                        )}
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label className="text-sm font-bold">Papel de acesso
+                        <select className="block w-full rounded-xl border p-3 mt-1" value={roleInput} onChange={(e) => setRoleInput(e.target.value)}>
+                          <option value="COMUM">Usuário comum</option><option value="SUPORTE">Suporte</option>
+                          <option value="SUPORTE_TI">Suporte T.I.</option><option value="COMERCIAL">Comercial</option>
+                          <option value="CONTADOR">Contador parceiro</option><option value="ADMIN">Administrador</option>
+                          <option value="MASTER">Master</option>
+                        </select>
+                      </label>
+                      <label className="text-sm font-bold">Limite de empresas (salvo junto com o acesso)
+                        <input type="number" min="0" max="10000" step="1" value={editLimit} onChange={(e) => setEditLimit(Number(e.target.value))} className="block w-full rounded-xl border p-3 mt-1" />
+                      </label>
+                      <p className="text-sm text-slate-600 sm:col-span-2">Mudar o papel não concede assinatura, não renova prazos e não transfere propriedade de empresas. Salve a promoção antes de conceder benefícios ao contador.</p>
                     </div>
-
-                    {roleInput === 'CONTADOR' && (
-                      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                        <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                          <Building2 className="text-purple-600" size={20} />
-                          <p className="mt-3 text-2xl font-black text-slate-950">{empresasNaCarteira}/{editLimit || 0}</p>
-                          <p className="text-xs font-bold uppercase text-slate-400">Empresas na carteira</p>
-                          <div className="mt-3 h-2 rounded-full bg-slate-100">
-                            <div className="h-2 rounded-full bg-purple-600" style={{ width: `${limiteEmpresasPct}%` }} />
-                          </div>
-                        </div>
-                        <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                          <FileCheck className="text-emerald-600" size={20} />
-                          <p className="mt-3 text-2xl font-black text-slate-950">{editLimiteNotas || 0}</p>
-                          <p className="text-xs font-bold uppercase text-slate-400">NFS-e globais por mês</p>
-                        </div>
-                        <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                          <Clock3 className="text-blue-600" size={20} />
-                          <p className="mt-3 text-2xl font-black text-slate-950">{editRenovacaoAutomatica ? 'Auto' : '30 dias'}</p>
-                          <p className="text-xs font-bold uppercase text-slate-400">Renovação</p>
-                        </div>
-                      </div>
+                    {['SUPORTE', 'SUPORTE_TI', 'COMERCIAL'].includes(selectedUserFull.role) && (
+                      <section className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3">
+                        <h4 className="font-bold text-slate-900">Uso pessoal da área do cliente</h4>
+                        <p className="text-sm text-slate-600">O cargo interno não libera acesso à própria empresa. Esta permissão e o plano são concedidos separadamente; empresas de terceiros continuam fora desse acesso.</p>
+                        <p className="text-sm font-semibold">Permissão: {customerAccess === null ? 'Carregando...' : customerAccess.enabled ? 'Liberada' : 'Bloqueada'}</p>
+                        <button type="button" disabled={!customerAccess || customerActionPending} onClick={changeCustomerAccess}
+                          className="rounded-lg border border-blue-600 px-4 py-2 text-sm font-bold text-blue-700 disabled:opacity-40">
+                          {customerAccess?.enabled ? 'Bloquear área do cliente' : 'Liberar área do cliente'}
+                        </button>
+                        {customerAccess?.enabled && <div className="flex flex-wrap gap-2 border-t pt-3">
+                          <label className="sr-only" htmlFor="internal-customer-plan">Plano pessoal</label>
+                          <select id="internal-customer-plan" value={customerPlanSelection} onChange={event => setCustomerPlanSelection(event.target.value)}
+                            className="min-w-52 flex-1 rounded-lg border px-3 py-2 text-sm">
+                            <option value="">Selecione um plano mensal</option>
+                            {customerPlans.map(plan => <option key={plan.slug} value={plan.slug}>{plan.name}</option>)}
+                          </select>
+                          <button type="button" disabled={!customerPlanSelection || customerActionPending} onClick={grantCustomerPlan}
+                            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-40">Conceder plano</button>
+                        </div>}
+                      </section>
                     )}
+                    {selectedUserFull.role === 'CONTADOR' && <AccountantBenefitPanel key={selectedUserFull.id} userId={selectedUserFull.id}
+                      suspended={selectedUserFull.planoStatus === 'suspended'} onChanged={async () => { await handleOpenEdit(selectedUserFull.id); carregarDados(); }} />}
 
-                    {/* LISTA DE EMPRESAS VINCULADAS */}
-                    {roleInput === 'CONTADOR' && (
-                        <div className="rounded-2xl border border-slate-200 p-4">
-                            <h4 className="font-bold text-sm text-slate-700 mb-3 flex items-center gap-2"><Building2 size={16}/> Empresas Proprietarias ({selectedUserFull.empresasProprietarias?.length || 0})</h4>
-                            <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_1fr_auto]">
-                                <input
-                                  className="rounded-xl border border-slate-200 p-3 text-sm outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
-                                  placeholder="CNPJ"
-                                  value={novaProprietaria.documento}
-                                  onChange={e => setNovaProprietaria({ ...novaProprietaria, documento: e.target.value })}
-                                />
-                                <input
-                                  className="rounded-xl border border-slate-200 p-3 text-sm outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
-                                  placeholder="Razao social opcional"
-                                  value={novaProprietaria.razaoSocial}
-                                  onChange={e => setNovaProprietaria({ ...novaProprietaria, razaoSocial: e.target.value })}
-                                />
-                                <button
-                                  type="button"
-                                  onClick={handleAddEmpresaProprietaria}
-                                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-black text-white transition hover:bg-blue-700"
-                                >
-                                  <Building2 size={16}/> Incluir
-                                </button>
-                            </div>
-                            <div className="mt-3 max-h-44 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50">
-                                {selectedUserFull.empresasProprietarias?.length === 0 || !selectedUserFull.empresasProprietarias ? (
-                                    <p className="p-4 text-xs text-center text-slate-400">Nenhuma empresa proprietaria marcada.</p>
-                                ) : (
-                                    selectedUserFull.empresasProprietarias?.map((empresa: any) => (
-                                        <div key={empresa.id} className="flex items-center justify-between border-b p-3 text-sm transition last:border-0 hover:bg-white">
-                                            <div>
-                                                <p className="font-bold text-slate-700">{empresa.razaoSocial}</p>
-                                                <p className="text-[10px] text-slate-500">CNPJ: {empresa.documento}</p>
-                                            </div>
-                                            <button onClick={() => handleRemoveEmpresaProprietaria(empresa.id)} className="text-red-500 hover:bg-red-50 p-1.5 rounded border border-transparent hover:border-red-200 transition" title="Remover propriedade">
-                                                <X size={14}/>
-                                            </button>
-                                        </div>
-                                    ))
-                                )}
-                            </div>
-                        </div>
-                    )}
+                    {['COMUM', 'CONTADOR'].includes(selectedUserFull.role) && <AdminAccountCompaniesPanel key={selectedUserFull.id} userId={selectedUserFull.id} onChanged={carregarDados} />}
 
-                    {roleInput === 'CONTADOR' && (
+                    {selectedUserFull.role === 'CONTADOR' && (
                         <div className="rounded-2xl border border-slate-200 p-4">
-                            <h4 className="font-bold text-sm text-slate-700 mb-3 flex items-center gap-2"><Building2 size={16}/> Carteira de Empresas Ativas ({selectedUserFull.empresasContabeis?.length || 0})</h4>
+                            <h4 className="font-bold text-sm text-slate-700 mb-3 flex items-center gap-2"><Building2 size={16}/> Carteira de Empresas Ativas ({selectedUserFull._count?.empresasContabeis ?? selectedUserFull.empresasContabeis?.length ?? 0})</h4>
+                            {selectedUserFull._count?.empresasContabeis > 50 && <p className="mb-2 text-xs text-slate-600">Mostrando os 50 vínculos ativos mais recentes. Consulte todos em <Link className="underline" href="/admin/vinculos-custodia">Vínculos e custódia</Link>.</p>}
                             <div className="max-h-52 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50">
                                 {selectedUserFull.empresasContabeis?.length === 0 ? (
                                     <p className="p-4 text-xs text-center text-slate-400">Nenhuma empresa vinculada.</p>
@@ -639,6 +527,7 @@ export default function GestaoColaboradores() {
       )}
 
       {/* LISTA DE COLABORADORES */}
+      {listError && <p role="alert" className="rounded-xl border border-red-300 bg-red-50 p-3 text-red-800">{listError}</p>}
       <div className="saas-table-scroll rounded-2xl border border-slate-200 bg-white shadow-sm">
         <table className="min-w-[760px] w-full text-left text-sm">
             <thead className="border-b bg-slate-50">
@@ -712,6 +601,11 @@ export default function GestaoColaboradores() {
                 ))}
             </tbody>
         </table>
+      </div>
+      <div className="flex items-center justify-end gap-3 text-sm">
+        <button disabled={page <= 1} onClick={() => setPage(value => value - 1)} className="rounded border px-3 py-2 disabled:opacity-40">Anterior</button>
+        <span>Página {page} de {totalPages}</span>
+        <button disabled={page >= totalPages} onClick={() => setPage(value => value + 1)} className="rounded border px-3 py-2 disabled:opacity-40">Próxima</button>
       </div>
     </div>
   );

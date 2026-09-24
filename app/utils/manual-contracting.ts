@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { normalizeBase64Attachment } from './request-guards';
 
 export const MANUAL_CONTRACTING_PAYMENT = 'ATIVACAO_MANUAL';
 
@@ -11,6 +12,8 @@ export const MANUAL_CONTRACTING_PENDING_STATUSES = [
 export const MANUAL_CONTRACTING_FINAL_STATUSES = [
   'ATIVADO_MANUALMENTE',
   'RECUSADO',
+  'CANCELADO',
+  'EXPIRADO',
 ] as const;
 
 export const MANUAL_CONTRACTING_STATUSES = [
@@ -24,6 +27,8 @@ export const MANUAL_CONTRACTING_STATUS_LABELS: Record<string, string> = {
   EM_ANALISE: 'Em analise',
   ATIVADO_MANUALMENTE: 'Ativado manualmente',
   RECUSADO: 'Recusado',
+  CANCELADO: 'Cancelado',
+  EXPIRADO: 'Expirado',
   AGUARDANDO_ATIVACAO_MANUAL: 'Aguardando ativacao manual',
 };
 
@@ -42,7 +47,8 @@ export function parsePedidoMetadata(gatewayId: string | null) {
   if (!gatewayId) return {};
 
   try {
-    return JSON.parse(gatewayId);
+    const parsed = JSON.parse(gatewayId);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
   } catch {
     return {};
   }
@@ -82,6 +88,9 @@ export function validatePaymentProof(input: {
   let base64 = input.conteudoBase64.trim();
   const dataUrlMatch = base64.match(/^data:([^;,]+);base64,/i);
   if (dataUrlMatch) {
+    if (dataUrlMatch[1].toLowerCase() !== mimeType) {
+      return { errorResponse: NextResponse.json({ error: 'Tipo declarado do comprovante inconsistente.' }, { status: 400 }) };
+    }
     base64 = base64.slice(dataUrlMatch[0].length);
   }
 
@@ -91,6 +100,11 @@ export function validatePaymentProof(input: {
   }
 
   const buffer = Buffer.from(compactBase64, 'base64');
+  const normalized = normalizeBase64Attachment(`data:${mimeType};base64,${compactBase64}`, nomeArquivo);
+  if (normalized.errorResponse) return { errorResponse: normalized.errorResponse };
+  if (input.tamanho !== undefined && (!Number.isSafeInteger(declaredSize) || declaredSize !== buffer.length)) {
+    return { errorResponse: NextResponse.json({ error: 'Tamanho declarado do comprovante inconsistente.' }, { status: 400 }) };
+  }
   if (buffer.length > MAX_PAYMENT_PROOF_BYTES || declaredSize > MAX_PAYMENT_PROOF_BYTES) {
     return { errorResponse: NextResponse.json({ error: 'Comprovante excede o limite de 5 MB.' }, { status: 413 }) };
   }
@@ -107,7 +121,12 @@ export function validatePaymentProof(input: {
 }
 
 export function serializePedidoContratacao(pedido: any) {
-  const detalhes = parsePedidoMetadata(pedido.gatewayId);
+  const metadata = parsePedidoMetadata(pedido.gatewayId);
+  // Never expose internal notes or operator identifiers through the customer API.
+  const detalhes = Object.fromEntries([
+    'cupom', 'qtdCiclos', 'planoNome', 'pacotes', 'ticketId', 'ticketProtocolo',
+    'comprovanteEnviadoEm', 'motivoRecusa', 'processadoEm', 'inicioAssinatura',
+  ].filter((key) => metadata[key] !== undefined).map((key) => [key, metadata[key]]));
   const anexos = Array.isArray(pedido.anexos) ? pedido.anexos : [];
 
   return {
@@ -123,6 +142,8 @@ export function serializePedidoContratacao(pedido: any) {
     formaPagamento: pedido.formaPagamento,
     createdAt: pedido.createdAt,
     updatedAt: pedido.updatedAt,
+    expiresAt: pedido.expiresAt,
+    cotacao: pedido.cotacao || null,
     detalhes,
     anexos: anexos.map((anexo: any) => ({
       id: anexo.id,

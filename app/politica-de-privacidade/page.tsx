@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { ArrowLeft, Mail, ShieldCheck } from "lucide-react";
-import { companyLegalName, legalNotice, legalUpdatedAt, privacyContactEmail } from "@/app/legal-content";
+import { companyLegalAddress, companyLegalCnpj, companyLegalName, legalNotice, legalUpdatedAt, privacyContactEmail, privacyOfficerName } from "@/app/legal-content";
 
 const dataCategories = [
   "Dados de cadastro e autenticacao: nome, e-mail, CPF, telefone, senha criptografada, codigo de verificacao, IP de origem e registros de acesso.",
   "Dados empresariais e fiscais: CNPJ, razao social, nome fantasia, inscricoes, endereco, regime tributario, CNAEs, codigos de servico e parametros de tributacao.",
-  "Dados de clientes/tomadores: nome, CPF/CNPJ, e-mail, telefone, endereco, inscricoes e demais informacoes necessarias para emissao de NFS-e.",
+  "Dados de clientes/tomadores: identidade cadastral pública da PJ por CNPJ; e-mail, telefone, inscrições e preferências particulares de cada relação comercial; dados locais de PF e exterior; e demais informações necessárias à NFS-e.",
   "Dados de emissao: descricoes de servicos, valores, XMLs, PDFs, chaves de acesso, protocolos, status de notas, rascunhos, cancelamentos e logs tecnicos.",
   "Certificado digital A1: arquivo, senha, validade e dados tecnicos necessarios para assinatura e transmissao de documentos fiscais.",
   "Dados comerciais e suporte: planos, pedidos, faturas, cupons, tickets, mensagens, anexos e historico de atendimento.",
@@ -52,9 +52,7 @@ export default function PoliticaDePrivacidade() {
             </div>
           </div>
 
-          <div className="mb-8 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm font-semibold leading-6 text-amber-900">
-            {legalNotice}
-          </div>
+          {legalNotice && <div className="mb-8 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm font-semibold leading-6 text-amber-900">{legalNotice}</div>}
 
           <div className="space-y-8 text-sm leading-7 text-slate-700">
             <section>
@@ -65,6 +63,7 @@ export default function PoliticaDePrivacidade() {
                 tomadores cadastrados, enquanto {companyLegalName} pode atuar como operadora quando processa dados em nome da
                 contratante e como controladora em atividades proprias, como cadastro, seguranca, cobranca e suporte.
               </p>
+              {(companyLegalCnpj || companyLegalAddress) && <p className="mt-3"><strong>Controlador:</strong> {companyLegalName}{companyLegalCnpj ? ` · CNPJ ${companyLegalCnpj}` : ''}{companyLegalAddress ? ` · ${companyLegalAddress}` : ''}.</p>}
             </section>
 
             <section>
@@ -79,6 +78,17 @@ export default function PoliticaDePrivacidade() {
               <ul className="mt-3 list-disc space-y-2 pl-5">
                 {purposes.map((item) => <li key={item}>{item}</li>)}
               </ul>
+            </section>
+
+            <section>
+              <h2 className="text-xl font-black text-slate-950">3.1. Identidade fiscal de pessoas jurídicas</h2>
+              <p className="mt-3">
+                Para reduzir duplicidades e divergências, dados cadastrais públicos de uma pessoa jurídica podem ser mantidos
+                em uma identidade única vinculada ao CNPJ e reutilizados nas carteiras que cadastrem esse mesmo tomador.
+                Contatos e inscrições informados especificamente para a relação entre prestador e tomador permanecem separados
+                por empresa e não são compartilhados com outras carteiras. Cada documento fiscal conserva a fotografia dos
+                dados efetivamente utilizados na emissão, mesmo se a identidade cadastral for atualizada depois.
+              </p>
             </section>
 
             <section>
@@ -133,6 +143,7 @@ export default function PoliticaDePrivacidade() {
                 </a>
                 . Poderemos solicitar informacoes adicionais para confirmar sua identidade e proteger terceiros.
               </p>
+              <p className="mt-3">Titulares autenticados também podem usar a <Link href="/privacidade" className="font-black text-blue-700 hover:text-blue-900">Central de Privacidade</Link> para obter uma cópia imediata e acompanhar protocolos.</p>
             </section>
 
             <section>
@@ -155,7 +166,7 @@ export default function PoliticaDePrivacidade() {
           </div>
 
           <div className="mt-10 flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
-            <span className="font-semibold">Canal de privacidade</span>
+            <span className="font-semibold">Canal de privacidade{privacyOfficerName ? ` · Encarregado(a): ${privacyOfficerName}` : ''}</span>
             <a className="inline-flex items-center gap-2 font-black text-blue-700 hover:text-blue-900" href={`mailto:${privacyContactEmail}`}>
               <Mail size={16} />
               {privacyContactEmail}

@@ -1,6 +1,7 @@
+import { withApiGuard } from '@/app/utils/api-route';
 import { NextResponse } from 'next/server';
 
-export async function POST(request: Request) {
+export const POST = withApiGuard(async function POST(request: Request) {
   try {
     const { cep } = await request.json();
     const cepLimpo = cep.replace(/\D/g, '');
@@ -28,4 +29,4 @@ export async function POST(request: Request) {
   } catch (error) {
     return NextResponse.json({ error: 'Erro ao consultar CEP.' }, { status: 500 });
   }
-}
+});

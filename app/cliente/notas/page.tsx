@@ -8,7 +8,7 @@ export default function PaginaNotas() {
     <div className="saas-shell">
       <AppHeader
         title="Notas emitidas"
-        subtitle="Visualize notas autorizadas, baixe XML/PDF e realize cancelamentos."
+        subtitle="Notas de produção: consulte autorizadas e canceladas, baixe XML/PDF e solicite cancelamentos."
         eyebrow="Gerenciamento fiscal"
         backHref="/cliente/dashboard"
       />

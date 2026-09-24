@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
-import { verifyJWT } from '@/app/utils/auth';
 import { cookies } from 'next/headers';
-import { prisma } from '@/app/utils/prisma';
 import { validateSameOrigin } from '@/app/utils/request-guards';
+import { roleRequiresMfa } from '@/app/utils/mfa-policy';
+import { findActiveAuthSession } from '@/app/utils/auth-session';
 
 export async function getAuthenticatedUser(request: Request) {
   const originError = validateSameOrigin(request);
@@ -11,7 +11,7 @@ export async function getAuthenticatedUser(request: Request) {
   }
 
   // 1. Busca o token no Cookie HttpOnly
-  const cookieStore = cookies();
+  const cookieStore = (await cookies());
   const token = cookieStore.get('auth_token')?.value;
 
   // 2. Se não tiver token, já retorna nulo (Bloqueia acesso)
@@ -21,16 +21,16 @@ export async function getAuthenticatedUser(request: Request) {
 
   // 3. Valida o Token
   try {
-    const payload = await verifyJWT(token);
-    
-    // 4. Busca o usuário no banco para garantir que ele ainda existe/está ativo
-    if (payload && payload.sub) {
-        // Garantir que payload.sub é tratado como string
-        const userId = typeof payload.sub === 'string' ? payload.sub : String(payload.sub);
-        const user = await prisma.user.findUnique({
-            where: { id: userId }
-        });
-        return user; // Retorna o usuário autenticado de verdade
+    const session = await findActiveAuthSession(token);
+    if (session) {
+        const pathname = new URL(request.url).pathname;
+        const securitySetupPath = ['/api/auth/mfa', '/api/auth/sessions', '/api/auth/trusted-devices', '/api/auth/logout', '/api/system/status'].includes(pathname);
+        const legalSetupPath = securitySetupPath || pathname === '/api/legal/acceptance';
+        const mfaPending = (roleRequiresMfa(session.user.role) && !session.user.mfaEnabledAt)
+          || (Boolean(session.user.mfaEnabledAt) && !session.mfaVerifiedAt);
+        if (mfaPending && !securitySetupPath) return null;
+        if (session.user.legalAcceptances.length === 0 && !legalSetupPath) return null;
+        return session.user;
     }
     return null;
 

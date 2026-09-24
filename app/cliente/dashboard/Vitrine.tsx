@@ -3,35 +3,36 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ChevronRight, Globe, Lightbulb, Package, TrendingUp } from 'lucide-react';
+import { formatReportMoney } from '@/app/utils/fiscal-report';
 
 type PlatformStats = {
   totalNotas: number;
   totalClientes: number;
   municipios: number;
-  valorMes: number;
+  valorMes: number | string;
+  notasSemAmbiente?: number;
 };
 
-export default function Vitrine() {
+export default function Vitrine({ unlimitedPlan = false }: { unlimitedPlan?: boolean }) {
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [isPaused, setIsPaused] = useState(false);
   const [supportLink, setSupportLink] = useState('/cliente/suporte');
   const [newTicketLink, setNewTicketLink] = useState('/cliente/suporte/novo');
   const [stats, setStats] = useState<PlatformStats>({ totalNotas: 0, totalClientes: 0, municipios: 0, valorMes: 0 });
+  const [statsState, setStatsState] = useState<'loading' | 'ready' | 'error'>('loading');
 
   useEffect(() => {
     const userId = localStorage.getItem('userId');
     if (userId) {
-      fetch(`/api/saas/stats?t=${Date.now()}`, { cache: 'no-store', headers: { 'x-user-id': userId } })
+      fetch(`/api/saas/stats?t=${Date.now()}`, { cache: 'no-store', headers: { 'x-user-id': userId, 'x-empresa-id': localStorage.getItem('empresaContextId') || '' } })
         .then((response) => {
           if (!response.ok) throw new Error('Erro ao carregar os números da plataforma');
           return response.json();
         })
-        .then((data) => data && !data.error && setStats(data))
-        .catch(console.error);
+        .then((data) => { if (!data || data.error) throw new Error('Dados indisponíveis'); setStats(data); setStatsState('ready'); })
+        .catch(() => setStatsState('error'));
     }
 
-    const role = localStorage.getItem('userRole') || '';
-    const internal = localStorage.getItem('isSupportMode') === 'true' || ['ADMIN', 'SUPORTE', 'SUPER_ADMIN'].includes(role);
+    const internal = localStorage.getItem('isSupportMode') === 'true';
     if (internal) {
       setSupportLink('/admin/suporte');
       setNewTicketLink('/admin/suporte');
@@ -41,10 +42,10 @@ export default function Vitrine() {
   const cards = [
     {
       id: 'network',
-      badge: 'Números da plataforma',
-      title: 'O Poder da Nossa Rede',
-      description: 'Milhares de notas são emitidas diariamente. Confie na robustez do sistema para escalar o seu negócio de forma segura.',
-      action: 'Ver nossos planos',
+      badge: 'Numeros da sua empresa',
+      title: 'Sua operacao em numeros',
+      description: 'Notas autorizadas em produção e clientes da empresa selecionada. Homologação e legado sem ambiente não entram nos totais fiscais.',
+      action: unlimitedPlan ? 'Gerenciar conta' : 'Ver nossos planos',
       href: '/configuracoes/minha-conta',
       tone: 'bg-gradient-to-br from-slate-800 to-slate-950',
       icon: Globe,
@@ -52,16 +53,16 @@ export default function Vitrine() {
     },
     {
       id: 'monthly-volume',
-      badge: 'Movimento da plataforma',
+      badge: 'Movimento da sua empresa',
       title: 'Faturamento emitido no mês',
-      description: 'Valor total das NFS-e emitidas pelo SaaS no mês atual.',
+      description: 'Somente NFS-e autorizadas em produção, pela data de emissão no mês de Brasília. Não inclui homologação nem documentos sem ambiente confirmado.',
       action: 'Conhecer a plataforma',
       href: '/configuracoes/minha-conta',
       tone: 'bg-gradient-to-br from-emerald-600 to-teal-800',
       icon: TrendingUp,
       kind: 'revenue',
     },
-    {
+    ...(!unlimitedPlan ? [{
       id: 'packages',
       badge: 'Novidade',
       title: 'Pacotes Avulsos de Notas',
@@ -71,7 +72,7 @@ export default function Vitrine() {
       tone: 'bg-gradient-to-br from-blue-600 to-indigo-700',
       icon: Package,
       kind: 'standard',
-    },
+    }] : []),
     {
       id: 'international',
       badge: 'Dica',
@@ -96,21 +97,16 @@ export default function Vitrine() {
     },
   ];
 
-  useEffect(() => {
-    if (isPaused) return;
-    const timer = window.setInterval(() => setCurrentIndex((index) => (index + 1) % cards.length), 6000);
-    return () => window.clearInterval(timer);
-  }, [isPaused, cards.length]);
-
-  const money = Number(stats.valorMes || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const money = statsState === 'ready' ? formatReportMoney(stats.valorMes) : statsState === 'error' ? 'Dados indisponíveis' : 'Carregando...';
 
   return (
-    <section className="group relative h-[260px] w-full overflow-hidden rounded-2xl border border-slate-200 shadow-sm sm:h-[320px] min-[1440px]:h-[700px]" onMouseEnter={() => setIsPaused(true)} onMouseLeave={() => setIsPaused(false)}>
+    <section aria-label="Informações da empresa" className="group relative w-full overflow-hidden rounded-2xl border border-slate-200 shadow-sm">
       {cards.map((card, index) => {
         const Icon = card.icon;
         const active = currentIndex === index;
+        if (!active) return null;
         return (
-          <article key={card.id} className={`absolute inset-0 flex h-full flex-col p-6 pb-12 text-white transition-all duration-700 ${card.tone} ${active ? 'translate-x-0 opacity-100' : 'pointer-events-none translate-x-8 opacity-0'}`}>
+          <article key={card.id} className={`relative flex min-h-[380px] flex-col gap-3 p-6 pb-14 text-white ${card.tone}`}>
             <Icon className="pointer-events-none absolute -right-8 -top-8 h-40 w-40 opacity-[0.08]" />
             <div className="relative z-10">
               <span className="inline-flex rounded-full bg-white/20 px-3 py-1 text-[10px] font-black uppercase tracking-widest backdrop-blur">{card.badge}</span>
@@ -123,7 +119,7 @@ export default function Vitrine() {
                 {[['NFS-e', stats.totalNotas], ['Clientes', stats.totalClientes], ['Cidades', stats.municipios]].map(([label, value]) => (
                   <div key={String(label)} className="min-w-0 rounded-xl border border-white/10 bg-white/10 p-3 backdrop-blur-sm">
                     <span className="block truncate text-[10px] font-bold uppercase text-white/60">{label}</span>
-                    <span className="mt-1 block text-xl font-black">{value}</span>
+                    <span className="mt-1 block text-xl font-black">{statsState === 'ready' ? value : statsState === 'error' ? '-' : '...'}</span>
                   </div>
                 ))}
               </div>
@@ -131,9 +127,10 @@ export default function Vitrine() {
 
             {card.kind === 'revenue' && (
               <div className="relative z-10 my-auto rounded-2xl border border-white/20 bg-white/15 p-5 backdrop-blur-sm">
-                <span className="text-[10px] font-black uppercase tracking-widest text-emerald-100">Total emitido pelo SaaS</span>
+                <span className="text-[10px] font-black uppercase tracking-widest text-emerald-100">Total autorizado da sua empresa</span>
                 <strong className="mt-2 block break-words text-3xl font-black tracking-tight">{money}</strong>
-                <span className="mt-2 block text-xs font-semibold text-emerald-50/80">Competência do mês atual</span>
+                <span className="mt-2 block text-xs font-semibold text-emerald-50/80">Produção - mês atual</span>
+                {!!stats.notasSemAmbiente && <Link href="/relatorios" className="mt-2 block text-xs font-bold underline">{stats.notasSemAmbiente} documento(s) legado(s) excluído(s): conferir nos relatórios.</Link>}
               </div>
             )}
 

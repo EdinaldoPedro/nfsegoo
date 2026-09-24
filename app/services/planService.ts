@@ -1,468 +1,155 @@
-import { PrismaClient } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { prisma } from '@/app/utils/prisma';
+import { hasCustomerCompanyAccess, isAdminRole } from '@/app/utils/access-control';
+import { contractIsActive, currentUsageCycle, isBaseContract } from '@/app/utils/billing-cycle';
+import { commercialTransaction } from './commercialService';
 
-const prisma = new PrismaClient();
-
+type Db = Prisma.TransactionClient;
 export type TipoAcao = 'EMITIR' | 'VISUALIZAR' | 'CADASTRAR_CLIENTE';
-
 export type EffectivePlanLimits = {
-  allowedBase: boolean;
-  status: 'ATIVO' | 'EXPIRADO' | 'INATIVO' | 'LIMITE_ATINGIDO';
-  reason?: string;
+  allowedBase: boolean; status: 'ATIVO' | 'EXPIRADO' | 'INATIVO' | 'LIMITE_ATINGIDO'; reason?: string;
   historyIdDisponivel?: string;
-  planoBase?: {
-    id: string;
-    nome: string;
-    slug: string;
-    tipo: string;
-    dataInicio: Date;
-    dataFim: Date | null;
-    diasTeste: number;
-  };
-  limiteNotas: number;
-  notasUsadas: number;
-  limiteClientes: number;
-  clientesUsados: number;
-  limiteEmpresas: number;
-  empresasUsadas: number;
-  empresasAdicionais: number;
+  planoBase?: { id: string; nome: string; slug: string; tipo: string; dataInicio: Date; dataFim: Date | null; diasTeste: number };
+  limiteNotas: number; notasUsadas: number; limiteClientes: number; clientesUsados: number;
+  limiteEmpresas: number; empresasUsadas: number; empresasAdicionais: number;
+  unlimited: boolean;
   origem: 'ADMIN' | 'PLANO' | 'CUSTOM' | 'PACOTE' | 'SEM_PLANO';
 };
 
-function inicioDoMes(data = new Date()) {
-  return new Date(data.getFullYear(), data.getMonth(), 1);
+async function billingState(db: Db, userId: string, now: Date) {
+  const user = await db.user.findUnique({ where: { id: userId }, select: {
+    id: true, role: true, empresaId: true, limiteEmpresas: true, empresasAdicionais: true, planoStatus: true, createdAt: true,
+  } });
+  const histories = await db.planHistory.findMany({ where: { userId, arquivadoEm: null, status: { in: ['ATIVO', 'EXPIRADO'] } },
+    include: { plan: { select: { id: true, slug: true, diasTeste: true } },
+      usageCycles: { where: { startsAt: { lte: now } }, orderBy: { startsAt: 'desc' }, take: 1 } },
+    orderBy: [{ dataInicio: 'desc' }, { id: 'asc' }] });
+  const active = histories.filter((h) => contractIsActive(h, now));
+  // Multiple legacy base histories must not accidentally multiply a subscription.
+  const base = active.find((h) => isBaseContract(h.tipoContratado));
+  const valid = base ? [base, ...active.filter((h) => !isBaseContract(h.tipoContratado))] : [];
+  const buckets = valid.map((history) => {
+    const cycle = currentUsageCycle(history, now);
+    const row = cycle && history.usageCycles.find((c) => c.startsAt.getTime() === cycle.startsAt.getTime());
+    return { history, cycle, used: row?.used || 0, limit: Math.max(0, history.limiteNotasContratado ?? 0) };
+  }).filter((bucket) => bucket.cycle !== null);
+  const unlimited = !!user && isAdminRole(user.role) && user.planoStatus !== 'suspended';
+  const allowed = !!user && user.planoStatus !== 'suspended' && (unlimited || !!base);
+  const expired = histories.some((h) => isBaseContract(h.tipoContratado) && h.dataFim && h.dataFim <= now);
+  return { user, base, buckets, allowed, expired, unlimited };
 }
 
-function isBasePlanType(tipo?: string | null) {
-  return tipo === 'PLANO' || tipo === 'CUSTOM';
-}
-
-export async function renovarUsoMensalSeNecessario(userId: string) {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { dataRenovacaoCiclo: true, empresaId: true },
-  });
-
-  if (!user) return;
-
-  const mesAtual = inicioDoMes();
-  const ultimaRenovacao = user.dataRenovacaoCiclo ? inicioDoMes(user.dataRenovacaoCiclo) : null;
-
-  if (ultimaRenovacao && ultimaRenovacao >= mesAtual) return;
-
-  const historicosAtivos = await prisma.planHistory.findMany({
-    where: { userId, status: 'ATIVO' },
-    include: { plan: true },
-    orderBy: { createdAt: 'asc' },
-  });
-
-  const notasAutorizadasMes = await prisma.notaFiscal.count({
-    where: {
-      status: 'AUTORIZADA',
-      arquivadoEm: null,
-      createdAt: { gte: mesAtual },
-      empresa: {
-        OR: [
-          { donoFaturamentoId: userId },
-          { proprietarioUserId: userId } as any,
-          { id: user.empresaId || '' },
-          { contadoresLink: { some: { contadorId: userId, status: 'APROVADO', arquivadoEm: null } } },
-        ],
-      },
-    } as any,
-  });
-
-  let restante = notasAutorizadasMes;
-  const updates = historicosAtivos.map((hist) => {
-    const limite = hist.plan.maxNotasMensal || 0;
-    const uso = limite > 0 ? Math.min(restante, limite) : 0;
-    restante = Math.max(0, restante - uso);
-
-    return prisma.planHistory.update({
-      where: { id: hist.id },
-      data: { notasEmitidas: uso },
-    });
-  });
-
-  await prisma.$transaction([
-    ...updates,
-    prisma.user.update({
-      where: { id: userId },
-      data: { dataRenovacaoCiclo: mesAtual },
-    }),
-  ]);
-}
-
-export async function resolveBillingUserId(params: {
-  empresaId: string;
-  actorUserId: string;
-  acao?: TipoAcao;
-}) {
-  const { empresaId, actorUserId } = params;
-
-  const [empresa, actor] = await Promise.all([
-    prisma.empresa.findUnique({
-      where: { id: empresaId },
-      select: {
-        id: true,
-        donoFaturamentoId: true,
-        proprietarioUserId: true,
-        modoCobranca: true,
-        contadorCustodianteId: true,
-      } as any,
-    }),
-    prisma.user.findUnique({
-      where: { id: actorUserId },
-      select: { id: true, role: true },
-    }),
-  ]);
-
-  if (!empresa) {
-    throw new Error('Empresa nao encontrada para resolver cobranca.');
-  }
-
-  if ((empresa as any).modoCobranca === 'POR_OPERADOR') return actorUserId;
-  if ((empresa as any).donoFaturamentoId) return (empresa as any).donoFaturamentoId as string;
-  if ((empresa as any).proprietarioUserId) return (empresa as any).proprietarioUserId as string;
-
-  const donoEmpresa = await prisma.user.findFirst({
-    where: { empresaId, role: { notIn: ['CONTADOR', 'SUPORTE', 'SUPORTE_TI'] } },
-    orderBy: { createdAt: 'asc' },
-    select: { id: true },
-  });
-
-  if (donoEmpresa) return donoEmpresa.id;
-  if ((empresa as any).contadorCustodianteId) return (empresa as any).contadorCustodianteId as string;
-  if (actor?.role === 'CONTADOR') return actorUserId;
-
-  return actorUserId;
-}
-
-export async function getEffectivePlanLimits(userId: string): Promise<EffectivePlanLimits> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: {
-      id: true,
-      role: true,
-      empresaId: true,
-      limiteEmpresas: true,
-      empresasAdicionais: true,
-    },
-  });
-
-  if (!user) {
-    return {
-      allowedBase: false,
-      status: 'INATIVO',
-      reason: 'Usuario nao encontrado.',
-      limiteNotas: 0,
-      notasUsadas: 0,
-      limiteClientes: 0,
-      clientesUsados: 0,
-      limiteEmpresas: 0,
-      empresasUsadas: 0,
-      empresasAdicionais: 0,
-      origem: 'SEM_PLANO',
-    };
-  }
-
-  if (['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(user.role)) {
-    return {
-      allowedBase: true,
-      status: 'ATIVO',
-      historyIdDisponivel: 'ADMIN_BYPASS',
-      limiteNotas: 99999,
-      notasUsadas: 0,
-      limiteClientes: 99999,
-      clientesUsados: 0,
-      limiteEmpresas: 99999,
-      empresasUsadas: 0,
-      empresasAdicionais: 0,
-      origem: 'ADMIN',
-    };
-  }
-
-  await renovarUsoMensalSeNecessario(userId);
-
-  const historicosAtivos = await prisma.planHistory.findMany({
-    where: { userId, status: 'ATIVO' },
-    include: { plan: true },
-    orderBy: { createdAt: 'asc' },
-  });
-
-  const historicosValidos = [];
-  let hasBasePlanExpired = false;
-
-  for (const hist of historicosAtivos) {
-    if (hist.dataFim && new Date() > hist.dataFim) {
-      await prisma.planHistory.update({
-        where: { id: hist.id },
-        data: { status: 'EXPIRADO' },
-      });
-
-      if (isBasePlanType(hist.plan.tipo)) hasBasePlanExpired = true;
-    } else {
-      historicosValidos.push(hist);
-    }
-  }
-
-  if (hasBasePlanExpired) {
-    await prisma.user.update({
-      where: { id: userId },
-      data: { planoStatus: 'expired' },
-    });
-  }
-
-  const limiteEmpresas = (user.limiteEmpresas || 0) + (user.empresasAdicionais || 0);
-
-  if (historicosValidos.length === 0) {
-    const expirado = await prisma.planHistory.findFirst({
-      where: { userId, status: 'EXPIRADO' },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    return {
-      allowedBase: false,
-      status: expirado ? 'EXPIRADO' : 'INATIVO',
-      reason: expirado
-        ? 'Seu plano expirou. Renove sua assinatura para acessar o sistema.'
-        : 'Nenhum plano ou pacote ativo. Escolha um plano para comecar.',
-      limiteNotas: 0,
-      notasUsadas: 0,
-      limiteClientes: 0,
-      clientesUsados: 0,
-      limiteEmpresas,
-      empresasUsadas: 0,
-      empresasAdicionais: user.empresasAdicionais || 0,
-      origem: 'SEM_PLANO',
-    };
-  }
-
-  let limiteNotas = 0;
-  let notasUsadas = 0;
-  let limiteClientes = 0;
-  let historyIdDisponivel = historicosValidos[0].id;
-  let encontrouEspaco = false;
-
-  for (const hist of historicosValidos) {
-    const limiteHist = hist.plan.maxNotasMensal || 0;
-    limiteNotas += limiteHist;
-    notasUsadas += hist.notasEmitidas || 0;
-    limiteClientes += hist.plan.maxClientes || 0;
-
-    if (!encontrouEspaco && limiteHist > 0 && hist.notasEmitidas < limiteHist) {
-      historyIdDisponivel = hist.id;
-      encontrouEspaco = true;
-    }
-  }
-
+export async function getEffectivePlanLimits(userId: string, db: Db = prisma, now = new Date()): Promise<EffectivePlanLimits> {
+  const { user, base, buckets, allowed, expired, unlimited } = await billingState(db, userId, now);
+  const empty: EffectivePlanLimits = { allowedBase: false, status: expired ? 'EXPIRADO' : 'INATIVO',
+    reason: expired ? 'Seu plano expirou. Renove para realizar novas operações.' : 'Nenhuma assinatura vigente para novas operações.',
+    limiteNotas: 0, notasUsadas: 0, limiteClientes: 0, clientesUsados: 0, limiteEmpresas: 0, empresasUsadas: 0,
+    empresasAdicionais: 0, unlimited: false, origem: 'SEM_PLANO' };
+  if (!user) return { ...empty, reason: 'Usuário não encontrado.' };
+  const companyWhere: Prisma.EmpresaWhereInput = { arquivadoEm: null, OR: [
+    { donoFaturamentoId: userId }, { proprietarioUserId: userId }, { id: user.empresaId || '' },
+    ...(user.role === 'CONTADOR' ? [{ contadoresLink: { some: { contadorId: userId, status: 'APROVADO', arquivadoEm: null } } }] : []),
+  ] };
   const [clientesUsados, empresasUsadas] = await Promise.all([
-    prisma.vinculoCarteira.count({
-      where: {
-        arquivadoEm: null,
-        empresa: {
-          OR: [
-            { donoFaturamentoId: userId },
-            { proprietarioUserId: userId } as any,
-            { id: user.empresaId || '' },
-          ],
-        },
-      },
-    }),
-    prisma.empresa.count({
-      where: {
-        arquivadoEm: null,
-        OR: [
-          { donoFaturamentoId: userId },
-          { proprietarioUserId: userId } as any,
-          { id: user.empresaId || '' },
-          { contadoresLink: { some: { contadorId: userId, status: 'APROVADO', arquivadoEm: null } } } as any,
-        ],
-      } as any,
-    }),
+    db.vinculoCarteira.count({ where: { arquivadoEm: null, empresa: companyWhere } }), db.empresa.count({ where: companyWhere }),
   ]);
-
-  const planoBase = historicosValidos.find((h) => isBasePlanType(h.plan.tipo)) || historicosValidos[0];
-  const origem = planoBase.plan.tipo === 'CUSTOM' ? 'CUSTOM' : planoBase.plan.tipo === 'PLANO' ? 'PLANO' : 'PACOTE';
-
-  return {
-    allowedBase: true,
-    status: 'ATIVO',
-    historyIdDisponivel,
-    planoBase: {
-      id: planoBase.plan.id,
-      nome: planoBase.plan.name,
-      slug: planoBase.plan.slug,
-      tipo: planoBase.plan.tipo,
-      dataInicio: planoBase.dataInicio,
-      dataFim: planoBase.dataFim,
-      diasTeste: planoBase.plan.diasTeste || 0,
-    },
-    limiteNotas,
-    notasUsadas,
-    limiteClientes,
-    clientesUsados,
-    limiteEmpresas,
-    empresasUsadas,
-    empresasAdicionais: user.empresasAdicionais || 0,
-    origem,
-  };
+  const counts = { clientesUsados, empresasUsadas, limiteEmpresas: Math.max(0, user.limiteEmpresas) + Math.max(0, user.empresasAdicionais), empresasAdicionais: user.empresasAdicionais };
+  if (unlimited) return { ...counts, allowedBase: true, status: 'ATIVO', unlimited: true,
+    limiteNotas: 0, notasUsadas: 0, limiteClientes: 0,
+    planoBase: { id: 'ADMIN_UNLIMITED', nome: 'Administrativo Customizado', slug: 'ADMIN_UNLIMITED', tipo: 'CUSTOM',
+      dataInicio: user.createdAt, dataFim: null, diasTeste: 0 }, origem: 'ADMIN' };
+  if (!allowed || !base) return { ...empty, ...counts, ...(user.planoStatus === 'suspended' ? { status: 'INATIVO', reason: 'Acesso operacional suspenso. Consulte o atendimento.' } : {}) };
+  return { ...counts, allowedBase: true, status: 'ATIVO', unlimited: false,
+    historyIdDisponivel: buckets.find((b) => b.used < b.limit)?.history.id,
+    limiteNotas: buckets.reduce((sum, b) => sum + b.limit, 0), notasUsadas: buckets.reduce((sum, b) => sum + b.used, 0),
+    limiteClientes: buckets.reduce((sum, b) => sum + Math.max(0, b.history.limiteClientesContratado ?? 0), 0),
+    planoBase: { id: base.planId, nome: base.nomeContratado || 'Plano contratado', slug: base.plan.slug, tipo: base.tipoContratado!,
+      dataInicio: base.dataInicio, dataFim: base.dataFim, diasTeste: base.plan.diasTeste },
+    origem: base.tipoContratado === 'CUSTOM' ? 'CUSTOM' : 'PLANO' };
 }
 
-export async function checkPlanLimits(userId: string, acao: TipoAcao = 'EMITIR') {
-  const limits = await getEffectivePlanLimits(userId);
-
-  if (!limits.allowedBase) {
-    return {
-      allowed: false,
-      reason: limits.reason,
-      status: limits.status,
-      limiteNotas: limits.limiteNotas,
-      notasUsadas: limits.notasUsadas,
-      limiteClientes: limits.limiteClientes,
-      clientesUsados: limits.clientesUsados,
-      limiteEmpresas: limits.limiteEmpresas,
-      empresasUsadas: limits.empresasUsadas,
-    };
-  }
-
-  if (acao === 'EMITIR' && limits.limiteNotas > 0 && limits.notasUsadas >= limits.limiteNotas) {
-    return {
-      allowed: false,
-      reason: `Voce atingiu o limite de ${limits.limiteNotas} emissoes mensais. Faca um upgrade ou compre um pacote extra de notas.`,
-      status: 'LIMITE_ATINGIDO',
-      limiteNotas: limits.limiteNotas,
-      notasUsadas: limits.notasUsadas,
-      limiteClientes: limits.limiteClientes,
-      clientesUsados: limits.clientesUsados,
-      limiteEmpresas: limits.limiteEmpresas,
-      empresasUsadas: limits.empresasUsadas,
-    };
-  }
-
-  if (acao === 'CADASTRAR_CLIENTE' && limits.limiteClientes > 0 && limits.clientesUsados >= limits.limiteClientes) {
-    return {
-      allowed: false,
-      reason: `Voce atingiu o limite de ${limits.limiteClientes} clientes cadastrados na sua carteira.`,
-      status: 'LIMITE_ATINGIDO',
-      limiteNotas: limits.limiteNotas,
-      notasUsadas: limits.notasUsadas,
-      limiteClientes: limits.limiteClientes,
-      clientesUsados: limits.clientesUsados,
-      limiteEmpresas: limits.limiteEmpresas,
-      empresasUsadas: limits.empresasUsadas,
-    };
-  }
-
-  return {
-    allowed: true,
-    historyId: limits.historyIdDisponivel || 'ADMIN_BYPASS',
-    status: limits.status,
-    limiteNotas: limits.limiteNotas,
-    notasUsadas: limits.notasUsadas,
-    limiteClientes: limits.limiteClientes,
-    clientesUsados: limits.clientesUsados,
-    limiteEmpresas: limits.limiteEmpresas,
-    empresasUsadas: limits.empresasUsadas,
-  };
+export async function checkPlanLimits(userId: string, acao: TipoAcao = 'EMITIR', db: Db = prisma) {
+  const limits = await getEffectivePlanLimits(userId, db);
+  // Subscription expiry does not confiscate access to historical fiscal data;
+  // authentication and company ACLs remain mandatory in the calling route.
+  if (acao === 'VISUALIZAR') return { ...limits, allowed: true, historyId: undefined };
+  if (!limits.allowedBase) return { ...limits, allowed: false, historyId: undefined };
+  if (limits.unlimited) return { ...limits, allowed: true, historyId: undefined };
+  const exhausted = acao === 'EMITIR' ? limits.notasUsadas >= limits.limiteNotas : limits.clientesUsados >= limits.limiteClientes;
+  return { ...limits, allowed: !exhausted, historyId: limits.historyIdDisponivel,
+    ...(exhausted ? { status: 'LIMITE_ATINGIDO', reason: acao === 'EMITIR'
+      ? 'Créditos de emissão esgotados neste ciclo. Consulte os pacotes adicionais.' : 'Limite de clientes da carteira atingido.' } : {}) };
 }
 
-export async function incrementUsage(historyId: string) {
-  if (historyId === 'ADMIN_BYPASS') return;
-  await prisma.planHistory.update({
-    where: { id: historyId },
-    data: { notasEmitidas: { increment: 1 } },
-  });
+export async function resolveBillingUserId(params: { empresaId: string; actorUserId: string; acao?: TipoAcao }, db: Db = prisma) {
+  const actor = await db.user.findUnique({ where: { id: params.actorUserId }, select: { id: true, role: true, empresaId: true } });
+  if (!actor || !await hasCustomerCompanyAccess(actor, params.empresaId, db)) throw Object.assign(new Error('Sem acesso à empresa para resolver a cobrança.'), { status: 403 });
+  const company = await db.empresa.findFirst({ where: { id: params.empresaId, arquivadoEm: null }, select: {
+    donoFaturamentoId: true, proprietarioUserId: true, modoCobranca: true, contadorCustodianteId: true,
+    donoUser: { select: { id: true, role: true } },
+  } });
+  if (!company) throw new Error('Empresa indisponível para cobrança.');
+  if (company.modoCobranca === 'POR_OPERADOR') return actor.id;
+  const owner = company.donoFaturamentoId || company.proprietarioUserId || company.donoUser?.id || company.contadorCustodianteId;
+  if (!owner) throw new Error('Defina o responsável pelo faturamento antes de emitir.');
+  return owner;
 }
 
-export async function reserveEmissionCredit(userId: string) {
-  const limits = await getEffectivePlanLimits(userId);
-
-  if (!limits.allowedBase) {
-    return {
-      allowed: false,
-      reason: limits.reason,
-      status: limits.status,
-      limiteNotas: limits.limiteNotas,
-      notasUsadas: limits.notasUsadas,
-      historyId: null as string | null,
-      reserved: false,
-    };
+/** Must run in the same transaction as job creation. The request key belongs to
+ * the company/idempotency key, never to a transient HTTP attempt. */
+export async function reserveEmissionCreditInTransaction(db: Db, userId: string, requestKey: string, now = new Date()) {
+  if (!requestKey || requestKey.length > 240) throw new Error('Invalid emission reservation key');
+  const existing = await db.emissionCreditReservation.findUnique({ where: { requestKey }, include: { cycle: true } });
+  if (existing) {
+    if (existing.userId !== userId) throw new Error('Reservation owner mismatch');
+    return { allowed: existing.status !== 'RELEASED', reserved: existing.status === 'RESERVED', status: existing.status,
+      historyId: existing.cycle.historyId, reservationId: existing.id, unlimited: false,
+      reason: existing.status === 'RELEASED' ? 'Reserva encerrada. Inicie nova tentativa explícita.' : undefined };
   }
-
-  if (limits.historyIdDisponivel === 'ADMIN_BYPASS') {
-    return {
-      allowed: true,
-      status: limits.status,
-      limiteNotas: limits.limiteNotas,
-      notasUsadas: limits.notasUsadas,
-      historyId: 'ADMIN_BYPASS',
-      reserved: false,
-    };
+  const { allowed, buckets, expired, unlimited } = await billingState(db, userId, now);
+  if (!allowed) return { allowed: false, reserved: false, status: expired ? 'EXPIRADO' : 'INATIVO', historyId: null,
+    reservationId: null, unlimited: false, reason: 'Assinatura não vigente para emissão.' };
+  if (unlimited) return { allowed: true, reserved: false, status: 'ATIVO', historyId: null,
+    reservationId: null, unlimited: true, reason: undefined };
+  // Use the expiring base allocation before permanent add-on credits.
+  for (const bucket of buckets) {
+    if (!bucket.cycle || bucket.limit <= 0) continue;
+    const cycle = await db.planUsageCycle.upsert({ where: { historyId_startsAt: { historyId: bucket.history.id, startsAt: bucket.cycle.startsAt } },
+      create: { historyId: bucket.history.id, startsAt: bucket.cycle.startsAt, endsAt: bucket.cycle.endsAt }, update: {} });
+    const reserved = await db.planUsageCycle.updateMany({ where: { id: cycle.id, used: { lt: bucket.limit } }, data: { used: { increment: 1 } } });
+    if (!reserved.count) continue;
+    const reservation = await db.emissionCreditReservation.create({ data: { userId, requestKey, cycleId: cycle.id } });
+    return { allowed: true, reserved: true, status: 'ATIVO', historyId: bucket.history.id, reservationId: reservation.id, unlimited: false, reason: undefined };
   }
+  return { allowed: false, reserved: false, status: 'LIMITE_ATINGIDO', historyId: null, reservationId: null, unlimited: false, reason: 'Créditos de emissão esgotados.' };
+}
 
-  if (limits.limiteNotas <= 0) {
-    return {
-      allowed: true,
-      status: limits.status,
-      limiteNotas: limits.limiteNotas,
-      notasUsadas: limits.notasUsadas,
-      historyId: limits.historyIdDisponivel || null,
-      reserved: false,
-    };
-  }
+export async function reserveEmissionCredit(userId: string, requestKey: string, now = new Date()) {
+  return commercialTransaction(userId, (tx) => reserveEmissionCreditInTransaction(tx, userId, requestKey, now));
+}
 
-  const historicosAtivos = await prisma.planHistory.findMany({
-    where: { userId, status: 'ATIVO' },
-    include: { plan: true },
-    orderBy: { createdAt: 'asc' },
-  });
-
-  for (const hist of historicosAtivos) {
-    if (hist.dataFim && new Date() > hist.dataFim) continue;
-
-    const limite = hist.plan.maxNotasMensal || 0;
-    if (limite <= 0) continue;
-
-    const reservado = await prisma.planHistory.updateMany({
-      where: {
-        id: hist.id,
-        status: 'ATIVO',
-        notasEmitidas: { lt: limite },
-      },
-      data: { notasEmitidas: { increment: 1 } },
-    });
-
-    if (reservado.count === 1) {
-      return {
-        allowed: true,
-        status: 'ATIVO',
-        limiteNotas: limits.limiteNotas,
-        notasUsadas: limits.notasUsadas + 1,
-        historyId: hist.id,
-        reserved: true,
-      };
+/** Terminal CAS makes duplicate release/commit harmless and keeps the original cycle. */
+export async function releaseEmissionCredit(reservationId?: string | null, db: Db = prisma) {
+  if (!reservationId) return;
+  const release = async (tx: Db) => {
+    const reservation = await tx.emissionCreditReservation.findUnique({ where: { id: reservationId }, select: { cycleId: true } });
+    if (!reservation) throw new Error('Unknown credit reservation; manual reconciliation required');
+    const changed = await tx.emissionCreditReservation.updateMany({ where: { id: reservationId, status: 'RESERVED' }, data: { status: 'RELEASED', completedAt: new Date() } });
+    if (changed.count) {
+      const cycle = await tx.planUsageCycle.updateMany({ where: { id: reservation.cycleId, used: { gt: 0 } }, data: { used: { decrement: 1 } } });
+      if (!cycle.count) throw new Error('Credit ledger underflow');
     }
-  }
-
-  return {
-    allowed: false,
-    reason: `Voce atingiu o limite de ${limits.limiteNotas} emissoes mensais. Faca um upgrade ou compre um pacote extra de notas.`,
-    status: 'LIMITE_ATINGIDO',
-    limiteNotas: limits.limiteNotas,
-    notasUsadas: limits.notasUsadas,
-    historyId: null as string | null,
-    reserved: false,
   };
+  if (db === prisma) await prisma.$transaction(release); else await release(db);
 }
 
-export async function releaseEmissionCredit(historyId?: string | null) {
-  if (!historyId || historyId === 'ADMIN_BYPASS') return;
-
-  await prisma.planHistory.updateMany({
-    where: {
-      id: historyId,
-      notasEmitidas: { gt: 0 },
-    },
-    data: { notasEmitidas: { decrement: 1 } },
-  });
+export async function consumeEmissionCredit(reservationId: string, db: Db = prisma) {
+  const consume = async (tx: Db) => {
+    const changed = await tx.emissionCreditReservation.updateMany({ where: { id: reservationId, status: 'RESERVED' }, data: { status: 'CONSUMED', completedAt: new Date() } });
+    if (!changed.count) {
+      const existing = await tx.emissionCreditReservation.findUnique({ where: { id: reservationId }, select: { status: true } });
+      if (existing?.status !== 'CONSUMED') throw new Error('Released/missing credit cannot settle an authorized invoice');
+    }
+  };
+  if (db === prisma) await prisma.$transaction(consume); else await consume(db);
 }

@@ -1,201 +1,35 @@
-import { prisma } from '@/app/utils/prisma';
+import { createHash } from 'node:crypto';
+import { CommercialError } from '@/app/utils/commercial-pricing';
+import { parseAccountantBenefit } from '@/app/utils/accountant-contract';
+import { isAdminRole } from '@/app/utils/access-control';
+import { commercialTransaction } from './commercialService';
+import { grantPlanInTransaction, validateManualGrant } from './manualPlanGrantService';
 
-const BASE_PLAN_TYPES = new Set(['PLANO', 'CUSTOM']);
-
-export const DEFAULT_CONTADOR_PLAN_SLUG = 'CONTADOR_STARTER';
-
-export function getContadorCustomPlanSlug(userId: string) {
-  return `parceiro-contabil-${userId}`;
-}
-
-function addDays(date: Date, days: number) {
-  const result = new Date(date);
-  result.setDate(result.getDate() + days);
-  return result;
-}
-
-function addYears(date: Date, years: number) {
-  const result = new Date(date);
-  result.setFullYear(result.getFullYear() + years);
-  return result;
-}
-
-async function finalizarPlanosBaseAtivos(userId: string, exceptPlanId?: string) {
-  const historicosAtivos = await prisma.planHistory.findMany({
-    where: { userId, status: 'ATIVO' },
-    include: { plan: true },
+/** Explicit administrative courtesy, separate from role changes and paid orders.
+ * Every operation gets an immutable private catalog version. Future concessions
+ * follow existing contracts; editing a collaborator never extends a subscription. */
+export async function grantAccountantBenefit(input: { actorId: string; userId: string; operationId: unknown;
+  justification: string; benefit: Record<string, unknown> }) {
+  const benefit = parseAccountantBenefit(input.benefit);
+  const version = createHash('sha256').update(JSON.stringify(benefit)).digest('hex').slice(0, 16);
+  const slug = benefit.action === 'SUSPEND' ? 'SUSPENDED' : benefit.action === 'REACTIVATE' ? 'REACTIVATE'
+    : `contador-${input.operationId}-${version}`;
+  const grant = { ...input, planSlug: slug, cycle: benefit.cycle };
+  validateManualGrant(grant);
+  return commercialTransaction(input.userId, async (tx) => {
+    const [actor, target] = await Promise.all([
+      tx.user.findUnique({ where: { id: input.actorId }, select: { role: true } }),
+      tx.user.findUnique({ where: { id: input.userId }, select: { role: true } }),
+    ]);
+    if (!isAdminRole(actor?.role) || target?.role !== 'CONTADOR') throw new CommercialError('Concessão exclusiva para contadores, autorizada por ADMIN ou MASTER.', 403);
+    if (benefit.action === 'GRANT') {
+      await tx.plan.upsert({ where: { slug }, update: {}, create: {
+        slug, name: benefit.kind === 'DEFAULT' ? 'Contador Starter — concessão' : 'Contador — concessão personalizada',
+        description: 'Benefício administrativo sem cobrança ou renovação automática; condições congeladas no contrato.',
+        priceMonthly: 0, priceYearly: 0, features: '[]', maxNotasMensal: benefit.notes,
+        maxClientes: benefit.customers, diasTeste: 0, active: true, privado: true, recommended: false, tipo: 'CUSTOM',
+      } });
+    }
+    return grantPlanInTransaction(tx, grant);
   });
-
-  await Promise.all(
-    historicosAtivos
-      .filter((hist) => hist.plan && BASE_PLAN_TYPES.has(hist.plan.tipo) && hist.planId !== exceptPlanId)
-      .map((hist) =>
-        prisma.planHistory.update({
-          where: { id: hist.id },
-          data: { status: 'FINALIZADO', dataFim: new Date() },
-        }),
-      ),
-  );
-}
-
-export async function ensureContadorStarterPlan() {
-  return prisma.plan.upsert({
-    where: { slug: DEFAULT_CONTADOR_PLAN_SLUG },
-    update: {
-      name: 'Contador Starter',
-      description: 'Plano privado inicial para contadores parceiros.',
-      priceMonthly: 0,
-      priceYearly: 0,
-      features: JSON.stringify(['Painel do contador', 'Carteira de clientes', 'Empresas vinculadas', 'Suporte administrativo']),
-      maxNotasMensal: 60,
-      maxClientes: 25,
-      diasTeste: 0,
-      active: true,
-      recommended: false,
-      privado: true,
-      tipo: 'PLANO',
-    },
-    create: {
-      name: 'Contador Starter',
-      slug: DEFAULT_CONTADOR_PLAN_SLUG,
-      description: 'Plano privado inicial para contadores parceiros.',
-      priceMonthly: 0,
-      priceYearly: 0,
-      features: JSON.stringify(['Painel do contador', 'Carteira de clientes', 'Empresas vinculadas', 'Suporte administrativo']),
-      maxNotasMensal: 60,
-      maxClientes: 25,
-      diasTeste: 0,
-      active: true,
-      recommended: false,
-      privado: true,
-      tipo: 'PLANO',
-    },
-  });
-}
-
-export async function ativarPlanoContadorPadrao(userId: string, ciclo = 'ANUAL') {
-  const plano = await ensureContadorStarterPlan();
-  const dataFim = ciclo === 'MENSAL' ? addDays(new Date(), 30) : addYears(new Date(), 1);
-
-  await finalizarPlanosBaseAtivos(userId, plano.id);
-
-  const historicoAtual = await prisma.planHistory.findFirst({
-    where: { userId, planId: plano.id, status: 'ATIVO' },
-  });
-
-  if (historicoAtual) {
-    await prisma.planHistory.update({
-      where: { id: historicoAtual.id },
-      data: { dataFim },
-    });
-  } else {
-    await prisma.planHistory.create({
-      data: {
-        userId,
-        planId: plano.id,
-        status: 'ATIVO',
-        dataInicio: new Date(),
-        dataFim,
-        notasEmitidas: 0,
-      },
-    });
-  }
-
-  await prisma.user.update({
-    where: { id: userId },
-    data: {
-      plano: plano.slug,
-      planoStatus: 'active',
-      planoCiclo: ciclo,
-      planoExpiresAt: dataFim,
-    },
-  });
-
-  return { plano, dataFim };
-}
-
-export async function aplicarPlanoContadorCustom({
-  userId,
-  limiteNotas,
-  limiteClientes,
-  assinaturaAtiva = true,
-  renovacaoAutomatica = false,
-}: {
-  userId: string;
-  limiteNotas?: number;
-  limiteClientes?: number;
-  assinaturaAtiva?: boolean;
-  renovacaoAutomatica?: boolean;
-}) {
-  const slug = getContadorCustomPlanSlug(userId);
-  const planoAtual = await prisma.plan.findUnique({ where: { slug } });
-  const maxNotasMensal = Number.isFinite(limiteNotas) ? Number(limiteNotas) : planoAtual?.maxNotasMensal ?? 60;
-  const maxClientes = Number.isFinite(limiteClientes) ? Number(limiteClientes) : planoAtual?.maxClientes ?? 25;
-  const dataFim = renovacaoAutomatica ? addYears(new Date(), 10) : addDays(new Date(), 30);
-  const status = assinaturaAtiva ? 'ATIVO' : 'CANCELADO';
-
-  const plano = await prisma.plan.upsert({
-    where: { slug },
-    update: {
-      maxNotasMensal,
-      maxClientes,
-      active: false,
-      privado: true,
-      tipo: 'CUSTOM',
-    },
-    create: {
-      name: 'Parceiro Contabil Custom',
-      slug,
-      description: 'Plano individual configurado pelo administrativo para contador parceiro.',
-      priceMonthly: 0,
-      priceYearly: 0,
-      features: JSON.stringify(['Limites personalizados', 'Carteira de clientes', 'Empresas vinculadas']),
-      maxNotasMensal,
-      maxClientes,
-      diasTeste: 0,
-      active: false,
-      recommended: false,
-      privado: true,
-      tipo: 'CUSTOM',
-    },
-  });
-
-  await finalizarPlanosBaseAtivos(userId, plano.id);
-
-  const historicoAtual = await prisma.planHistory.findFirst({
-    where: { userId, planId: plano.id, status: 'ATIVO' },
-  });
-
-  if (historicoAtual) {
-    await prisma.planHistory.update({
-      where: { id: historicoAtual.id },
-      data: {
-        status,
-        dataFim: assinaturaAtiva ? dataFim : new Date(),
-      },
-    });
-  } else {
-    await prisma.planHistory.create({
-      data: {
-        userId,
-        planId: plano.id,
-        status,
-        dataInicio: new Date(),
-        dataFim: assinaturaAtiva ? dataFim : new Date(),
-        notasEmitidas: 0,
-      },
-    });
-  }
-
-  await prisma.user.update({
-    where: { id: userId },
-    data: {
-      plano: plano.slug,
-      planoStatus: assinaturaAtiva ? 'active' : 'canceled',
-      planoCiclo: 'ANUAL',
-      planoExpiresAt: assinaturaAtiva ? dataFim : new Date(),
-    },
-  });
-
-  return { plano, dataFim, assinaturaAtiva };
 }

@@ -1,11 +1,12 @@
+import { withApiGuard } from '@/app/utils/api-route';
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '@/app/utils/prisma';
 import { getAuthenticatedUser, forbidden } from '@/app/utils/api-middleware';
 
-const prisma = new PrismaClient();
 
 // GET: Buscar a linha do tempo (eventos) do utilizador
-export async function GET(request: Request, { params }: { params: { id: string } }) {
+export const GET = withApiGuard(async function GET(request: Request, { params: routeParams }: { params: Promise<{ id: string }> }) {
+  const params = await routeParams;
     const admin = await getAuthenticatedUser(request);
     if (!admin || !['MASTER', 'ADMIN'].includes(admin.role)) return forbidden();
 
@@ -20,10 +21,11 @@ export async function GET(request: Request, { params }: { params: { id: string }
         console.error("Erro ao buscar eventos CRM:", error);
         return NextResponse.json({ error: 'Erro ao buscar linha do tempo' }, { status: 500 });
     }
-}
+});
 
 // POST: Criar um novo evento manualmente (Anotação de Venda/Suporte)
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export const POST = withApiGuard(async function POST(request: Request, { params: routeParams }: { params: Promise<{ id: string }> }) {
+  const params = await routeParams;
     const admin = await getAuthenticatedUser(request);
     if (!admin || !['MASTER', 'ADMIN'].includes(admin.role)) return forbidden();
 
@@ -50,4 +52,4 @@ export async function POST(request: Request, { params }: { params: { id: string 
         console.error("Erro ao registar anotação CRM:", error);
         return NextResponse.json({ error: 'Erro ao registar anotação' }, { status: 500 });
     }
-}
+});

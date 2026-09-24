@@ -1,722 +1,203 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { 
-    ArrowLeft, ShoppingCart, ShieldCheck, 
-    Loader2, Calendar, Ticket, PackagePlus, ChevronDown, Tag, FileUp, CheckCircle2, Headphones
-} from 'lucide-react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { useDialog } from '@/app/contexts/DialogContext';
+import type { CommercialQuote } from '@/app/utils/commercial-pricing';
 
-interface Plan {
-    id: string;
-    name: string;
-    slug: string;
-    description: string;
-    priceMonthly: number;
-    priceYearly: number;
-}
-
-interface CartAddons {
-    [planId: string]: number;
-}
-
-interface CupomAtivo {
-    id: string;
-    codigo: string;
-    tipoDesconto: string;
-    valorDesconto: number;
-    aplicarEm: string;
-    maxCiclos: number | null;
-    planosValidos: string | null; // <--- NOVA PROPRIEDADE
-}
-
-interface PedidoContratacao {
-    id: string;
-    planoSlug: string;
-    status: string;
-    statusLabel: string;
-    valorTotal: number;
-    ciclo: string;
-    createdAt: string;
-    detalhes?: any;
-    anexos?: any[];
-}
+type Product = { id: string; name: string; slug: string; tipo: string; priceMonthly: string | number;
+  priceYearly: string | number; diasTeste: number; description?: string };
+type Proof = { id: string; nomeArquivo: string; downloadUrl: string };
+type Order = { id: string; status: string; statusLabel: string; valorTotal: number; expiresAt: string | null;
+  createdAt: string; cotacao: CommercialQuote | null; detalhes: { ticketId?: string; inicioAssinatura?: string }; anexos: Proof[] };
+const money = (cents: number) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const inputClass = 'mt-1 w-full rounded-lg border border-slate-300 bg-white p-3 text-slate-900';
+const pendingStatuses = ['AGUARDANDO_COMPROVANTE', 'COMPROVANTE_ENVIADO', 'EM_ANALISE'];
 
 function CheckoutContent() {
-    const router = useRouter();
-    const searchParams = useSearchParams();
-    const dialog = useDialog();
+  const params = useSearchParams();
+  const dialog = useDialog();
+  const [products, setProducts] = useState<Product[]>([]);
+  const [planSlug, setPlanSlug] = useState(params.get('plan') || '');
+  const [cycle, setCycle] = useState<'MENSAL' | 'ANUAL'>(params.get('cycle') === 'ANUAL' ? 'ANUAL' : 'MENSAL');
+  const [cycles, setCycles] = useState(1);
+  const [addons, setAddons] = useState<Record<string, number>>({});
+  const [coupon, setCoupon] = useState('');
+  const [couponInput, setCouponInput] = useState('');
+  const [quote, setQuote] = useState<{ cotacao: CommercialQuote; cotacaoHash: string; cartKey: string } | null>(null);
+  const [quoteError, setQuoteError] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [quoting, setQuoting] = useState(false);
+  const [quoteRevision, setQuoteRevision] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [order, setOrder] = useState<Order | null>(null);
+  const [history, setHistory] = useState<Order[]>([]);
+  const keyRef = useRef<{ cartKey: string; id: string } | null>(null);
 
-    const planSlug = searchParams.get('plan');
-    const cycleParam = searchParams.get('cycle'); 
-    
-    const [loading, setLoading] = useState(true);
-    const [basePlans, setBasePlans] = useState<Plan[]>([]); 
-    const [plano, setPlano] = useState<Plan | null>(null);
-    const [pacotesDisponiveis, setPacotesDisponiveis] = useState<Plan[]>([]); 
+  const loadOrders = useCallback(async () => {
+    const response = await fetch('/api/checkout', { cache: 'no-store' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(response.status === 401 ? 'Entre na sua conta para contratar.' : data.error || 'Não foi possível carregar suas solicitações.');
+    setOrder(data.pedido);
+    setHistory(data.historico || []);
+  }, []);
 
-    const [processing, setProcessing] = useState(false);
-    const [loadingText, setLoadingText] = useState('Solicitar Contratacao');
-    const [requestSent, setRequestSent] = useState('');
-    const [pedidoCriado, setPedidoCriado] = useState<PedidoContratacao | null>(null);
-    const [uploadingProof, setUploadingProof] = useState(false);
-    const [proofError, setProofError] = useState('');
-    const [, setStep] = useState<1 | 2>(1);
-    const [, setCopiado] = useState(false);
-    
-    
-    const [ciclo, setCiclo] = useState<'MENSAL' | 'ANUAL'>((cycleParam as 'MENSAL'|'ANUAL') || 'MENSAL');
-    const [qtdCiclos, setQtdCiclos] = useState(1);
-    const [quantidadesPacotes, setQuantidadesPacotes] = useState<CartAddons>({});
-    
-    const [cupomDigitado, setCupomDigitado] = useState('');
-    const [cupomAtivo, setCupomAtivo] = useState<CupomAtivo | null>(null);
-    const [erroCupom, setErroCupom] = useState('');
-    const [loadingCupom, setLoadingCupom] = useState(false);
-
-    useEffect(() => {
-        fetch('/api/plans')
-            .then(r => r.json())
-            .then((plans: Plan[]) => {
-                const principais = plans.filter(p => !p.slug.toLowerCase().includes('pacote') && p.slug !== 'TRIAL' && p.slug !== 'PARCEIRO');
-                setBasePlans(principais);
-
-                const selected = plans.find(p => p.slug === planSlug);
-                if (selected && !selected.slug.toLowerCase().includes('pacote') && selected.slug !== 'TRIAL') {
-                    setPlano(selected);
-                    const ehAnual = Number(selected.priceMonthly) === 0 && Number(selected.priceYearly) > 0;
-                    setCiclo(ehAnual ? 'ANUAL' : 'MENSAL');
-                    if (ehAnual) setQtdCiclos(1);
-                }
-
-                let pacotesDoBanco = plans.filter(p => p.slug.toLowerCase().includes('pacote'));
-                
-                pacotesDoBanco.sort((a, b) => {
-                    if (a.slug.includes('NOTA')) return -1;
-                    if (b.slug.includes('NOTA')) return 1;
-                    return 0;
-                });
-
-                setPacotesDisponiveis(pacotesDoBanco);
-
-                const extrasIniciais = Number(searchParams.get('extras'));
-                if (extrasIniciais > 0 && pacotesDoBanco.length > 0) {
-                    setQuantidadesPacotes({ [pacotesDoBanco[0].id]: extrasIniciais });
-                }
-
-                setLoading(false);
-            })
-            .catch(err => {
-                console.error("Erro ao buscar planos:", err);
-                setLoading(false);
-            });
-    }, [planSlug, searchParams]);
-
-    useEffect(() => {
-        fetch('/api/checkout', { cache: 'no-store' })
-            .then(res => res.ok ? res.json() : null)
-            .then(data => {
-                if (data?.pedido) {
-                    setPedidoCriado(data.pedido);
-                    setRequestSent('Voce ja tem uma solicitacao de contratacao em andamento.');
-                }
-            })
-            .catch(() => {});
-    }, []);
-
-    if (loading) return <div className="h-screen flex items-center justify-center"><Loader2 className="animate-spin text-blue-600" size={40}/></div>;
-
-    const isPlanoContador =
-        planSlug === 'PARCEIRO' ||
-        planSlug === 'parceiro-contabil' ||
-        planSlug?.startsWith('parceiro-contabil-') ||
-        planSlug?.startsWith('CONTADOR_');
-
-    if (isPlanoContador) {
-        return (
-            <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
-                <div className="bg-white p-10 rounded-3xl shadow-xl max-w-lg text-center border border-slate-200">
-                    <div className="w-20 h-20 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-6">
-                        <ShieldCheck size={40} />
-                    </div>
-                    <h2 className="text-2xl font-black text-slate-800 mb-4">Plano Parceiro Contábil</h2>
-                    <p className="text-slate-600 mb-8 leading-relaxed">
-                        Os planos para contadores possuem condições exclusivas e faturamento unificado via contrato interno.
-                    </p>
-                    <div className="flex flex-col gap-3">
-                        <button className="w-full py-4 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition shadow-lg">Falar com um Consultor (WhatsApp)</button>
-                        <button onClick={() => router.back()} className="w-full py-4 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition">Voltar</button>
-                    </div>
-                </div>
-            </div>
-        );
+  useEffect(() => {
+    let active = true;
+    async function load() {
+      try {
+        const response = await fetch('/api/plans');
+        const data = await response.json();
+        if (!response.ok || !Array.isArray(data)) throw new Error('Catálogo indisponível. Tente novamente.');
+        if (!active) return;
+        setProducts(data.filter((p: Product) => p.diasTeste === 0 && ['PLANO', 'PACOTE_NOTAS', 'PACOTE_CLIENTES', 'PACOTE_PJ'].includes(p.tipo)));
+        await loadOrders();
+      } catch (cause) { if (active) setError((cause as Error).message); }
+      finally { if (active) setLoading(false); }
     }
+    void load();
+    return () => { active = false; };
+  }, [loadOrders]);
 
-    const precoUnitarioPlano = plano ? (ciclo === 'MENSAL' ? Number(plano.priceMonthly) : Number(plano.priceYearly)) : 0;
-    const subtotalPlano = precoUnitarioPlano * qtdCiclos; 
-    
-    let valorTotalPacotes = 0;
-    pacotesDisponiveis.forEach(pacote => {
-        const qtd = quantidadesPacotes[pacote.id] || 0;
-        valorTotalPacotes += qtd * Number(pacote.priceMonthly); 
-    });
-    
-    const subtotal = subtotalPlano + valorTotalPacotes;
-    
-    // ==========================================
-    // A MATEMÁTICA CORRIGIDA E INTELIGENTE!
-    // ==========================================
-    let baseCalculoDesconto = 0;
-    const ciclosComDesconto = cupomAtivo?.maxCiclos ? Math.min(qtdCiclos, cupomAtivo.maxCiclos) : qtdCiclos;
-    const valorPlanoComDescontoAplicavel = precoUnitarioPlano * ciclosComDesconto;
+  const cart = useMemo(() => ({ planSlug: planSlug || null, ciclo: planSlug ? cycle : 'MENSAL', qtdCiclos: planSlug ? cycles : 1,
+    pacotes: Object.entries(addons).filter(([, qtd]) => qtd > 0).map(([planId, qtd]) => ({ planId, qtd })), cupom: coupon || null }), [planSlug, cycle, cycles, addons, coupon]);
+  const cartKey = JSON.stringify(cart);
+  useEffect(() => {
+    if (loading || order || (!cart.planSlug && !cart.pacotes.length)) { setQuote(null); setQuoting(false); setQuoteError(''); return; }
+    const controller = new AbortController();
+    setQuoting(true); setQuoteError(''); setQuote(null);
+    const timer = setTimeout(async () => {
+      try {
+        const response = await fetch('/api/checkout/cotacao', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: cartKey, signal: controller.signal });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Cotação indisponível.');
+        if (!controller.signal.aborted) setQuote({ ...data, cartKey });
+      } catch (cause) { if (!controller.signal.aborted) setQuoteError((cause as Error).message); }
+      finally { if (!controller.signal.aborted) setQuoting(false); }
+    }, 350);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [cart, cartKey, loading, order, quoteRevision]);
 
-    if (cupomAtivo) {
-        if (cupomAtivo.aplicarEm === 'PLANOS_SELECIONADOS' && cupomAtivo.planosValidos) {
-            const permitidos = cupomAtivo.planosValidos.split(',');
-            
-            // Soma o desconto no Plano Principal SE ele estiver na lista de permitidos
-            if (plano && permitidos.includes(plano.id)) {
-                baseCalculoDesconto += valorPlanoComDescontoAplicavel;
-            }
-            
-            // Soma o desconto nos Pacotes Extras SE eles estiverem na lista de permitidos
-            pacotesDisponiveis.forEach(pacote => {
-                if (permitidos.includes(pacote.id)) {
-                    const qtd = quantidadesPacotes[pacote.id] || 0;
-                    baseCalculoDesconto += qtd * Number(pacote.priceMonthly);
-                }
-            });
-            
-        } else if (cupomAtivo.aplicarEm === 'SO_ASSINATURA') {
-            baseCalculoDesconto = valorPlanoComDescontoAplicavel;
-        } else if (cupomAtivo.aplicarEm === 'SO_PACOTES') {
-            baseCalculoDesconto = valorTotalPacotes;
-        } else {
-            // CARRINHO TOTAL
-            baseCalculoDesconto = valorPlanoComDescontoAplicavel + valorTotalPacotes;
-        }
+  async function submit() {
+    if (!quote || quote.cartKey !== cartKey) return;
+    setBusy(true); setError('');
+    if (!keyRef.current || keyRef.current.cartKey !== cartKey) keyRef.current = { cartKey, id: crypto.randomUUID() };
+    try {
+      const response = await fetch('/api/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': keyRef.current.id },
+        body: JSON.stringify({ ...cart, cotacaoHash: quote.cotacaoHash }) });
+      const data = await response.json();
+      if (!response.ok) {
+        if (response.status === 409) { setQuote(null); setQuoteRevision((value) => value + 1); await loadOrders(); }
+        throw new Error(data.error || 'Solicitação não registrada.');
+      }
+      setOrder(data.pedido); await loadOrders();
+    } catch (cause) { setError((cause as Error).message); }
+    finally { setBusy(false); }
+  }
+
+  async function cancel() {
+    if (!order || !await dialog.showConfirm({ title: 'Cancelar solicitação?', description: 'Isso não devolve uma transferência já realizada. Se você pagou, solicite a conciliação pelo suporte.', confirmText: 'Cancelar solicitação', cancelText: 'Voltar' })) return;
+    setBusy(true); setError('');
+    try {
+      const response = await fetch('/api/checkout', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: order.id }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Cancelamento não concluído.');
+      keyRef.current = null; await loadOrders();
+    } catch (cause) { setError((cause as Error).message); }
+    finally { setBusy(false); }
+  }
+
+  async function upload(file?: File) {
+    if (!file || !order) return;
+    if (!file.size || file.size > 5 * 1024 * 1024 || !['application/pdf', 'image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+      setError('Envie PDF, PNG, JPG ou WEBP com até 5 MB.'); return;
     }
+    setBusy(true); setError('');
+    try {
+      const conteudoBase64 = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(new Error('Não foi possível ler o arquivo.')); reader.readAsDataURL(file); });
+      const response = await fetch('/api/checkout/comprovante', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pedidoId: order.id, nomeArquivo: file.name, mimeType: file.type, tamanho: file.size, conteudoBase64 }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Envio não concluído.');
+      await loadOrders();
+    } catch (cause) { setError((cause as Error).message); }
+    finally { setBusy(false); }
+  }
 
-    let valorDesconto = 0;
-    if (cupomAtivo) {
-        if (cupomAtivo.tipoDesconto === 'PORCENTAGEM') {
-            valorDesconto = baseCalculoDesconto * (cupomAtivo.valorDesconto / 100);
-        } else {
-            valorDesconto = Math.min(cupomAtivo.valorDesconto, baseCalculoDesconto);
-        }
-    }
+  async function download(proof: Proof) {
+    try {
+      const response = await fetch(proof.downloadUrl);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Arquivo indisponível.');
+      const link = document.createElement('a'); link.href = data.conteudoBase64; link.download = data.nomeArquivo; link.click();
+    } catch (cause) { setError((cause as Error).message); }
+  }
 
-    const total = Math.max(0, subtotal - valorDesconto);
-
-    const labelCiclo = ciclo === 'MENSAL' ? 'Mês' : 'Ano';
-    const labelPlural = ciclo === 'MENSAL' ? 'Meses' : 'Anos';
-    const isAnual = ciclo === 'ANUAL';
-
-    const handleQtdPlanoChange = (delta: number) => {
-        const novoValor = qtdCiclos + delta;
-        if (novoValor < 0) return;
-        if (isAnual && novoValor > 1) return; 
-        setQtdCiclos(novoValor);
-    };
-
-    const atualizarQtdPacote = (pacoteId: string, delta: number) => {
-        setQuantidadesPacotes(prev => {
-            const atual = prev[pacoteId] || 0;
-            const novoValor = Math.max(0, atual + delta);
-            return { ...prev, [pacoteId]: novoValor };
-        });
-    };
-
-    const handleAplicarCupom = async () => {
-        setErroCupom('');
-        const codigo = cupomDigitado.trim().toUpperCase();
-        if (!codigo) return;
-
-        setLoadingCupom(true);
-
-        // Mapeia quais pacotes o cliente adicionou no carrinho
-        const pacotesIds = pacotesDisponiveis
-            .filter(p => (quantidadesPacotes[p.id] || 0) > 0)
-            .map(p => p.id);
-
-        try {
-            const res = await fetch('/api/cupons/validar', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    codigo, 
-                    planoId: plano?.id,
-                    pacotesIds // <--- ENVIANDO OS PACOTES AGORA!
-                })
-            });
-
-            const data = await res.json();
-
-            if (res.ok) {
-                setCupomAtivo(data);
-                setCupomDigitado('');
-            } else {
-                setErroCupom(data.error || 'Cupom inválido.');
-            }
-        } catch (error) {
-            setErroCupom('Erro de conexão ao validar o cupom.');
-        } finally {
-            setLoadingCupom(false);
-        }
-    };
-
-    const handleRemoverCupom = () => {
-        setCupomAtivo(null);
-        setCupomDigitado('');
-        setErroCupom('');
-    };
-
-    const handleManualCheckout = async () => {
-        setProcessing(true);
-        setLoadingText('Registrando solicitacao...');
-
-        try {
-            const pacotesComprados = pacotesDisponiveis
-                .filter(p => (quantidadesPacotes[p.id] || 0) > 0)
-                .map(p => ({ planId: p.id, qtd: quantidadesPacotes[p.id] }));
-
-            const res = await fetch('/api/checkout', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    planSlug: plano?.slug || null,
-                    ciclo,
-                    qtdCiclos,
-                    pacotes: pacotesComprados,
-                    cupom: cupomAtivo?.codigo || null
-                })
-            });
-
-            const data = await res.json();
-
-            if (!res.ok) {
-                await dialog.showAlert({
-                    type: 'danger',
-                    title: 'Não foi possível enviar a solicitação',
-                    description: data.error || 'Revise os dados da contratação e tente novamente.',
-                });
-                setLoadingText('Solicitar Contratacao');
-                setProcessing(false);
-                return;
-            }
-
-            setPedidoCriado(data.pedido);
-            setRequestSent(data.mensagem || 'Solicitacao de contratacao registrada.');
-            setLoadingText('Solicitacao enviada');
-            setProcessing(false);
-        } catch (error) {
-            console.error(error);
-            await dialog.showAlert({
-                type: 'danger',
-                title: 'Falha de conexão',
-                description: 'Não foi possível enviar a solicitação. Verifique sua internet e tente novamente.',
-            });
-            setLoadingText('Solicitar Contratacao');
-            setProcessing(false);
-        }
-    };
-
-    const handleProofUpload = async (file: File | null) => {
-        if (!file || !pedidoCriado) return;
-        setProofError('');
-
-        const allowed = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp'];
-        if (!allowed.includes(file.type)) {
-            setProofError('Envie PDF, PNG, JPG ou WEBP.');
-            return;
-        }
-        if (file.size > 5 * 1024 * 1024) {
-            setProofError('O comprovante deve ter ate 5 MB.');
-            return;
-        }
-
-        setUploadingProof(true);
-        try {
-            const conteudoBase64 = await new Promise<string>((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = () => resolve(String(reader.result || ''));
-                reader.onerror = reject;
-                reader.readAsDataURL(file);
-            });
-
-            const res = await fetch('/api/checkout/comprovante', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    pedidoId: pedidoCriado.id,
-                    nomeArquivo: file.name,
-                    mimeType: file.type,
-                    tamanho: file.size,
-                    conteudoBase64,
-                }),
-            });
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok) {
-                setProofError(data.error || 'Nao foi possivel enviar o comprovante.');
-                return;
-            }
-
-            setPedidoCriado(prev => prev ? {
-                ...prev,
-                status: data.status || 'COMPROVANTE_ENVIADO',
-                statusLabel: 'Comprovante enviado',
-                anexos: [data.anexo, ...(prev.anexos || [])],
-            } : prev);
-            setRequestSent('Comprovante recebido. A equipe vai analisar sua contratacao.');
-        } catch {
-            setProofError('Erro de conexao ao enviar comprovante.');
-        } finally {
-            setUploadingProof(false);
-        }
-    };
-
-    const handleSolicitarAtivacao = async () => {
-        if (typeof window !== 'undefined') return handleManualCheckout();
-        setProcessing(true);
-        setLoadingText('Registrando solicitaÃ§Ã£o...');
-
-        try {
-            await new Promise(r => setTimeout(r, 600)); 
-            setLoadingText('Validando itens...');
-
-            const pacotesComprados = pacotesDisponiveis
-                .filter(p => (quantidadesPacotes[p.id] || 0) > 0)
-                .map(p => ({ planId: p.id, qtd: quantidadesPacotes[p.id] }));
-
-            await new Promise(r => setTimeout(r, 600)); 
-            setLoadingText('Gerando cobrança PIX...');
-
-            const res = await fetch('/api/checkout', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    planSlug: plano?.slug || null,
-                    ciclo,
-                    qtdCiclos, 
-                    pacotes: pacotesComprados, 
-                    cupom: cupomAtivo?.codigo || null 
-                })
-            });
-
-            const data = await res.json();
-            
-            if (res.ok) {
-                setLoadingText('Tudo pronto!');
-                await new Promise(r => setTimeout(r, 400));
-                setStep(2); 
-            } else {
-                await dialog.showAlert({
-                    type: 'danger',
-                    title: 'Não foi possível gerar o pedido',
-                    description: data.error || 'Revise os dados de pagamento e tente novamente.',
-                });
-                setLoadingText('Finalizar Pedido');
-                setProcessing(false);
-            }
-        } catch (error) {
-            console.error(error);
-            await dialog.showAlert({
-                type: 'danger',
-                title: 'Falha ao gerar o PIX',
-                description: 'Não foi possível conectar ao serviço de pagamento. Tente novamente em alguns instantes.',
-            });
-            setLoadingText('Finalizar Pedido');
-            setProcessing(false);
-        }
-    };
-
-    const handleCopiarPix = () => {
-        navigator.clipboard.writeText("00020101021126580014br.gov.bcb.pix...");
-        setCopiado(true);
-        setTimeout(() => setCopiado(false), 3000);
-    };
-
-    void handleCopiarPix;
-
-    return (
-        <div className="min-h-screen bg-slate-50 p-4 md:p-8">
-            <div className="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
-                
-                <div className="lg:col-span-2 space-y-6">
-                    <button onClick={() => router.back()} className="flex items-center gap-2 text-slate-500 hover:text-blue-600 font-bold text-sm transition">
-                        <ArrowLeft size={18}/> Voltar
-                    </button>
-
-                    <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-                        <ShoppingCart className="text-blue-600"/> Finalizar Contratação
-                    </h1>
-
-                    <div className={`bg-white p-6 rounded-xl shadow-sm border transition duration-300 ${qtdCiclos === 0 ? 'border-dashed border-slate-300 opacity-75' : 'border-slate-200'}`}>
-                        <div className="flex justify-between items-start mb-4">
-                            <div className="flex-1">
-                                <div className="flex items-center gap-2 mb-1">
-                                    <div className="relative">
-                                        <select 
-                                            value={plano?.id || ''}
-                                            onChange={(e) => {
-                                                const novoPlano = basePlans.find(p => p.id === e.target.value);
-                                                setPlano(novoPlano || null);
-                                                if (novoPlano) {
-                                                    const ehAnual = Number(novoPlano.priceMonthly) === 0 && Number(novoPlano.priceYearly) > 0;
-                                                    setCiclo(ehAnual ? 'ANUAL' : 'MENSAL');
-                                                    if (qtdCiclos === 0) setQtdCiclos(1);
-                                                    else if (ehAnual && qtdCiclos > 1) setQtdCiclos(1);
-                                                }
-                                                // TRAVA DE SEGURANÇA: Remove cupom ao mudar de plano!
-                                                if (cupomAtivo) {
-                                                    setCupomAtivo(null);
-                                                    setErroCupom('O plano foi alterado. Por favor, aplique o cupom novamente.');
-                                                }
-                                            }}
-                                            className="appearance-none bg-slate-100 hover:bg-slate-200 border-none text-slate-800 py-1.5 pl-3 pr-8 rounded-lg font-bold text-lg focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer transition max-w-[200px] sm:max-w-none truncate"
-                                        >
-                                            <option value="">Nenhum Plano</option>
-                                            {basePlans.map(p => (
-                                                <option key={p.id} value={p.id}>{p.name}</option>
-                                            ))}
-                                        </select>
-                                        <ChevronDown size={16} className="absolute right-2 top-2.5 text-slate-500 pointer-events-none" />
-                                    </div>
-                                    {plano && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">{ciclo}</span>}
-                                </div>
-                                <p className="text-slate-500 text-sm ml-1">{plano ? plano.description : 'Apenas pacotes avulsos.'}</p>
-                            </div>
-                            
-                            {plano && (
-                                <div className="text-right">
-                                    <span className="text-2xl font-black text-slate-800">{precoUnitarioPlano.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                                    <span className="text-xs text-slate-400 block">/{labelCiclo.toLowerCase()}</span>
-                                </div>
-                            )}
-                        </div>
-
-                        {plano && (
-                            <div className="bg-slate-50 p-4 rounded-lg border border-slate-100 flex items-center justify-between">
-                                <span className="text-sm font-bold text-slate-700 flex items-center gap-2">
-                                    <Calendar size={16} className={qtdCiclos === 0 ? 'text-slate-400' : 'text-blue-600'}/> 
-                                    {qtdCiclos === 0 ? 'Plano removido' : `Garanta ${qtdCiclos} ${qtdCiclos > 1 ? labelPlural.toLowerCase() : labelCiclo.toLowerCase()}`}
-                                </span>
-                                <div className="flex items-center gap-3 bg-white p-1 rounded-lg shadow-sm border border-slate-200">
-                                    <button onClick={() => handleQtdPlanoChange(-1)} disabled={qtdCiclos === 0} className="w-8 h-8 font-bold text-slate-500 hover:bg-slate-100 disabled:opacity-30 rounded transition">-</button>
-                                    <span className={`text-lg font-bold w-8 text-center ${qtdCiclos === 0 ? 'text-slate-400' : 'text-blue-700'}`}>{qtdCiclos}</span>
-                                    <button onClick={() => handleQtdPlanoChange(1)} disabled={isAnual && qtdCiclos >= 1} className="w-8 h-8 font-bold text-slate-500 hover:bg-slate-100 disabled:opacity-30 rounded transition">+</button>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-
-                    {pacotesDisponiveis.length > 0 && (
-                        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                            <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2 border-b pb-4 mb-4">
-                                <PackagePlus className="text-blue-600"/> Adicionais e Extras
-                            </h3>
-                            
-                            <div className="space-y-4">
-                                {pacotesDisponiveis.map(pacote => {
-                                    const price = Number(pacote.priceMonthly);
-                                    const qtd = quantidadesPacotes[pacote.id] || 0;
-                                    const isNotas = pacote.slug.includes('NOTA');
-                                    
-                                    return (
-                                        <div key={pacote.id} className={`flex items-center justify-between p-4 rounded-xl border ${isNotas ? 'bg-blue-50/50 border-blue-100' : 'bg-slate-50 border-slate-100'}`}>
-                                            <div>
-                                                <span className={`block font-bold ${isNotas ? 'text-blue-800' : 'text-slate-800'}`}>{pacote.name}</span>
-                                                <span className="text-xs text-slate-500">R$ {price.toFixed(2).replace('.',',')} / unid.</span>
-                                            </div>
-                                            <div className="flex items-center gap-3 bg-white p-1 rounded-lg border shadow-sm">
-                                                <button onClick={() => atualizarQtdPacote(pacote.id, -1)} className="w-8 h-8 text-slate-500 hover:bg-slate-100 rounded font-bold">-</button>
-                                                <span className={`text-lg font-bold w-8 text-center ${qtd > 0 ? (isNotas ? 'text-blue-600' : 'text-slate-800') : 'text-slate-400'}`}>{qtd}</span>
-                                                <button onClick={() => atualizarQtdPacote(pacote.id, 1)} className="w-8 h-8 text-slate-500 hover:bg-slate-100 rounded font-bold">+</button>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                    )}
-                </div>
-
-                <div className="lg:col-span-1">
-                    <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-200 sticky top-6">
-                        <h3 className="font-bold text-slate-800 mb-6 text-lg border-b pb-4">Resumo do Pedido</h3>
-                        
-                        <div className="space-y-3 text-sm text-slate-600 mb-6">
-                            {plano && qtdCiclos > 0 && (
-                                <div className="flex justify-between font-medium text-slate-800">
-                                    <span>{plano.name} ({qtdCiclos}x)</span>
-                                    <span>{subtotalPlano.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                                </div>
-                            )}
-                            
-                            {pacotesDisponiveis.map(pacote => {
-                                const qtd = quantidadesPacotes[pacote.id] || 0;
-                                if (qtd === 0) return null;
-                                const valorItem = qtd * Number(pacote.priceMonthly);
-                                return (
-                                    <div key={`resumo-${pacote.id}`} className="flex justify-between text-slate-500">
-                                        <span>{qtd}x {pacote.name.replace('Pacote ', '')}</span>
-                                        <span>{valorItem.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                                    </div>
-                                );
-                            })}
-
-                            {total === 0 && <div className="text-center text-slate-400 italic">Seu carrinho está vazio</div>}
-                        </div>
-
-                        <div className="mb-6">
-                            {cupomAtivo ? (
-                                <div className="bg-green-50 border-2 border-dashed border-green-300 p-4 rounded-xl flex items-center justify-between transition-all">
-                                    <div>
-                                        <div className="flex items-center gap-2 text-green-700 font-bold mb-0.5">
-                                            <Ticket size={16}/> {cupomAtivo.codigo}
-                                        </div>
-                                        <p className="text-xs text-green-600 font-medium">
-                                            -{cupomAtivo.tipoDesconto === 'PORCENTAGEM' ? `${cupomAtivo.valorDesconto}%` : `R$ ${cupomAtivo.valorDesconto}`} aplicado
-                                        </p>
-                                    </div>
-                                    <button onClick={handleRemoverCupom} className="text-xs font-bold text-slate-400 hover:text-red-500 transition px-2 py-1 bg-white rounded shadow-sm">
-                                        Remover
-                                    </button>
-                                </div>
-                            ) : (
-                                <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
-                                    <label className="block text-xs font-bold text-slate-500 uppercase mb-2 flex items-center gap-1">
-                                        <Tag size={12}/> Tem cupom de desconto?
-                                    </label>
-                                    <div className="flex gap-2">
-                                        <input 
-                                            type="text" 
-                                            value={cupomDigitado}
-                                            onChange={(e) => setCupomDigitado(e.target.value.toUpperCase())}
-                                            placeholder="Ex: PROMO20"
-                                            className="w-full p-2.5 border border-slate-200 rounded-lg uppercase text-sm focus:ring-2 focus:ring-blue-500 outline-none transition disabled:opacity-50"
-                                            disabled={loadingCupom}
-                                        />
-                                        <button 
-                                            onClick={handleAplicarCupom} 
-                                            disabled={loadingCupom || !cupomDigitado}
-                                            className="bg-slate-800 text-white px-4 py-2.5 rounded-lg text-sm font-bold hover:bg-slate-700 transition disabled:opacity-50 flex items-center justify-center min-w-[80px]"
-                                        >
-                                            {loadingCupom ? <Loader2 size={16} className="animate-spin" /> : 'Aplicar'}
-                                        </button>
-                                    </div>
-                                    {erroCupom && <p className="text-red-500 text-xs mt-2 flex items-center gap-1"><span className="w-1 h-1 rounded-full bg-red-500"></span> {erroCupom}</p>}
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="border-t pt-4 mb-6">
-                            {cupomAtivo && (
-                                <div className="flex justify-between items-center mb-1 text-sm text-green-600 font-bold">
-                                    <span>Desconto</span>
-                                    <span>-{valorDesconto.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                                </div>
-                            )}
-                            <div className="flex justify-between items-end mt-2">
-                                <span className="font-bold text-slate-800">Estimativa comercial</span>
-                                <span className="text-3xl font-black text-slate-900 leading-none">{total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                            </div>
-                        </div>
-
-                        {pedidoCriado ? (
-                            <PedidoContratacaoCard
-                                pedido={pedidoCriado}
-                                message={requestSent}
-                                uploading={uploadingProof}
-                                error={proofError}
-                                onUpload={handleProofUpload}
-                            />
-                        ) : requestSent && (
-                            <div className="mb-4 rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-800">
-                                {requestSent}
-                            </div>
-                        )}
-
-                        <button 
-                            onClick={handleSolicitarAtivacao}
-                            disabled={processing || total === 0 || !!requestSent}
-                            className="w-full py-4 bg-blue-600 text-white rounded-xl font-bold text-lg hover:bg-blue-700 transition shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            {processing ? <Loader2 className="animate-spin"/> : <ShieldCheck size={20}/>}
-                            {processing ? loadingText : 'Solicitar Contratacao'}
-                        </button>
-                        <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
-                            <p className="text-[11px] font-bold uppercase tracking-wide text-amber-800">Ativacao manual</p>
-                            <p className="mt-1 text-xs leading-relaxed text-amber-900">
-                                A contratacao sera conferida pela equipe interna. Envie o comprovante para agilizar a ativacao do plano.
-                            </p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
+  const base = products.filter((p) => p.tipo === 'PLANO');
+  const selected = base.find((p) => p.slug === planSlug);
+  const expired = !!order?.expiresAt && new Date(order.expiresAt) <= new Date();
+  return <main className="mx-auto min-h-screen max-w-5xl space-y-6 p-4 text-slate-900 sm:p-8">
+    <Link href="/cliente/dashboard" className="text-blue-700 underline">Voltar à minha conta</Link>
+    <header><h1 className="text-3xl font-bold">Contratação</h1><p className="mt-2 text-slate-600">Cobrança e ativação manuais. Nenhum débito automático será realizado.</p></header>
+    {error && <div role="alert" className="rounded-xl border border-red-300 bg-red-50 p-4">{error} <Link className="underline" href="/login">Acessar conta</Link></div>}
+    {loading ? <p role="status">Carregando catálogo e solicitações…</p> : order ? <section className="space-y-4 rounded-2xl border bg-white p-6">
+      <h2 className="text-xl font-bold">{order.statusLabel}</h2><p className="break-all text-sm">Pedido: {order.id}</p>
+      <p>Total confirmado: <strong>{money(Math.round(order.valorTotal * 100))}</strong></p>
+      {order.expiresAt && <p>Prazo para conferência: {new Date(order.expiresAt).toLocaleString('pt-BR')}.</p>}
+      {expired && <p role="alert" className="text-red-700">Prazo expirado. Não transfira valores para este pedido; cancele e solicite uma nova cotação.</p>}
+      {!order.cotacao && <p role="alert">Pedido antigo sem condições verificáveis. Cancele e recrie a solicitação.</p>}
+      <p>Confirme os dados de pagamento diretamente no atendimento. O envio do comprovante não confirma a quitação.</p>
+      {order.detalhes.ticketId && <Link className="inline-block font-semibold text-blue-700 underline" href={`/cliente/suporte/${order.detalhes.ticketId}`}>Abrir atendimento da contratação</Link>}
+      {order.cotacao && !expired && <label className="block">Enviar comprovante (até cinco arquivos, 5 MB cada)
+        <input className={inputClass} type="file" accept=".pdf,.png,.jpg,.jpeg,.webp" disabled={busy || order.anexos.length >= 5} onChange={(event) => { void upload(event.target.files?.[0]); event.target.value = ''; }} />
+      </label>}
+      <ul className="space-y-2">{order.anexos.map((proof) => <li key={proof.id}><button className="text-blue-700 underline" onClick={() => void download(proof)}>{proof.nomeArquivo}</button></li>)}</ul>
+      <button type="button" className="rounded-lg border border-red-300 p-3 text-red-800 disabled:opacity-50" disabled={busy} onClick={() => void cancel()}>Cancelar solicitação</button>
+    </section> : <div className="grid gap-6 md:grid-cols-2">
+      <section className="space-y-4 rounded-2xl border bg-white p-6">
+        <h2 className="text-xl font-bold">Itens da contratação</h2>
+        <label className="block">Assinatura<select className={inputClass} value={planSlug} onChange={(event) => { const slug = event.target.value; setPlanSlug(slug); setCycles(1); const product = base.find((p) => p.slug === slug); setCycle(product && Number(product.priceMonthly) === 0 ? 'ANUAL' : 'MENSAL'); }}>
+          <option value="">Somente pacotes (exige plano vigente)</option>{base.map((p) => <option value={p.slug} key={p.id}>{p.name}</option>)}
+        </select></label>
+        {planSlug && !selected && <p role="alert">Plano não disponível no catálogo público. Selecione outro ou fale com o atendimento.</p>}
+        {selected && <><p className="text-sm text-slate-600">{selected.description}</p>
+          <label className="block">Ciclo<select className={inputClass} value={cycle} onChange={(event) => { setCycle(event.target.value as 'MENSAL' | 'ANUAL'); setCycles(1); }}>
+            <option value="MENSAL" disabled={Number(selected.priceMonthly) <= 0}>Mensal</option><option value="ANUAL" disabled={Number(selected.priceYearly) <= 0}>Anual</option>
+          </select></label>
+          <label className="block">Quantidade de {cycle === 'ANUAL' ? 'anos' : 'meses'}<input className={inputClass} type="number" min={1} max={cycle === 'ANUAL' ? 1 : 12} value={cycles} onChange={(event) => setCycles(Math.max(1, Math.min(cycle === 'ANUAL' ? 1 : 12, Math.trunc(Number(event.target.value) || 1))))} /></label>
+        </>}
+        <fieldset className="space-y-3"><legend className="font-semibold">Pacotes adicionais</legend>{products.filter((p) => p.tipo !== 'PLANO').map((p) => <label key={p.id} className="block">{p.name} — {money(Math.round(Number(p.priceMonthly) * 100))} por pacote
+          <input className={inputClass} type="number" min={0} max={100} value={addons[p.id] || 0} onChange={(event) => setAddons((current) => ({ ...current, [p.id]: Math.max(0, Math.min(100, Math.trunc(Number(event.target.value) || 0))) }))} />
+        </label>)}</fieldset>
+        <p className="text-sm text-slate-600">Notas avulsas não se renovam mensalmente. Uma renovação antecipada começa após o período já contratado, sem encurtá-lo.</p>
+        <label className="block">Cupom<input className={inputClass} maxLength={40} value={couponInput} onChange={(event) => setCouponInput(event.target.value.toUpperCase())} /></label>
+        <button className="rounded-lg border p-3" onClick={() => setCoupon(couponInput.trim())}>Consultar cupom</button>
+        {coupon && <p>{coupon} <button className="text-blue-700 underline" onClick={() => { setCoupon(''); setCouponInput(''); }}>Remover</button></p>}
+      </section>
+      <section className="h-fit space-y-4 rounded-2xl border bg-white p-6" aria-live="polite">
+        <h2 className="text-xl font-bold">Cotação do servidor</h2>
+        {quoting && <p role="status">Conferindo preços e elegibilidade…</p>}
+        {quoteError && <p role="alert" className="text-red-700">{quoteError}</p>}
+        {quote && quote.cartKey === cartKey ? <>
+          <ul className="space-y-2">{quote.cotacao.lines.map((line) => <li key={line.planId}>{line.quantidade}× {line.nome}: {money(line.totalCents)}</li>)}</ul>
+          <p>Desconto: {money(quote.cotacao.descontoCents)}</p><p className="text-2xl font-bold">Total: {money(quote.cotacao.totalCents)}</p>
+          <p className="text-sm">Ao solicitar, estas condições ficam registradas para conferência. O prazo de validade será exibido no pedido.</p>
+        </> : <p>Selecione os itens para receber uma cotação válida. Se o preço mudar, será necessária nova confirmação.</p>}
+        <button className="w-full rounded-lg bg-blue-700 p-4 font-semibold text-white disabled:opacity-40" disabled={busy || quoting || !quote || quote.cartKey !== cartKey} onClick={() => void submit()}>{busy ? 'Registrando…' : 'Confirmar cotação e solicitar'}</button>
+        <Link className="block text-blue-700 underline" href="/cliente/suporte">Condições para contadores e dúvidas comerciais</Link>
+      </section>
+    </div>}
+    {history.length > 0 && <section className="space-y-3"><h2 className="text-xl font-bold">Últimas solicitações</h2>{history.map((item) => <article className="rounded-xl border bg-white p-4" key={item.id}>
+      <p>{new Date(item.createdAt).toLocaleDateString('pt-BR')} · {item.statusLabel} · {money(Math.round(item.valorTotal * 100))}</p>
+      {item.detalhes.inicioAssinatura && <p>Início da assinatura: {new Date(item.detalhes.inicioAssinatura).toLocaleDateString('pt-BR')}</p>}
+      {!pendingStatuses.includes(item.status) && item.detalhes.ticketId && <Link className="text-blue-700 underline" href={`/cliente/suporte/${item.detalhes.ticketId}`}>Ver atendimento</Link>}
+    </article>)}</section>}
+  </main>;
 }
 
-function PedidoContratacaoCard({
-    pedido,
-    message,
-    uploading,
-    error,
-    onUpload,
-}: {
-    pedido: PedidoContratacao;
-    message: string;
-    uploading: boolean;
-    error: string;
-    onUpload: (file: File | null) => void;
-}) {
-    const ticketId = pedido.detalhes?.ticketId;
-    const ticketProtocolo = pedido.detalhes?.ticketProtocolo;
-    const temComprovante = (pedido.anexos?.length || 0) > 0;
-
-    return (
-        <div className="mb-4 rounded-2xl border border-green-200 bg-green-50 p-4 text-sm text-green-900">
-            <div className="flex items-start gap-3">
-                <div className="rounded-xl bg-white p-2 text-green-600">
-                    <CheckCircle2 size={20} />
-                </div>
-                <div className="min-w-0 flex-1">
-                    <p className="font-black">Solicitacao de contratacao em andamento</p>
-                    <p className="mt-1 text-xs leading-5 text-green-800">{message}</p>
-                    <div className="mt-3 space-y-1 rounded-xl bg-white/80 p-3 text-xs text-slate-700">
-                        <p><strong>Pedido:</strong> #{pedido.id.slice(0, 8)}</p>
-                        {ticketProtocolo && <p><strong>Ticket:</strong> #{ticketProtocolo}</p>}
-                        <p><strong>Plano:</strong> {pedido.detalhes?.planoNome || pedido.planoSlug}</p>
-                        <p><strong>Ciclo:</strong> {pedido.ciclo}</p>
-                        <p><strong>Valor:</strong> {Number(pedido.valorTotal || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
-                        <p><strong>Status:</strong> {pedido.statusLabel || pedido.status}</p>
-                    </div>
-
-                    <label className="mt-3 flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-green-300 bg-white px-3 py-3 text-xs font-black text-green-700 hover:bg-green-50">
-                        {uploading ? <Loader2 className="animate-spin" size={16} /> : <FileUp size={16} />}
-                        {uploading ? 'Enviando comprovante...' : temComprovante ? 'Enviar novo comprovante' : 'Enviar comprovante'}
-                        <input
-                            type="file"
-                            accept=".pdf,.png,.jpg,.jpeg,.webp,application/pdf,image/png,image/jpeg,image/webp"
-                            className="hidden"
-                            disabled={uploading}
-                            onChange={(event) => onUpload(event.target.files?.[0] || null)}
-                        />
-                    </label>
-                    {error && <p className="mt-2 text-xs font-bold text-red-600">{error}</p>}
-                    {ticketId && (
-                        <a href={`/suporte/${ticketId}`} className="mt-3 inline-flex items-center gap-1 text-xs font-black text-blue-700 hover:underline">
-                            <Headphones size={14} /> Acompanhar suporte
-                        </a>
-                    )}
-                </div>
-            </div>
-        </div>
-    );
-}
-
-export default function Page() {
-    return <Suspense fallback={<div className="h-screen flex items-center justify-center"><Loader2 className="animate-spin text-blue-600" size={40}/></div>}><CheckoutContent /></Suspense>
+export default function CheckoutPage() {
+  return <Suspense fallback={<p className="p-8">Carregando contratação…</p>}><CheckoutContent /></Suspense>;
 }

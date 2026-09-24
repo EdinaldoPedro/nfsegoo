@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { ArrowLeft, Building2 } from 'lucide-react';
 import Sidebar from '@/components/Sidebar';
 
@@ -24,7 +25,7 @@ export default function AppHeader({ title, subtitle, backHref, eyebrow, action, 
             </Link>
           ) : showLogo ? (
             <div className="flex shrink-0 items-center gap-3">
-              <img src="/icons/G.png" alt="NFSeGoo" className="h-10 w-10 rounded-2xl bg-white p-1.5 shadow-sm ring-1 ring-slate-200" />
+              <Image src="/icons/G.png" alt="NFSeGoo" width={40} height={40} className="h-10 w-10 rounded-2xl bg-white p-1.5 shadow-sm ring-1 ring-slate-200" />
             </div>
           ) : (
             <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 ring-1 ring-blue-100">

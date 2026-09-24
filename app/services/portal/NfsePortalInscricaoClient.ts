@@ -1,7 +1,8 @@
 import { existsSync } from 'fs';
-import puppeteer from 'puppeteer';
+import path from 'node:path';
 import { chromium, type Browser } from 'playwright';
 import { openEmpresaCertificate } from '@/app/services/certificateVault';
+import { validarCPF } from '@/app/utils/cpf';
 
 const URL_LOGIN = 'https://www.nfse.gov.br/EmissorNacional/Login?ReturnUrl=%2fEmissorNacional';
 const URL_CERTIFICADO = 'https://certificado.nfse.gov.br/EmissorNacional/Certificado';
@@ -28,6 +29,7 @@ export interface PortalInscricaoOptions {
   navigationTimeoutMs?: number;
   authTimeoutMs?: number;
   actionTimeoutMs?: number;
+  expectedCnpj?: string;
 }
 
 function hojeSaoPaulo() {
@@ -39,29 +41,35 @@ function hojeSaoPaulo() {
   }).format(new Date());
 }
 
-function maskCpf(cpf: string) {
-  return `***.***.***-${cpf.slice(-2)}`;
-}
-
-function resolveChromiumExecutable() {
+function resolveChromiumLaunchOptions(): { executablePath?: string } | null {
   const candidates: Array<string | undefined> = [
     process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
     process.env.PUPPETEER_EXECUTABLE_PATH,
   ];
 
+  const configured = candidates.find((candidate) => !!candidate && existsSync(candidate));
+  if (configured) return { executablePath: configured };
+
   try {
-    candidates.push(chromium.executablePath());
+    // Let Playwright launch its own bundled Chromium by default. Passing that
+    // same path explicitly causes spawn UNKNOWN on some Windows installations.
+    if (existsSync(chromium.executablePath())) return {};
   } catch {
     // O Playwright pode estar instalado sem o navegador no servidor.
   }
 
-  try {
-    candidates.push(puppeteer.executablePath());
-  } catch {
-    // O Puppeteer tambem pode estar instalado sem o Chrome baixado.
-  }
-
-  if (process.platform !== 'win32') {
+  if (process.platform === 'win32') {
+    const programFiles = process.env.PROGRAMFILES;
+    const programFilesX86 = process.env['PROGRAMFILES(X86)'];
+    const localAppData = process.env.LOCALAPPDATA;
+    candidates.push(
+      programFiles && path.join(programFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+      programFilesX86 && path.join(programFilesX86, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+      localAppData && path.join(localAppData, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+      programFiles && path.join(programFiles, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+      programFilesX86 && path.join(programFilesX86, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+    );
+  } else {
     candidates.push(
       '/usr/bin/google-chrome-stable',
       '/usr/bin/google-chrome',
@@ -70,7 +78,8 @@ function resolveChromiumExecutable() {
     );
   }
 
-  return candidates.find((candidate) => !!candidate && existsSync(candidate));
+  const fallback = candidates.find((candidate) => !!candidate && existsSync(candidate));
+  return fallback ? { executablePath: fallback } : null;
 }
 
 function isPortalAuthenticated(urlValue: URL) {
@@ -91,36 +100,40 @@ export class NfsePortalInscricaoClient {
     options: PortalInscricaoOptions = {},
   ): Promise<PortalInscricaoInfo> {
     const cpfLimpo = cpf.replace(/\D/g, '');
-    if (cpfLimpo.length !== 11) {
+    if (!validarCPF(cpfLimpo)) {
       throw new Error('CPF invalido para consulta no Portal Nacional.');
     }
-
-    console.log(`[BOT CPF] Iniciando consulta oficial da inscricao: ${maskCpf(cpfLimpo)}`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dataConsulta) || !Number.isFinite(new Date(`${dataConsulta}T12:00:00Z`).getTime())) {
+      throw new Error('Data de consulta invalida.');
+    }
 
     const credenciais = openEmpresaCertificate({
       empresaId,
       certificadoA1: pfxBase64,
       senhaCertificado,
+      expectedCnpj: options.expectedCnpj,
+      requireTrustedChain: true,
       purpose: 'CONSULT_CPF_INSCRICAO',
     });
 
     const urlConsulta = `https://www.nfse.gov.br/emissornacional/api/EmissaoDPS/RecuperarInfoInscricao/${cpfLimpo}?data=${dataConsulta}`;
-    const navigationTimeoutMs = options.navigationTimeoutMs ?? 30000;
-    const authTimeoutMs = options.authTimeoutMs ?? 20000;
-    const actionTimeoutMs = options.actionTimeoutMs ?? 5000;
+    const bounded = (value: number | undefined, fallback: number, min: number, max: number) => Math.max(min, Math.min(max, Math.trunc(value ?? fallback)));
+    const navigationTimeoutMs = bounded(options.navigationTimeoutMs, 30_000, 5_000, 35_000);
+    const authTimeoutMs = bounded(options.authTimeoutMs, 20_000, 5_000, 25_000);
+    const actionTimeoutMs = bounded(options.actionTimeoutMs, 5_000, 1_000, 8_000);
 
     let browser: Browser | null = null;
 
     try {
-      const executablePath = resolveChromiumExecutable();
-      if (!executablePath) {
+      const launchOptions = resolveChromiumLaunchOptions();
+      if (!launchOptions) {
         throw new Error('Navegador automatizado indisponivel no servidor. Instale o Chromium do Playwright ou configure PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH.');
       }
 
       browser = await chromium.launch({
-        executablePath,
+        ...launchOptions,
         headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+        args: ['--disable-dev-shm-usage'],
       });
 
       const cert = Buffer.from(credenciais.cert);
@@ -147,30 +160,24 @@ export class NfsePortalInscricaoClient {
       const page = await context.newPage();
       page.setDefaultTimeout(actionTimeoutMs);
 
-      console.log('[BOT CPF] 1. Acessando pagina de login...');
       await page.goto(URL_LOGIN, { timeout: navigationTimeoutMs, waitUntil: 'domcontentloaded' });
       await page.waitForTimeout(500);
 
-      console.log("[BOT CPF] Clicando na opcao 'Certificado Digital'...");
       const acessoCertificado = page.locator(`a[href="${URL_CERTIFICADO}"]`).first();
       if (await acessoCertificado.count() === 0) {
         throw new Error('O Portal Nacional alterou o link de acesso por certificado digital.');
       }
       await acessoCertificado.click({ timeout: actionTimeoutMs });
 
-      console.log('[BOT CPF] Aguardando autenticacao...');
       try {
         await page.waitForURL(isPortalAuthenticated, {
           timeout: authTimeoutMs,
           waitUntil: 'domcontentloaded',
         });
-        console.log('[BOT CPF] Login detectado.');
       } catch {
-        const currentUrl = new URL(page.url());
-        throw new Error(`Falha no login por certificado digital. O portal permaneceu em ${currentUrl.origin}${currentUrl.pathname}.`);
+        throw new Error('Falha no login por certificado digital no Portal Nacional.');
       }
 
-      console.log(`[BOT CPF] 2. Consultando inscricao: ${maskCpf(cpfLimpo)}`);
       // A API interna valida a sessao do navegador. O cliente HTTP isolado do
       // Playwright recebe 403 mesmo compartilhando os cookies do contexto.
       const retorno = await page.evaluate(async (url) => {
@@ -179,10 +186,13 @@ export class NfsePortalInscricaoClient {
           cache: 'no-store',
           headers: { Accept: 'application/json' },
         });
+        const declaredLength = Number(response.headers.get('content-length') || 0);
+        if (Number.isFinite(declaredLength) && declaredLength > 256 * 1024) return { ok: false, status: 502, text: '' };
+        const text = await response.text();
         return {
           ok: response.ok,
           status: response.status,
-          text: await response.text(),
+          text: text.length <= 256 * 1024 ? text : '',
         };
       }, urlConsulta);
 
@@ -204,7 +214,8 @@ export class NfsePortalInscricaoClient {
       }
 
       const nomeRazaoSocial = String(dados.nomerazaosocial || dados.nomeRazaoSocial || '').trim();
-      if (!nomeRazaoSocial) {
+      // eslint-disable-next-line no-control-regex -- dados cadastrais remotos não podem conter bytes de controle.
+      if (!nomeRazaoSocial || nomeRazaoSocial.length > 200 || /[\u0000-\u001f\u007f]/.test(nomeRazaoSocial)) {
         throw new Error('Portal Nacional nao retornou o nome/razao social para este CPF.');
       }
 
@@ -212,14 +223,13 @@ export class NfsePortalInscricaoClient {
 
       return {
         cpf: cpfLimpo,
-        inscricao: String(dados.inscricao || cpfLimpo),
+        inscricao: String(dados.inscricao || cpfLimpo).slice(0, 40),
         nomeRazaoSocial,
-        codigoPais: typeof codigoPais === 'number' ? codigoPais : null,
+        codigoPais: typeof codigoPais === 'number' && Number.isSafeInteger(codigoPais) ? codigoPais : null,
         dataConsulta,
       };
-    } catch (error: any) {
-      console.error('[BOT CPF CRITICAL]', error.message);
-      throw new Error(`Erro no robo de consulta CPF: ${error.message}`);
+    } catch (error) {
+      throw new Error('Nao foi possivel concluir a consulta de CPF no Portal Nacional.', { cause: error });
     } finally {
       await browser?.close();
     }

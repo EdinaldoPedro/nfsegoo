@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "status": "DRAFT",
+  "portal": "NFS_E_PADRAO_NACIONAL",
+  "environment": "HOMOLOGACAO",
+  "fiscalArtifactHash": "SUBSTITUIR_PELO_RESULTADO_DE_NPM_RUN_FISCAL_FINGERPRINT",
+  "reportSha256": "SUBSTITUIR_PELO_SHA256_DO_RELATORIO_COMPLETO_SANITIZADO",
+  "approvedAt": "2026-09-24T12:00:00.000Z",
+  "expiresAt": "2027-03-23T12:00:00.000Z",
+  "approvers": [
+    { "role": "TECNICO", "name": "Responsável técnico", "approvalRef": "CHAMADO-TECNICO-0001" },
+    { "role": "FISCAL", "name": "Responsável fiscal", "approvalRef": "PARECER-FISCAL-0001" }
+  ],
+  "scenarios": [
+    { "id": "EMISSAO_PJ", "status": "PASSED", "executedAt": "2026-09-24T10:00:00.000Z", "evidenceRef": "EVIDENCIA-HOM-001" },
+    { "id": "EMISSAO_PF", "status": "PASSED", "executedAt": "2026-09-24T10:05:00.000Z", "evidenceRef": "EVIDENCIA-HOM-002" },
+    { "id": "CONSULTA_AUTORIZADA", "status": "PASSED", "executedAt": "2026-09-24T10:10:00.000Z", "evidenceRef": "EVIDENCIA-HOM-003" },
+    { "id": "REJEICAO_FISCAL", "status": "PASSED", "executedAt": "2026-09-24T10:15:00.000Z", "evidenceRef": "EVIDENCIA-HOM-004" },
+    { "id": "CANCELAMENTO", "status": "PASSED", "executedAt": "2026-09-24T10:20:00.000Z", "evidenceRef": "EVIDENCIA-HOM-005" },
+    { "id": "XML_PDF", "status": "PASSED", "executedAt": "2026-09-24T10:25:00.000Z", "evidenceRef": "EVIDENCIA-HOM-006" },
+    { "id": "RETOMADA_SEM_DUPLICIDADE", "status": "PASSED", "executedAt": "2026-09-24T10:30:00.000Z", "evidenceRef": "EVIDENCIA-HOM-007" },
+    { "id": "REGIME_MEI", "status": "PASSED", "executedAt": "2026-09-24T10:35:00.000Z", "evidenceRef": "EVIDENCIA-HOM-008" },
+    { "id": "REGIME_SIMPLES", "status": "PASSED", "executedAt": "2026-09-24T10:40:00.000Z", "evidenceRef": "EVIDENCIA-HOM-009" },
+    { "id": "REGIME_LUCRO_PRESUMIDO", "status": "PASSED", "executedAt": "2026-09-24T10:45:00.000Z", "evidenceRef": "EVIDENCIA-HOM-010" }
+  ]
+}

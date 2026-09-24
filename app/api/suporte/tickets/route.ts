@@ -1,10 +1,11 @@
+import { withApiGuard } from '@/app/utils/api-route';
 import { NextResponse } from 'next/server';
 import { prisma } from '@/app/utils/prisma';
 import { validateRequest } from '@/app/utils/api-security';
 import { registrarEventoCrm } from '@/app/services/crmService';
 import { normalizeBase64Attachment, validateJsonContentLength } from '@/app/utils/request-guards';
 
-export async function GET(request: Request) {
+export const GET = withApiGuard(async function GET(request: Request) {
   const { targetId, errorResponse } = await validateRequest(request);
   if (errorResponse) return errorResponse;
 
@@ -23,9 +24,9 @@ export async function GET(request: Request) {
   } catch (error: any) {
     return NextResponse.json({ error: error.message || 'Erro ao buscar tickets' }, { status: 500 });
   }
-}
+});
 
-export async function POST(request: Request) {
+export const POST = withApiGuard(async function POST(request: Request) {
   const { targetId, errorResponse } = await validateRequest(request);
   if (errorResponse) return errorResponse;
 
@@ -122,4 +123,4 @@ export async function POST(request: Request) {
   } catch (error: any) {
     return NextResponse.json({ error: `Erro interno: ${error.message}` }, { status: 500 });
   }
-}
+}, { maxBodyBytes: 7 * 1024 * 1024 });

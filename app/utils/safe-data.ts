@@ -13,12 +13,22 @@ export function stripUserSecrets<T extends Record<string, any> | null | undefine
 
   const {
     senha,
+    sessionVersion,
+    mfaSecret,
+    mfaPendingSecret,
+    mfaPendingExpires,
+    mfaRecoveryCodes,
+    mfaLastUsedStep,
+    sessoes,
+    impersonacoesIniciadas,
+    impersonacoesRecebidas,
     resetToken,
     verificationCode,
     verificationExpires,
     empresa,
     empresasContabeis,
     empresasFaturadas,
+    empresasProprietarias,
     ...safeUser
   } = user;
 
@@ -32,5 +42,6 @@ export function stripUserSecrets<T extends Record<string, any> | null | undefine
         }))
       : empresasContabeis,
     empresasFaturadas: Array.isArray(empresasFaturadas) ? empresasFaturadas.map((item) => stripEmpresaSecrets(item)) : empresasFaturadas,
+    empresasProprietarias: Array.isArray(empresasProprietarias) ? empresasProprietarias.map((item) => stripEmpresaSecrets(item)) : empresasProprietarias,
   };
 }

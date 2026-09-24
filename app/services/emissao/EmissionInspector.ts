@@ -9,7 +9,10 @@ import { isPercentualFiscalValido, parseDecimalInput } from '@/app/utils/number-
 import { resolveFiscalDecision } from '@/app/services/emissor/fiscal/FiscalRuleEngine';
 import { validateNationalAddress } from '@/app/utils/customer-address';
 import { getDpsSequence, normalizeDpsEnvironment } from '@/app/services/dpsSequenceService';
+import { normalizeDpsNumber, normalizeDpsSeries } from '@/app/utils/dps-identity';
 import { assertRegimeTributarioSuportado } from '@/app/utils/regime-tributario';
+import { fiscalCnpj } from '@/app/utils/fiscal-identifiers';
+import { validarCPF } from '@/app/utils/cpf';
 
 type CheckStatus = 'ok' | 'warn' | 'error' | 'info';
 
@@ -146,7 +149,7 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
   const cnaeFinal = onlyDigits(String(firstDefined(overrides.codigoCnae, overrides.cnae, notaAtual?.cnae, cnaePrincipal?.codigo, '')));
   const valorFinal = asNumber(overrides.valor, Number(venda.valor));
   const descricaoFinal = String(overrides.descricao ?? venda.descricao ?? '').trim();
-  const serieFinal = String(firstDefined(overrides.serieDPS, prestador.serieDPS, '900'));
+  const serieFinal = normalizeDpsSeries(firstDefined(overrides.serieDPS, prestador.serieDPS, '900'));
   const ambienteDps = normalizeDpsEnvironment(prestador.ambiente);
   const ultimoDpsConhecido = await getDpsSequence({
     empresaId: prestador.id,
@@ -154,7 +157,8 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
     serie: serieFinal,
     fallback: ambienteDps === 'PRODUCAO' ? prestador.ultimoDPS : 0,
   });
-  const numeroDPSFinal = firstDefined(overrides.numeroDPS) ? asNumber(overrides.numeroDPS) : ultimoDpsConhecido + 1;
+  const numeroInformado = firstDefined(overrides.numeroDPS);
+  const numeroDPSFinal = normalizeDpsNumber(numeroInformado !== undefined ? numeroInformado : ultimoDpsConhecido + 1);
   const prestadorInscricaoMunicipal = optionalText(firstDefined(overrides.inscricaoMunicipalPrestador, prestador.inscricaoMunicipal));
   const prestadorRegimeEspecial = optionalText(firstDefined(overrides.regimeEspecialTributacao, prestador.regimeEspecialTributacao));
   const tipoTributacaoFinal = asText(firstDefined(overrides.tipoTributacao, prestador.tipoTributacaoPadrao, '1'), '1');
@@ -179,13 +183,17 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
     uf: enderecoCadastroOuOverride(overrides.tomadorUf, tomador.uf),
   };
   const enderecoNacional = !isExterior ? validateNationalAddress(enderecoTomador) : null;
+  const prestadorCnpj = fiscalCnpj(prestador.documento);
+  const tomadorCpf = tomadorTipo === 'PF' ? onlyDigits(tomadorDocumento) : '';
+  const tomadorCnpj = tomadorTipo === 'PJ' ? fiscalCnpj(tomadorDocumento) : '';
+  const tomadorDocumentoValido = isExterior || (tomadorTipo === 'PF' ? validarCPF(tomadorCpf) : Boolean(tomadorCnpj));
 
   addCheck(checks, {
     id: 'prestador-cnpj',
     group: 'Prestador',
     label: 'CNPJ do prestador',
-    status: onlyDigits(prestador.documento).length === 14 ? 'ok' : 'error',
-    message: onlyDigits(prestador.documento).length === 14 ? 'CNPJ do prestador informado.' : 'CNPJ do prestador ausente ou invalido.',
+    status: prestadorCnpj ? 'ok' : 'error',
+    message: prestadorCnpj ? 'CNPJ do prestador validado.' : 'CNPJ do prestador ausente ou invalido.',
     tag: 'prest/CNPJ',
     field: 'empresa.documento',
   });
@@ -231,12 +239,29 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
     });
   }
 
+  if (prestador.certificadoA1) {
+    const metadataMatches = fiscalCnpj(prestador.certificadoCnpj) === prestadorCnpj;
+    const trusted = prestador.certificadoChainStatus === 'TRUSTED_CONFIGURED_BUNDLE';
+    addCheck(checks, {
+      id: 'certificado-identidade',
+      group: 'Prestador',
+      label: 'Identidade e cadeia do certificado',
+      status: !metadataMatches ? 'error' : prestador.ambiente === 'PRODUCAO' && !trusted ? 'error' : trusted ? 'ok' : 'warn',
+      message: !metadataMatches
+        ? 'Revalide o certificado: o CNPJ validado não coincide com o prestador.'
+        : prestador.ambiente === 'PRODUCAO' && !trusted
+          ? 'Produção exige certificado validado por uma cadeia ICP-Brasil configurada.'
+          : trusted ? 'CNPJ e cadeia ICP-Brasil validados.' : 'Certificado aceito apenas para homologação; cadeia não atestada localmente.',
+      field: 'empresa.certificadoA1',
+    });
+  }
+
   addCheck(checks, {
     id: 'tomador-documento',
     group: 'Tomador',
     label: 'Documento do tomador',
-    status: isExterior || onlyDigits(tomadorDocumento).length === 11 || onlyDigits(tomadorDocumento).length === 14 ? 'ok' : 'error',
-    message: isExterior ? 'Tomador exterior identificado.' : 'CPF/CNPJ nacional validado para montagem do XML.',
+    status: tomadorDocumentoValido ? 'ok' : 'error',
+    message: isExterior ? 'Tomador exterior identificado.' : tomadorDocumentoValido ? 'CPF/CNPJ nacional validado para montagem do XML.' : 'CPF/CNPJ do tomador invalido.',
     tag: 'toma/CPF ou toma/CNPJ',
     field: 'cliente.documento',
   });
@@ -451,6 +476,7 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
     itemLc,
     codigoIbge: asText(firstDefined(overrides.localPrestacaoIbge, prestador.codigoIbge), ''),
     regimeTributario: regimePrestador,
+    ambiente: prestador.ambiente,
     dataCompetencia: overrides.dataCompetencia,
     valor: valorFinal,
     codigoNbs,

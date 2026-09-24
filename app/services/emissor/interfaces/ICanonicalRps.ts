@@ -41,6 +41,7 @@ export interface ICanonicalRps {
     };
     servico: {
         valor: number;
+        localPrestacaoIbge?: string;
         valorLiquido: number;
         valorMoedaEstrangeira?: number;
         descricao: string;

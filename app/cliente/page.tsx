@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { 
     Plus, Search, Edit, Trash2, MapPin, 
     User, Building2, Globe, Loader2, X, 
@@ -11,6 +11,7 @@ import { useDialog } from '@/app/contexts/DialogContext';
 import { validarCPF } from '@/app/utils/cpf';
 import AppHeader from '@/components/AppHeader';
 import { hasCompleteNationalAddress, validateNationalAddress } from '@/app/utils/customer-address';
+import { formatCnpjInput, normalizeCnpj, validarCNPJ } from '@/app/utils/cnpj';
 
 // Lista de Países para Padronização (ISO 3166 / BACEN simplificado) - SEM ACENTOS PARA SEGURANÇA
 const LISTA_PAISES = [
@@ -29,6 +30,7 @@ interface Cliente {
   nomeFantasia?: string; 
   inscricaoMunicipal?: string; 
   email: string;
+  telefone?: string;
   documento: string;
   tipo: 'PJ' | 'PF' | 'EXT';
   cidade?: string;
@@ -60,12 +62,14 @@ export default function MeusClientes() {
   const [salvando, setSalvando] = useState(false);
   const [buscandoDados, setBuscandoDados] = useState(false);
   const [nomePfBloqueado, setNomePfBloqueado] = useState(false);
+  const ultimoCpfConsultado = useRef<string | null>(null);
+  const consultaCpfEmAndamento = useRef(false);
   const [termoBusca, setTermoBusca] = useState('');
   
   // === ESTADO DO FORMULÁRIO ===
   const [clienteAtual, setClienteAtual] = useState<Cliente>({ 
     id: '', nome: '', nomeFantasia: '', inscricaoMunicipal: '', 
-    email: '', documento: '', cidade: '', uf: '', cep: '', 
+    email: '', telefone: '', documento: '', cidade: '', uf: '', cep: '',
     logradouro: '', numero: '', bairro: '', codigoIbge: '',
     tipo: 'PJ', pais: 'Brasil', moeda: 'BRL', semEndereco: false
   });
@@ -116,9 +120,10 @@ export default function MeusClientes() {
 
   // --- LÓGICA DO WIZARD ---
   const abrirNovoCadastro = () => {
+    ultimoCpfConsultado.current = null;
     setNomePfBloqueado(false);
     setClienteAtual({ 
-        id: '', nome: '', nomeFantasia: '', inscricaoMunicipal: '', email: '', 
+        id: '', nome: '', nomeFantasia: '', inscricaoMunicipal: '', email: '', telefone: '',
         documento: '', cidade: '', uf: '', cep: '', logradouro: '', 
         numero: '', bairro: '', codigoIbge: '', tipo: 'PJ', pais: 'Brasil', moeda: 'BRL', semEndereco: false
     });
@@ -127,6 +132,7 @@ export default function MeusClientes() {
   }
 
   const selecionarTipo = (tipo: 'PJ' | 'PF' | 'EXT') => {
+      ultimoCpfConsultado.current = null;
       setNomePfBloqueado(false);
       setClienteAtual(prev => ({ 
           ...prev, 
@@ -161,15 +167,14 @@ export default function MeusClientes() {
   const verificarClienteExistente = async (doc: string) => {
         setBuscandoDados(true);
         try {
-            // OBS: O backend limpa caracteres não numéricos. 
-            // Para NIF alfanumérico, o backend precisaria ser ajustado, 
-            // mas assumindo NIF numérico ou backend tolerante:
             const res = await fetch('/api/clientes/check', {
                 method: 'POST',
                 headers: { 
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'x-user-id': localStorage.getItem('userId') || '',
+                    'x-empresa-id': localStorage.getItem('empresaContextId') || '',
                 },
-                body: JSON.stringify({ documento: doc })
+                body: JSON.stringify({ documento: doc, tipo: clienteAtual.tipo })
             });
             
             if (res.ok) {
@@ -187,6 +192,8 @@ export default function MeusClientes() {
     };
 
   const consultarCpfNoPortal = async (cpfLimpo: string) => {
+      if (consultaCpfEmAndamento.current) return false;
+      consultaCpfEmAndamento.current = true;
       setBuscandoDados(true);
       const userId = localStorage.getItem('userId');
       const contextId = localStorage.getItem('empresaContextId');
@@ -207,8 +214,8 @@ export default function MeusClientes() {
               setNomePfBloqueado(false);
               dialog.showAlert({
                   type: 'warning',
-                  title: 'Consulta oficial nao concluida',
-                  description: dados.error || 'Nao foi possivel validar o CPF no Portal Nacional agora.',
+                  title: 'Consulta oficial não concluída',
+                  description: dados.error || 'Não foi possível consultar o CPF agora. Informe o nome manualmente ou tente novamente mais tarde.',
               });
               return false;
           }
@@ -237,6 +244,7 @@ export default function MeusClientes() {
               description: 'Erro de conexao ao consultar CPF no Portal Nacional.',
           });
       } finally {
+          consultaCpfEmAndamento.current = false;
           setBuscandoDados(false);
       }
 
@@ -257,58 +265,54 @@ export default function MeusClientes() {
               setClienteAtual(prev => ({
                   ...prev,
                   nome: dados.razaoSocial, nomeFantasia: dados.nomeFantasia,
-                  email: dados.email, cep: dados.cep,
+                  // O e-mail público não vira destinatário fiscal sem escolha do prestador.
+                  email: prev.email, cep: dados.cep,
                   logradouro: dados.logradouro, numero: dados.numero,
                   bairro: dados.bairro, cidade: dados.cidade, uf: dados.uf,
                   codigoIbge: manterIbgeSeConsultaVierVazia(dados.codigoIbge, prev.codigoIbge)
               }));
-              dialog.showAlert({ type: 'success', description: 'Dados carregados da Receita!' });
+              dialog.showAlert({ type: 'success', description: 'Dados públicos do CNPJ carregados. Confira o e-mail particular desta relação antes de salvar.' });
           } else { 
               dialog.showAlert("CNPJ não encontrado na Receita."); 
           }
-      } catch (e) { } 
+      } catch {
+          dialog.showAlert('Nao foi possivel consultar o CNPJ. Tente novamente ou preencha os dados manualmente.');
+      }
       finally { setBuscandoDados(false); }
   };
 
   const handleAtualizarCadastroPJ = async () => {
       if (!isEdicaoPJ) return;
 
-      const cnpjLimpo = clienteAtual.documento.replace(/\D/g, '');
-      if (cnpjLimpo.length !== 14) {
+      const cnpjLimpo = normalizeCnpj(clienteAtual.documento);
+      if (!cnpjLimpo || !validarCNPJ(cnpjLimpo)) {
           dialog.showAlert('CNPJ inválido para atualização automática.');
           return;
       }
-
       setBuscandoDados(true);
 
       try {
-          const resCnpj = await fetch('/api/external/cnpj', {
+          const resCnpj = await fetch('/api/clientes/refresh', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ cnpj: cnpjLimpo })
+              headers: {
+                  'Content-Type': 'application/json',
+                  'x-user-id': localStorage.getItem('userId') || '',
+                  'x-empresa-id': localStorage.getItem('empresaContextId') || '',
+              },
+              body: JSON.stringify({ clienteId: clienteAtual.id })
           });
           const dados = await resCnpj.json();
 
           if (!resCnpj.ok) {
-              dialog.showAlert('Não foi possível consultar o CNPJ no momento.');
+              dialog.showAlert(dados.error || 'Não foi possível consultar o CNPJ no momento.');
               return;
           }
 
-          setClienteAtual(prev => ({
-              ...prev,
-              nome: dados.razaoSocial,
-              nomeFantasia: dados.nomeFantasia,
-              email: dados.email,
-              cep: dados.cep,
-              logradouro: dados.logradouro,
-              numero: dados.numero,
-              bairro: dados.bairro,
-              cidade: dados.cidade,
-              uf: dados.uf,
-              codigoIbge: manterIbgeSeConsultaVierVazia(dados.codigoIbge, prev.codigoIbge)
-          }));
+          setClienteAtual(prev => ({ ...prev, ...dados.cliente,
+              // A atualização pública nunca substitui estes dados particulares.
+              email: prev.email, telefone: prev.telefone, inscricaoMunicipal: prev.inscricaoMunicipal }));
 
-          dialog.showAlert({ type: 'success', description: 'Dados oficiais carregados. Clique em Salvar para confirmar.' });
+          dialog.showAlert({ type: 'success', description: 'Identidade pública atualizada para todas as carteiras. E-mail e I.M. desta relação foram preservados.' });
       } catch {
           dialog.showAlert('Erro de conexão ao atualizar cadastro.');
       } finally {
@@ -333,7 +337,9 @@ export default function MeusClientes() {
       }
 
       // === BRASIL (PJ/PF) ===
-      let v = val.replace(/\D/g, '');
+      const v = clienteAtual.tipo === 'PJ'
+          ? formatCnpjInput(val).replace(/[./-]/g, '')
+          : val.replace(/\D/g, '').slice(0, 11);
       const rawLength = v.length;
 
       // Máscara
@@ -343,9 +349,7 @@ export default function MeusClientes() {
             documentoFormatado = v.slice(0, 11).replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d{1,2})$/, '$1-$2');
           }
       } else {
-          if (v.length <= 14) {
-            documentoFormatado = v.slice(0, 14).replace(/^(\d{2})(\d)/, '$1.$2').replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3').replace(/\.(\d{3})(\d)/, '.$1/$2').replace(/(\d{4})(\d)/, '$1-$2');
-          }
+          documentoFormatado = formatCnpjInput(v);
       }
 
       setClienteAtual(prev => ({ ...prev, documento: documentoFormatado }));
@@ -361,6 +365,10 @@ export default function MeusClientes() {
                dialog.showAlert({ type: 'warning', title: 'CPF Inválido', description: 'Verifique os números digitados.' });
                return;
           }
+          // onChange may fire again for the same complete CPF (paste, formatting,
+          // edits). The official lookup is attempted once per CPF in this form.
+          if (ultimoCpfConsultado.current === v || consultaCpfEmAndamento.current) return;
+          ultimoCpfConsultado.current = v;
           const achouInterno = await verificarClienteExistente(v);
           if (!achouInterno) {
               await consultarCpfNoPortal(v);
@@ -369,9 +377,15 @@ export default function MeusClientes() {
 
       // === AUTOMAÇÃO PJ (14 Dígitos) ===
       if (clienteAtual.tipo === 'PJ' && rawLength === 14) {
+          if (!validarCNPJ(v)) {
+              dialog.showAlert({ type: 'warning', title: 'CNPJ inválido', description: 'Revise o CNPJ e seus dígitos verificadores.' });
+              return;
+          }
           const achouInterno = await verificarClienteExistente(v);
-          if (!achouInterno) {
+          if (!achouInterno && !/[A-Z]/.test(v)) {
               executarBuscaCNPJ(v);
+          } else if (!achouInterno) {
+              dialog.showAlert({ type: 'info', title: 'CNPJ alfanumérico válido', description: 'Preencha os dados cadastrais manualmente; a consulta pública automática ainda não oferece suporte.' });
           }
       }
   };
@@ -393,7 +407,9 @@ export default function MeusClientes() {
                   codigoIbge: manterIbgeSeConsultaVierVazia(dados.codigoIbge, prev.codigoIbge)
               }));
           }
-      } catch (e) { } finally { setBuscandoDados(false); }
+      } catch {
+          dialog.showAlert('Nao foi possivel consultar o CEP. Preencha o endereco manualmente.');
+      } finally { setBuscandoDados(false); }
   };
 
   const handleSalvar = async (e: React.FormEvent) => {
@@ -403,6 +419,9 @@ export default function MeusClientes() {
     }
     if (clienteAtual.tipo === 'PF' && !validarCPF(clienteAtual.documento || '')) {
       return dialog.showAlert({ type: 'warning', title: 'CPF invalido', description: 'Verifique o CPF antes de salvar.' });
+    }
+    if (clienteAtual.tipo === 'PJ' && !validarCNPJ(clienteAtual.documento || '')) {
+      return dialog.showAlert({ type: 'warning', title: 'CNPJ invalido', description: 'Verifique o CNPJ e seus digitos verificadores antes de salvar.' });
     }
     if (!clienteAtual.nome) return dialog.showAlert("Nome é obrigatório.");
     
@@ -556,7 +575,7 @@ export default function MeusClientes() {
                         {/* --- ETAPA 2: FORMULÁRIO --- */}
                         {modalStep === 'FORMULARIO' && (
                             <form onSubmit={handleSalvar} className="space-y-6 animate-in slide-in-from-right-4">
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                                     <div>
                                         <label className={labelClass}>
                                             {clienteAtual.tipo === 'PJ' ? 'CNPJ' : clienteAtual.tipo === 'PF' ? 'CPF' : 'NIF / Documento (Opcional)'}
@@ -571,7 +590,7 @@ export default function MeusClientes() {
                                                 onBlur={(e) => {
                                                     if(!formularioBloqueado && clienteAtual.tipo === 'EXT' && e.target.value.length > 3) verificarClienteExistente(e.target.value);
                                                 }}
-                                                placeholder={clienteAtual.tipo === 'EXT' ? 'Ex: 123456789' : 'Apenas números'}
+                                                placeholder={clienteAtual.tipo === 'EXT' ? 'Ex: 123456789' : clienteAtual.tipo === 'PJ' ? '00.AAA.000/0000-00' : 'Apenas números'}
                                                 maxLength={clienteAtual.tipo === 'EXT' ? 20 : 18}
                                             />
                                             {buscandoDados && (
@@ -580,11 +599,29 @@ export default function MeusClientes() {
                                                 </div>
                                             )}
                                         </div>
+                                        {clienteAtual.tipo === 'PF' && !clienteAtual.id && !nomePfBloqueado &&
+                                          validarCPF(String(clienteAtual.documento || '').replace(/\D/g, '')) && (
+                                            <button type="button" disabled={buscandoDados || formularioBloqueado}
+                                              onClick={async () => {
+                                                const cpf = String(clienteAtual.documento || '').replace(/\D/g, '');
+                                                if (!await verificarClienteExistente(cpf)) await consultarCpfNoPortal(cpf);
+                                              }}
+                                              className="mt-2 text-xs font-semibold text-blue-700 hover:underline disabled:opacity-50">
+                                              Tentar consultar CPF novamente
+                                            </button>
+                                          )}
                                     </div>
                                     <div>
                                         <label className={labelClass}>Email</label>
                                         <input type="email" placeholder="email@cliente.com" className={inputClass}
                                             value={clienteAtual.email || ''} onChange={e => setClienteAtual({...clienteAtual, email: e.target.value})}
+                                            disabled={formularioBloqueado}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className={labelClass}>Telefone desta relação</label>
+                                        <input type="tel" placeholder="DDD e número" className={inputClass}
+                                            value={clienteAtual.telefone || ''} onChange={e => setClienteAtual({...clienteAtual, telefone: e.target.value})}
                                             disabled={formularioBloqueado}
                                         />
                                     </div>

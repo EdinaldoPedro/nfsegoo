@@ -35,6 +35,9 @@ export default function AdminCnaes() {
   };
 
   const handleSave = async () => {
+    if (!editing.fonteNormativa?.trim()) return dialog.showAlert({ type: 'warning', description: 'Informe a fonte normativa da regra.' });
+    if (!editing.justification?.trim() || editing.justification.trim().length < 10) return dialog.showAlert({ type: 'warning', description: 'Informe uma justificativa com pelo menos 10 caracteres.' });
+    if (!editing.adminPassword) return dialog.showAlert({ type: 'warning', description: 'Informe sua senha administrativa atual.' });
     const pis = editing.aliquotaPisRetencao === '' || editing.aliquotaPisRetencao == null ? 0.65 : Number(editing.aliquotaPisRetencao);
     const cofins = editing.aliquotaCofinsRetencao === '' || editing.aliquotaCofinsRetencao == null ? 3 : Number(editing.aliquotaCofinsRetencao);
     const csll = editing.aliquotaCsllRetencao === '' || editing.aliquotaCsllRetencao == null ? 1 : Number(editing.aliquotaCsllRetencao);
@@ -48,6 +51,7 @@ export default function AdminCnaes() {
       valorMinimoRetencaoCrsf: editing.retemCrsf && (editing.valorMinimoRetencaoCrsf === '' || editing.valorMinimoRetencaoCrsf == null) ? 10.01 : editing.valorMinimoRetencaoCrsf,
       aliquotaIr: editing.retemIr ? editing.aliquotaIr : null,
       valorMinimoRetencaoIr: editing.retemIr && (editing.valorMinimoRetencaoIr === '' || editing.valorMinimoRetencaoIr == null) ? 10.01 : editing.valorMinimoRetencaoIr,
+      expectedUpdatedAt: editing.updatedAt,
     };
     const token = localStorage.getItem('token');
     const res = await fetch('/api/admin/cnaes', { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(payloadToSave) });
@@ -165,6 +169,11 @@ export default function AdminCnaes() {
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-4"><div><label className="mb-1 block text-xs font-bold">Obrigatório a partir de</label><input type="date" className={inputBase} value={editing.inicioObrigatoriedadeIbsCbs ? String(editing.inicioObrigatoriedadeIbsCbs).slice(0, 10) : ''} onChange={e => setEditing({ ...editing, inicioObrigatoriedadeIbsCbs: e.target.value })} /></div><div><label className="mb-1 block text-xs font-bold">cIndOp</label><input className={inputBase} value={editing.codigoIndicadorOperacao || ''} onChange={e => setEditing({ ...editing, codigoIndicadorOperacao: e.target.value })} placeholder="100301" /></div><div><label className="mb-1 block text-xs font-bold">CST</label><input className={inputBase} value={editing.cstIbsCbs || ''} onChange={e => setEditing({ ...editing, cstIbsCbs: e.target.value })} placeholder="000" /></div><div><label className="mb-1 block text-xs font-bold">cClassTrib</label><input className={inputBase} value={editing.classeTribIbsCbs || ''} onChange={e => setEditing({ ...editing, classeTribIbsCbs: e.target.value })} placeholder="000001" /></div></div>
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-3"><div><label className="mb-1 block text-xs font-bold">Início de vigência</label><input type="date" className={inputBase} value={editing.inicioVigencia ? String(editing.inicioVigencia).slice(0, 10) : ''} onChange={e => setEditing({ ...editing, inicioVigencia: e.target.value })} /></div><div><label className="mb-1 block text-xs font-bold">Fim de vigência</label><input type="date" className={inputBase} value={editing.fimVigencia ? String(editing.fimVigencia).slice(0, 10) : ''} onChange={e => setEditing({ ...editing, fimVigencia: e.target.value })} /></div><div><label className="mb-1 block text-xs font-bold">Fonte normativa</label><input className={inputBase} value={editing.fonteNormativa || ''} onChange={e => setEditing({ ...editing, fonteNormativa: e.target.value })} /></div></div>
               </div>
+              <div className="rounded-2xl border border-slate-300 bg-slate-50 p-4">
+                <h4 className="text-sm font-black uppercase text-slate-700">Confirmação e histórico</h4>
+                <p className="mt-1 text-xs text-slate-500">A alteração ficará registrada com responsável, justificativa e valores anteriores.</p>
+                <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2"><div><label className="mb-1 block text-xs font-bold text-slate-600">Justificativa</label><textarea className={`${inputBase} resize-none`} rows={3} value={editing.justification || ''} onChange={e => setEditing({ ...editing, justification: e.target.value })} /></div><div><label className="mb-1 block text-xs font-bold text-slate-600">Sua senha administrativa</label><input type="password" autoComplete="current-password" className={inputBase} value={editing.adminPassword || ''} onChange={e => setEditing({ ...editing, adminPassword: e.target.value })} /></div></div>
+              </div>
             </div>
             <div className="flex justify-end gap-2 border-t bg-slate-50 p-5"><button onClick={() => setEditing(null)} className="rounded-xl px-5 py-3 text-sm font-bold text-slate-600 hover:bg-white">Cancelar</button><button onClick={handleSave} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-6 py-3 text-sm font-bold text-white hover:bg-blue-700"><Save size={18} /> Salvar alterações</button></div>
           </div>
@@ -185,7 +194,7 @@ export default function AdminCnaes() {
                 <td className="p-4 text-center">{cnae.temRetencaoInss ? <CheckCircle size={17} className="mx-auto text-emerald-500" /> : <XCircle size={17} className="mx-auto text-slate-200" />}</td>
                 <td className="p-4 text-center">{cnae.retemCrsf ? <span className="text-xs font-black text-purple-600">{Number(cnae.aliquotaCrsf).toFixed(2)}%</span> : <XCircle size={17} className="mx-auto text-slate-200" />}</td>
                 <td className="p-4 text-center">{cnae.retemIr ? <span className="text-xs font-black text-orange-600">{Number(cnae.aliquotaIr).toFixed(2)}%</span> : <XCircle size={17} className="mx-auto text-slate-200" />}</td>
-                <td className="p-4 text-right"><button onClick={() => setEditing(cnae)} className="rounded-xl p-2 text-blue-600 hover:bg-blue-50"><Edit size={18} /></button></td>
+                <td className="p-4 text-right"><button onClick={() => setEditing({ ...cnae, justification: '', adminPassword: '' })} className="rounded-xl p-2 text-blue-600 hover:bg-blue-50"><Edit size={18} /></button></td>
               </tr>
             ))}
           </tbody>

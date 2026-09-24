@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
   Activity,
@@ -31,6 +31,7 @@ import {
   User,
 } from 'lucide-react';
 import { useDialog } from '@/app/contexts/DialogContext';
+import { fiscalOperationLabel, isFiscalOperationActive, isFiscalOperationPolling } from '@/app/utils/fiscal-operation-state';
 import NbsSelector from '@/components/NbsSelector';
 
 type ActiveTab = 'resumo' | 'correcao' | 'validacao' | 'xml' | 'retornos' | 'logs';
@@ -377,10 +378,10 @@ function RetornoCard({ log, index }: { log: any; index: number }) {
 }
 
 export default function DetalheVendaCompleto() {
-  const { id } = useParams();
+  const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const dialog = useDialog();
-  const vendaId = Array.isArray(id) ? id[0] : id;
+  const vendaId = id;
 
   const [venda, setVenda] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -391,6 +392,8 @@ export default function DetalheVendaCompleto() {
   const [baixandoArquivo, setBaixandoArquivo] = useState<'xml' | 'pdf' | null>(null);
   const [inspecao, setInspecao] = useState<any>(null);
   const [isEditing, setIsEditing] = useState(false);
+  const editingRef = useRef(false);
+  const setEditing = (value: boolean) => { editingRef.current = value; setIsEditing(value); };
   const [activeTab, setActiveTab] = useState<ActiveTab>('resumo');
 
   const [formData, setFormData] = useState({
@@ -434,13 +437,13 @@ export default function DetalheVendaCompleto() {
     tomadorCodigoIbge: '',
   });
 
-  const fetchVenda = (silent = false) => {
-    if (!silent && !venda) setLoading(true);
+  const fetchVenda = useCallback((silent = false) => {
+    if (!silent) setLoading(true);
     fetch(`/api/admin/vendas/${vendaId}`)
       .then((r) => r.json())
       .then((data) => {
         setVenda(data);
-        if (!isEditing && !silent) {
+        if (!editingRef.current && !silent) {
           const payload = data.payloadRecuperado || {};
           const valorTela = toFormText(payload.valor ?? data.valor).replace('.', ',');
           const valorMoedaEstrangeiraTela = toFormText(payload.valorMoedaEstrangeira).replace('.', ',');
@@ -489,21 +492,21 @@ export default function DetalheVendaCompleto() {
       })
       .catch((err) => console.error(err))
       .finally(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    fetchVenda();
   }, [vendaId]);
 
   useEffect(() => {
+    fetchVenda();
+  }, [fetchVenda]);
+
+  useEffect(() => {
     let interval: ReturnType<typeof setInterval> | undefined;
-    if (venda && venda.status === 'PROCESSANDO') {
-      interval = setInterval(() => fetchVenda(true), 3000);
+    if (venda && (venda.status === 'PROCESSANDO' || venda.notas?.some((nota: any) => isFiscalOperationPolling(nota.fiscalOperations?.[0]) || ['PENDENTE', 'PROCESSANDO'].includes(nota.documentTask?.status)))) {
+      interval = setInterval(() => { if (document.visibilityState === 'visible') fetchVenda(true); }, 5000);
     }
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [venda?.status]);
+  }, [fetchVenda, venda]);
 
   const parseValor = (val: string) => {
     if (!val) return 0;
@@ -546,7 +549,7 @@ export default function DetalheVendaCompleto() {
     }
   };
 
-  const handleSave = async (reenviar = false) => {
+  const handleSave = async () => {
     setProcessing(true);
     const userId = localStorage.getItem('userId');
     const envio = payloadEnvio();
@@ -562,33 +565,36 @@ export default function DetalheVendaCompleto() {
         throw new Error(saveError.error || 'Não foi possível validar e salvar os dados da venda.');
       }
 
-      if (reenviar) {
-        const resRetry = await fetch('/api/notas/retry', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
-          body: JSON.stringify({ vendaId, dadosAtualizados: envio }),
-        });
-
-        const dataRetry = await resRetry.json();
-        if (!resRetry.ok) throw new Error(dataRetry.error || 'Erro no processamento.');
-
-        await dialog.showAlert({ type: 'success', title: 'Processando', description: 'Reenvio iniciado. Acompanhe na aba de Logs.' });
-
-        setIsEditing(false);
-        setVenda((prev: any) => ({ ...prev, status: 'PROCESSANDO' }));
-        setActiveTab('logs');
-        setTimeout(() => fetchVenda(true), 1000);
-      } else {
-        await dialog.showAlert({ type: 'success', title: 'Salvo', description: 'Dados atualizados com sucesso.' });
-        setIsEditing(false);
-        fetchVenda();
-      }
+      await dialog.showAlert({ type: 'success', title: 'Sugestão salva', description: 'A proposta foi registrada para análise. A emissão deve ser revisada e solicitada pelo cliente ou contador autorizado.' });
+      setEditing(false);
+      fetchVenda();
     } catch (error: any) {
       dialog.showAlert({ type: 'danger', title: 'Falha na operação da venda', description: error.message });
       setTimeout(() => fetchVenda(true), 1000);
     } finally {
       setProcessing(false);
     }
+  };
+
+  const pedirReautenticacao = async (title: string) => {
+    const justification = await dialog.showPrompt({ title, description: 'Informe uma justificativa com pelo menos 10 caracteres.' });
+    if (!justification) return null;
+    if (justification.trim().length < 10) { await dialog.showAlert('Descreva a justificativa com pelo menos 10 caracteres.'); return null; }
+    const adminPassword = await dialog.showPrompt({ title: 'Confirmar identidade', description: 'Digite sua senha administrativa atual.', inputType: 'password' });
+    return adminPassword ? { justification: justification.trim(), adminPassword } : null;
+  };
+
+  const retomarConciliacaoNota = async (operationId: string) => {
+    const credentials = await pedirReautenticacao('Retomar consultas da nota');
+    if (!credentials) return;
+    setSincronizandoRetorno(true);
+    try {
+      const res = await fetch('/api/admin/emissoes/retomar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ operationId, ...credentials }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Operação não retomada.');
+      await dialog.showAlert({ type: 'info', title: 'Conciliação registrada', description: 'O worker fará somente consultas. Nenhum pedido fiscal será reenviado.' });
+    } catch (error: any) { await dialog.showAlert({ type: 'warning', description: error.message }); }
+    finally { setSincronizandoRetorno(false); fetchVenda(true); }
   };
 
   const handleDelete = async () => {
@@ -601,10 +607,12 @@ export default function DetalheVendaCompleto() {
     });
 
     if (confirmacao !== 'DELETAR') return;
+    const credentials = await pedirReautenticacao('Arquivar venda sem obrigação fiscal');
+    if (!credentials) return;
 
     setProcessing(true);
     try {
-      const res = await fetch(`/api/admin/vendas/${vendaId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/admin/vendas/${vendaId}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(credentials) });
       if (res.ok) {
         await dialog.showAlert({ type: 'success', description: 'Venda arquivada.' });
         router.push('/admin/emissoes');
@@ -620,7 +628,7 @@ export default function DetalheVendaCompleto() {
   };
 
   const startCorrection = () => {
-    setIsEditing(true);
+    setEditing(true);
     setActiveTab('correcao');
   };
 
@@ -633,7 +641,7 @@ export default function DetalheVendaCompleto() {
     const confirmar = await dialog.showConfirm({
       type: 'info',
       title: 'Atualizar PDF?',
-      description: 'A bancada vai gerar novamente a DANFSe a partir do XML oficial e substituir o PDF salvo desta venda.',
+      description: 'Será agendada a geração do DANFSe pelo worker, após validar o XML autorizado e, se houver, o evento de cancelamento.',
       confirmText: 'Atualizar PDF',
     });
 
@@ -648,7 +656,7 @@ export default function DetalheVendaCompleto() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Nao foi possivel atualizar o PDF.');
 
-      await dialog.showAlert({ type: 'success', title: 'PDF atualizado', description: data.message || 'PDF salvo com sucesso.' });
+      await dialog.showAlert({ type: 'info', title: 'PDF solicitado', description: 'A geração foi agendada. Acompanhe o estado do documento; o PDF ainda não foi substituído.' });
       fetchVenda(true);
       setActiveTab('logs');
     } catch (error: any) {
@@ -662,9 +670,9 @@ export default function DetalheVendaCompleto() {
   const sincronizarRetorno = async () => {
     const confirmar = await dialog.showConfirm({
       type: 'info',
-      title: 'Sincronizar nota?',
-      description: 'A bancada vai consultar o Portal Nacional pela chave de acesso e atualizar numero, XML e status desta venda sem reenviar a nota.',
-      confirmText: 'Sincronizar',
+      title: 'Consultar situação fiscal no Portal Nacional?',
+      description: 'Será agendada uma consulta pela chave e pelo ambiente original. Os documentos serão preservados e nenhum pedido fiscal será reenviado.',
+      confirmText: 'Agendar consulta',
     });
 
     if (!confirmar) return;
@@ -679,9 +687,9 @@ export default function DetalheVendaCompleto() {
       if (!res.ok) throw new Error(data.error || 'Nao foi possivel sincronizar o retorno fiscal.');
 
       await dialog.showAlert({
-        type: 'success',
-        title: 'Nota sincronizada',
-        description: data.message || 'Retorno fiscal atualizado com sucesso.',
+        type: 'info',
+        title: 'Consulta registrada',
+        description: data.operation?.statusMessage || 'A consulta ainda está pendente; acompanhe o resultado nesta tela.',
       });
       fetchVenda(true);
       setActiveTab('logs');
@@ -736,7 +744,7 @@ export default function DetalheVendaCompleto() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ notaId: notaAtual.id }),
       });
-      if (!res.ok) {
+      if (res.status !== 200 || !res.headers.get('content-type')?.includes('application/pdf')) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || 'Não foi possível baixar o PDF.');
       }
@@ -781,7 +789,9 @@ export default function DetalheVendaCompleto() {
         const raw = JSON.parse(venda.payloadJson);
         prettyPayload = JSON.stringify(raw, null, 2);
       }
-    } catch {}
+    } catch {
+      prettyPayload = 'Conteudo historico indisponivel: JSON invalido.';
+    }
 
     return { prettyPayload, xmlExibicao, xmlDownload };
   }, [venda]);
@@ -821,10 +831,12 @@ export default function DetalheVendaCompleto() {
   const nomeTomador = venda.cliente?.nome || venda.cliente?.razaoSocial || 'Tomador não informado';
   const ultimaMensagemErro = retornoLogs[0]?.message;
   const erroTemporarioPortal = retornoLogs.some(logIndicaErroTemporario);
+  const noteOperation = notaAtual?.fiscalOperations?.[0];
+  const canAdminister = typeof window !== 'undefined' && ['ADMIN', 'MASTER'].includes(localStorage.getItem('userRole') || '');
   const integridadePdf = {
     chaveOk: Boolean(notaAtual?.chaveAcesso),
     xmlOk: Boolean(notaAtual?.xmlAutorizadoBase64 || notaAtual?.xmlBase64),
-    pdfOk: Boolean(notaAtual?.pdfBase64),
+    pdfOk: Boolean(notaAtual?.pdfBase64 && notaAtual.documentTask?.status === 'CONCLUIDA'),
     notaAutorizada: venda.status === 'CONCLUIDA' || venda.status === 'CANCELADA' || notaAtual?.status === 'AUTORIZADA' || notaAtual?.status === 'CANCELADA',
     notaCancelada: venda.status === 'CANCELADA' || notaAtual?.status === 'CANCELADA',
     eventoCancelamentoOk: Boolean(notaAtual?.xmlCancelamentoEventoBase64),
@@ -881,8 +893,8 @@ export default function DetalheVendaCompleto() {
                 <Settings2 size={16} /> Corrigir
               </button>
               <button
+                disabled={!canAdminister || processing}
                 onClick={handleDelete}
-                disabled={processing}
                 className="inline-flex items-center gap-2 rounded-xl border border-red-100 px-4 py-2.5 text-sm font-bold text-red-600 hover:bg-red-50"
               >
                 <Trash2 size={16} /> Arquivar
@@ -908,7 +920,7 @@ export default function DetalheVendaCompleto() {
                     </h2>
                     <p className="mt-1 text-sm leading-relaxed text-red-800">
                       {erroTemporarioPortal
-                        ? 'A DPS foi preservada. Aguarde alguns minutos e tente reenviar sem alterar a numeração.'
+                        ? 'A DPS foi preservada. Verifique a conciliação antes de orientar qualquer nova solicitação.'
                         : ultimaMensagemErro || 'A emissão falhou. Consulte Retornos, Validação, XML e Logs.'}
                     </p>
                   </div>
@@ -917,7 +929,7 @@ export default function DetalheVendaCompleto() {
                   onClick={startCorrection}
                   className="rounded-xl bg-red-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-red-700 inline-flex items-center justify-center gap-2"
                 >
-                  <RefreshCw size={16} /> {erroTemporarioPortal ? 'Tentar reenviar' : 'Abrir correção'}
+                  <RefreshCw size={16} /> {erroTemporarioPortal ? 'Analisar retorno' : 'Abrir correção'}
                 </button>
               </div>
             </section>
@@ -999,13 +1011,21 @@ export default function DetalheVendaCompleto() {
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
                 <SectionShell title="Documentos e integridade" subtitle="Disponibilidade dos artefatos oficiais gerados pelo Portal." icon={ShieldCheck}>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <InfoItem label="Nota fiscal" value={notaAtual?.numero || 'Ainda não autorizada'} mono />
+                    <InfoItem label="Nota fiscal" value={notaAtual?.numeroOficial || notaAtual?.numero || 'Ainda não autorizada'} mono />
                     <InfoItem label="Data de emissão" value={notaAtual?.dataEmissao ? formatDate(notaAtual.dataEmissao) : 'Ainda não autorizada'} />
+                    <InfoItem label="Ambiente original" value={notaAtual?.ambiente || 'Verificar XML original'} />
+                    <InfoItem label="Geração do PDF" value={notaAtual?.documentTask?.status || 'Ainda não solicitado ao worker'} />
                     <InfoItem label="Chave de acesso" value={integridadePdf.chaveOk ? 'Disponível' : 'Pendente'} />
                     <InfoItem label="XML oficial" value={integridadePdf.xmlOk ? 'Disponível' : 'Pendente'} />
                     {integridadePdf.notaCancelada && <InfoItem label="Evento de cancelamento" value={integridadePdf.eventoCancelamentoOk ? 'Disponível' : 'Pendente'} />}
                     <InfoItem label={integridadePdf.notaCancelada ? 'PDF cancelado' : 'PDF'} value={integridadePdf.pdfOk ? 'Disponível' : 'Ausente'} />
                   </div>
+                  {noteOperation && <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm" role="status">
+                    <strong>{fiscalOperationLabel(noteOperation)}</strong>
+                    <p>{noteOperation.statusMessage}</p>
+                    <p className="text-xs text-slate-500">Operação: {noteOperation.id}</p>
+                    {canAdminister && noteOperation.status === 'RECONCILIACAO_MANUAL' && <button disabled={sincronizandoRetorno} onClick={() => retomarConciliacaoNota(noteOperation.id)} className="mt-2 underline font-bold">Retomar somente consultas</button>}
+                  </div>}
                   {(integridadePdf.xmlOk || podeSincronizarRetorno || podeReprocessarPdf) && (
                     <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
                       {integridadePdf.xmlOk && (
@@ -1025,13 +1045,13 @@ export default function DetalheVendaCompleto() {
                         </button>
                       )}
                       {podeSincronizarRetorno && (
-                        <button onClick={sincronizarRetorno} disabled={sincronizandoRetorno} className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-60 inline-flex items-center gap-2">
+                        <button onClick={sincronizarRetorno} disabled={sincronizandoRetorno || isFiscalOperationActive(noteOperation)} className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-60 inline-flex items-center gap-2">
                           {sincronizandoRetorno ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-                          {sincronizandoRetorno ? 'Sincronizando...' : 'Sincronizar nota'}
+                          {sincronizandoRetorno ? 'Agendando consulta...' : 'Consultar situação fiscal'}
                         </button>
                       )}
                       {podeReprocessarPdf && (
-                        <button onClick={reprocessarPdf} disabled={reprocessandoPdf} className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-bold text-blue-700 hover:bg-blue-100 disabled:opacity-60 inline-flex items-center gap-2">
+                        <button onClick={reprocessarPdf} disabled={reprocessandoPdf || ['PENDENTE', 'PROCESSANDO'].includes(notaAtual?.documentTask?.status)} className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-bold text-blue-700 hover:bg-blue-100 disabled:opacity-60 inline-flex items-center gap-2">
                           {reprocessandoPdf ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
                           {reprocessandoPdf ? 'Atualizando...' : 'Atualizar PDF'}
                         </button>
@@ -1060,24 +1080,21 @@ export default function DetalheVendaCompleto() {
               <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                 <div>
                   <p className="text-sm font-black text-blue-950">Modo de correção técnica</p>
-                  <p className="text-sm text-blue-700">Edite os campos que entram na DPS/XML, valide a prévia e reenvie a mesma venda pela fila fiscal.</p>
+                  <p className="text-sm text-blue-700">Registre uma sugestão técnica. A revisão e o envio fiscal cabem ao cliente ou contador autorizado; esta bancada não emite notas.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {!isEditing && (
-                    <button onClick={() => setIsEditing(true)} className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-700">
+                    <button onClick={() => setEditing(true)} className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-700">
                       Habilitar edição
                     </button>
                   )}
                   {isEditing && (
                     <>
-                      <button onClick={() => { setIsEditing(false); fetchVenda(); }} className="rounded-xl border border-blue-200 bg-white px-4 py-2 text-sm font-bold text-blue-700 hover:bg-blue-50">
+                      <button onClick={() => { setEditing(false); fetchVenda(); }} className="rounded-xl border border-blue-200 bg-white px-4 py-2 text-sm font-bold text-blue-700 hover:bg-blue-50">
                         Cancelar
                       </button>
-                      <button onClick={() => handleSave(false)} disabled={processing} className="rounded-xl border border-blue-200 bg-white px-4 py-2 text-sm font-bold text-blue-700 hover:bg-blue-50 disabled:opacity-60">
+                      <button onClick={() => handleSave()} disabled={processing} className="rounded-xl border border-blue-200 bg-white px-4 py-2 text-sm font-bold text-blue-700 hover:bg-blue-50 disabled:opacity-60">
                         Salvar rascunho
-                      </button>
-                      <button onClick={() => handleSave(true)} disabled={processing} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-60 inline-flex items-center gap-2">
-                        {processing ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />} Salvar e reenviar
                       </button>
                     </>
                   )}

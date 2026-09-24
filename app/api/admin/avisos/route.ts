@@ -1,326 +1,62 @@
 import { NextResponse } from 'next/server';
-import { Prisma, PrismaClient } from '@prisma/client';
+import { withApiGuard } from '@/app/utils/api-route';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
-import { validateJsonContentLength } from '@/app/utils/request-guards';
+import { isAdminRole } from '@/app/utils/access-control';
+import { requireAdminReauthentication } from '@/app/utils/admin-security';
+import { CommercialError } from '@/app/utils/commercial-pricing';
+import { prisma } from '@/app/utils/prisma';
+import { archiveNotice, noticeMetadataSelect, parseNoticeArchive, parseNoticeMutation, saveNotice,
+  serializeNotice } from '@/app/services/globalNoticeService';
 
-const prisma = new PrismaClient();
-
-const ADMIN_ROLES = ['MASTER', 'ADMIN'];
-const VALID_STATUS = ['RASCUNHO', 'AGENDADO', 'ATIVO', 'PAUSADO', 'ARQUIVADO'];
-const VALID_TYPES = ['INFO', 'SUCCESS', 'WARNING', 'CRITICAL'];
-const VALID_AUDIENCES = ['TODOS', 'CLIENTES', 'CONTADORES'];
-const MAX_ATTACHMENT_BASE64_LENGTH = 3_000_000;
-const ALLOWED_ATTACHMENT_MIME_TYPES = new Set(['application/pdf', 'image/png', 'image/jpeg', 'image/webp']);
-const ALLOWED_ATTACHMENT_EXTENSIONS = new Set(['.pdf', '.png', '.jpg', '.jpeg', '.webp']);
-let hasNotificarAppColumnCache: boolean | null = null;
-
-const NOTICE_SELECT = {
-  id: true,
-  titulo: true,
-  mensagem: true,
-  tipo: true,
-  status: true,
-  publico: true,
-  iniciaEm: true,
-  terminaEm: true,
-  linkLabel: true,
-  linkHref: true,
-  anexoNome: true,
-  anexoBase64: true,
-  criadoPorId: true,
-  publicadoEm: true,
-  arquivadoEm: true,
-  createdAt: true,
-  updatedAt: true,
-};
-
-function parseDate(value: unknown) {
-  if (!value || typeof value !== 'string') return null;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date;
+const statuses = ['RASCUNHO', 'AGENDADO', 'ATIVO', 'PAUSADO', 'ARQUIVADO', 'TODOS'];
+async function admin(request: Request) {
+  const user = await getAuthenticatedUser(request);
+  if (!user) return { response: unauthorized(), user: null };
+  if (!isAdminRole(user.role)) return { response: forbidden(), user: null };
+  return { response: null, user };
 }
 
-function resolveStatus(status: string, iniciaEm: Date | null) {
-  if (status === 'ATIVO' && iniciaEm && iniciaEm.getTime() > Date.now()) return 'AGENDADO';
-  return status;
-}
+export const GET = withApiGuard(async function GET(request: Request) {
+  const access = await admin(request); if (access.response) return access.response;
+  const params = new URL(request.url).searchParams;
+  if (Array.from(params.keys()).some(key => !['page', 'status'].includes(key))) return NextResponse.json({ error: 'Filtro inválido.' }, { status: 400 });
+  const pageText = params.get('page') || '1', status = params.get('status') || 'TODOS';
+  if (!/^[1-9]\d{0,4}$/.test(pageText) || !statuses.includes(status)) return NextResponse.json({ error: 'Página ou situação inválida.' }, { status: 400 });
+  const page = Number(pageText), where = status === 'TODOS' ? {} : status === 'AGENDADO'
+    ? { status: 'ATIVO', iniciaEm: { gt: new Date() } } : { status };
+  const [rows, total] = await prisma.$transaction([
+    prisma.globalNotice.findMany({ where, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }], skip: (page - 1) * 25, take: 25, select: noticeMetadataSelect }),
+    prisma.globalNotice.count({ where }),
+  ]);
+  return NextResponse.json({ data: rows.map(row => serializeNotice(row)), meta: { page, pageSize: 25, total, pages: Math.ceil(total / 25) } });
+});
 
-function serializeNotice(notice: any) {
-  const now = Date.now();
-  const startsAt = notice.iniciaEm ? new Date(notice.iniciaEm).getTime() : null;
-  const endsAt = notice.terminaEm ? new Date(notice.terminaEm).getTime() : null;
-  const runtimeStatus =
-    notice.status === 'ATIVO' && startsAt && startsAt > now
-      ? 'AGENDADO'
-      : notice.status === 'ATIVO' && endsAt && endsAt < now
-        ? 'EXPIRADO'
-        : notice.status;
-
-  return {
-    ...notice,
-    runtimeStatus,
-    anexoBase64: notice.anexoBase64 || null,
-    notificarApp: notice.notificarApp || false,
-  };
-}
-
-async function hasNotificarAppColumn() {
-  if (hasNotificarAppColumnCache !== null) return hasNotificarAppColumnCache;
-
+async function mutate(request: Request, mode: 'create' | 'update') {
+  const access = await admin(request); if (access.response) return access.response;
   try {
-    const rows = await prisma.$queryRaw<Array<{ exists: boolean }>>`
-      SELECT EXISTS (
-        SELECT 1
-        FROM information_schema.columns
-        WHERE table_schema = 'public'
-          AND table_name = 'GlobalNotice'
-          AND column_name = 'notificarApp'
-      ) AS "exists"
-    `;
-    if (rows?.[0]?.exists === true) {
-      hasNotificarAppColumnCache = true;
-      return true;
-    }
-  } catch {
-    return false;
+    const mutation = parseNoticeMutation(await request.json(), mode);
+    const reauth = await requireAdminReauthentication({ actorId: access.user!.id, password: mutation.adminPassword,
+      justification: mutation.justification, action: mode === 'create' ? 'GLOBAL_NOTICE_CREATE' : 'GLOBAL_NOTICE_UPDATE' });
+    if (reauth) return reauth;
+    return NextResponse.json(await saveNotice(access.user!.id, mutation), { status: mode === 'create' ? 201 : 200 });
+  } catch (error) {
+    if (error instanceof CommercialError) return NextResponse.json({ error: error.message }, { status: error.status });
+    throw error;
   }
-
-  return false;
 }
+export const POST = withApiGuard((request: Request) => mutate(request, 'create'), { maxBodyBytes: 3 * 1024 * 1024 });
+export const PUT = withApiGuard((request: Request) => mutate(request, 'update'), { maxBodyBytes: 3 * 1024 * 1024 });
 
-async function applyNotificarApp(noticeId: string, value: boolean) {
-  if (!(await hasNotificarAppColumn())) return;
-  await prisma.$executeRaw`
-    UPDATE "GlobalNotice"
-    SET "notificarApp" = ${value}
-    WHERE "id" = ${noticeId}
-  `;
-}
-
-async function attachNotificarAppFlags(notices: any[]) {
-  if (notices.length === 0 || !(await hasNotificarAppColumn())) return notices;
-
-  const ids = notices.map((notice) => notice.id).filter(Boolean);
-  if (ids.length === 0) return notices;
-  const idsSql = Prisma.join(ids);
-  const rows = await prisma.$queryRaw<Array<{ id: string; notificarApp: boolean }>>`
-    SELECT "id", "notificarApp"
-    FROM "GlobalNotice"
-    WHERE "id" IN (${idsSql})
-  `;
-  const flags = new Map(rows.map((row) => [row.id, row.notificarApp]));
-  return notices.map((notice) => ({ ...notice, notificarApp: flags.get(notice.id) || false }));
-}
-
-function fileExtension(fileName: string) {
-  const dotIndex = fileName.lastIndexOf('.');
-  return dotIndex >= 0 ? fileName.slice(dotIndex).toLowerCase() : '';
-}
-
-function validateSafeLink(value: unknown) {
-  const link = typeof value === 'string' ? value.trim() : '';
-  if (!link) return { value: null, error: null };
-
-  if (link.startsWith('/') && !link.startsWith('//') && !link.includes('\\')) {
-    return { value: link, error: null };
-  }
-
+export const DELETE = withApiGuard(async function DELETE(request: Request) {
+  const access = await admin(request); if (access.response) return access.response;
   try {
-    const url = new URL(link);
-    if (url.protocol === 'https:' || url.protocol === 'http:') {
-      return { value: url.toString(), error: null };
-    }
-  } catch {
-    return { value: null, error: 'Link do aviso invalido.' };
+    const mutation = parseNoticeArchive(await request.json());
+    const reauth = await requireAdminReauthentication({ actorId: access.user!.id, password: mutation.adminPassword,
+      justification: mutation.justification, action: 'GLOBAL_NOTICE_ARCHIVE' });
+    if (reauth) return reauth;
+    return NextResponse.json(await archiveNotice(access.user!.id, mutation));
+  } catch (error) {
+    if (error instanceof CommercialError) return NextResponse.json({ error: error.message }, { status: error.status });
+    throw error;
   }
-
-  return { value: null, error: 'Use apenas links http, https ou caminhos internos.' };
-}
-
-function validateAttachment(body: any) {
-  if (!body.anexoBase64) return { error: null, base64: null, fileName: null };
-
-  const rawBase64 = String(body.anexoBase64);
-  if (rawBase64.length > MAX_ATTACHMENT_BASE64_LENGTH) {
-    return { error: 'Use anexos de ate 2 MB para manter o carregamento leve.', base64: null, fileName: null };
-  }
-
-  const fileName = String(body.anexoNome || 'anexo').replace(/[^\w.\- ]+/g, '_').slice(0, 140);
-  const extensionAllowed = ALLOWED_ATTACHMENT_EXTENSIONS.has(fileExtension(fileName));
-  const dataUrlMatch = rawBase64.match(/^data:([^;,]+);base64,/i);
-  const mimeType = dataUrlMatch?.[1]?.toLowerCase() || '';
-
-  if (!dataUrlMatch || !ALLOWED_ATTACHMENT_MIME_TYPES.has(mimeType) || !extensionAllowed) {
-    return { error: 'Anexo deve ser PDF, PNG, JPG ou WEBP.', base64: null, fileName: null };
-  }
-
-  const compactBase64 = rawBase64.slice(dataUrlMatch[0].length).replace(/\s/g, '');
-  if (!compactBase64 || compactBase64.length % 4 === 1 || !/^[A-Za-z0-9+/]*={0,2}$/.test(compactBase64)) {
-    return { error: 'Anexo em formato invalido.', base64: null, fileName: null };
-  }
-
-  const bytes = Buffer.from(compactBase64, 'base64').length;
-  if (bytes > 2 * 1024 * 1024) {
-    return { error: 'Use anexos de ate 2 MB para manter o carregamento leve.', base64: null, fileName: null };
-  }
-
-  return { error: null, base64: `data:${mimeType};base64,${compactBase64}`, fileName };
-}
-
-export async function GET(request: Request) {
-  const user = await getAuthenticatedUser(request);
-  if (!user) return unauthorized();
-  if (!ADMIN_ROLES.includes(user.role)) return forbidden();
-
-  const { searchParams } = new URL(request.url);
-  const status = searchParams.get('status');
-
-  const notices = await prisma.globalNotice.findMany({
-    where: status && status !== 'TODOS' ? { status } : undefined,
-    orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
-    select: NOTICE_SELECT,
-  });
-
-  const noticesWithFlags = await attachNotificarAppFlags(notices);
-  return NextResponse.json(noticesWithFlags.map(serializeNotice));
-}
-
-export async function POST(request: Request) {
-  const user = await getAuthenticatedUser(request);
-  if (!user) return unauthorized();
-  if (!ADMIN_ROLES.includes(user.role)) return forbidden();
-
-  const sizeError = validateJsonContentLength(request, 4 * 1024 * 1024);
-  if (sizeError) return sizeError;
-
-  const body = await request.json();
-  const titulo = String(body.titulo || '').trim();
-  const mensagem = String(body.mensagem || '').trim();
-
-  if (!titulo || !mensagem) {
-    return NextResponse.json({ error: 'Informe titulo e mensagem do aviso.' }, { status: 400 });
-  }
-
-  const tipo = VALID_TYPES.includes(body.tipo) ? body.tipo : 'INFO';
-  const publico = VALID_AUDIENCES.includes(body.publico) ? body.publico : 'TODOS';
-  const iniciaEm = parseDate(body.iniciaEm);
-  const terminaEm = parseDate(body.terminaEm);
-  const statusBase = VALID_STATUS.includes(body.status) ? body.status : 'RASCUNHO';
-  const status = resolveStatus(statusBase, iniciaEm);
-
-  if (iniciaEm && terminaEm && terminaEm.getTime() <= iniciaEm.getTime()) {
-    return NextResponse.json({ error: 'A data final precisa ser maior que a data inicial.' }, { status: 400 });
-  }
-
-  const link = validateSafeLink(body.linkHref);
-  if (link.error) return NextResponse.json({ error: link.error }, { status: 400 });
-
-  const attachment = validateAttachment(body);
-  if (attachment.error) return NextResponse.json({ error: attachment.error }, { status: 400 });
-
-  const notice = await prisma.globalNotice.create({
-    data: {
-      titulo,
-      mensagem,
-      tipo,
-      publico,
-      status,
-      iniciaEm,
-      terminaEm,
-      linkLabel: body.linkLabel ? String(body.linkLabel).trim() : null,
-      linkHref: link.value,
-      anexoNome: attachment.fileName,
-      anexoBase64: attachment.base64,
-      criadoPorId: user.id,
-      publicadoEm: status === 'ATIVO' ? new Date() : null,
-    },
-    select: NOTICE_SELECT,
-  });
-  await applyNotificarApp(notice.id, body.notificarApp === true);
-
-  return NextResponse.json(serializeNotice({ ...notice, notificarApp: body.notificarApp === true }), { status: 201 });
-}
-
-export async function PUT(request: Request) {
-  const user = await getAuthenticatedUser(request);
-  if (!user) return unauthorized();
-  if (!ADMIN_ROLES.includes(user.role)) return forbidden();
-
-  const sizeError = validateJsonContentLength(request, 4 * 1024 * 1024);
-  if (sizeError) return sizeError;
-
-  const body = await request.json();
-  const id = String(body.id || '').trim();
-  if (!id) return NextResponse.json({ error: 'Aviso nao informado.' }, { status: 400 });
-
-  const titulo = String(body.titulo || '').trim();
-  const mensagem = String(body.mensagem || '').trim();
-  if (!titulo || !mensagem) {
-    return NextResponse.json({ error: 'Informe titulo e mensagem do aviso.' }, { status: 400 });
-  }
-
-  const atual = await prisma.globalNotice.findUnique({ where: { id }, select: NOTICE_SELECT });
-  if (!atual) return NextResponse.json({ error: 'Aviso nao encontrado.' }, { status: 404 });
-
-  const tipo = VALID_TYPES.includes(body.tipo) ? body.tipo : 'INFO';
-  const publico = VALID_AUDIENCES.includes(body.publico) ? body.publico : 'TODOS';
-  const iniciaEm = parseDate(body.iniciaEm);
-  const terminaEm = parseDate(body.terminaEm);
-  const statusBase = VALID_STATUS.includes(body.status) ? body.status : atual.status;
-  const status = resolveStatus(statusBase, iniciaEm);
-
-  if (iniciaEm && terminaEm && terminaEm.getTime() <= iniciaEm.getTime()) {
-    return NextResponse.json({ error: 'A data final precisa ser maior que a data inicial.' }, { status: 400 });
-  }
-
-  const link = validateSafeLink(body.linkHref);
-  if (link.error) return NextResponse.json({ error: link.error }, { status: 400 });
-
-  const attachment = validateAttachment(body);
-  if (attachment.error) return NextResponse.json({ error: attachment.error }, { status: 400 });
-
-  const notice = await prisma.globalNotice.update({
-    where: { id },
-    data: {
-      titulo,
-      mensagem,
-      tipo,
-      publico,
-      status,
-      iniciaEm,
-      terminaEm,
-      linkLabel: body.linkLabel ? String(body.linkLabel).trim() : null,
-      linkHref: link.value,
-      anexoNome: body.removerAnexo ? null : attachment.fileName || atual.anexoNome,
-      anexoBase64: body.removerAnexo ? null : attachment.base64 || atual.anexoBase64,
-      publicadoEm: status === 'ATIVO' && atual.status !== 'ATIVO' ? new Date() : atual.publicadoEm,
-      arquivadoEm: status === 'ARQUIVADO' && atual.status !== 'ARQUIVADO' ? new Date() : status !== 'ARQUIVADO' ? null : atual.arquivadoEm,
-    },
-    select: NOTICE_SELECT,
-  });
-  await applyNotificarApp(notice.id, body.notificarApp === true);
-
-  return NextResponse.json(serializeNotice({ ...notice, notificarApp: body.notificarApp === true }));
-}
-
-export async function DELETE(request: Request) {
-  const user = await getAuthenticatedUser(request);
-  if (!user) return unauthorized();
-  if (!ADMIN_ROLES.includes(user.role)) return forbidden();
-
-  const { searchParams } = new URL(request.url);
-  const id = searchParams.get('id');
-  if (!id) return NextResponse.json({ error: 'Aviso nao informado.' }, { status: 400 });
-
-  const notice = await prisma.globalNotice.update({
-    where: { id },
-    data: {
-      status: 'ARQUIVADO',
-      arquivadoEm: new Date(),
-    },
-    select: NOTICE_SELECT,
-  });
-
-  const [noticeWithFlag] = await attachNotificarAppFlags([notice]);
-  return NextResponse.json(serializeNotice(noticeWithFlag));
-}
+}, { maxBodyBytes: 8 * 1024 });

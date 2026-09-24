@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "status": "PENDING",
+  "environment": "STAGING_RELEASE_CANDIDATE",
+  "releaseId": "substituir-pelo-release-id-exato",
+  "planFingerprint": "gerar-a-partir-do-roteiro-do-release",
+  "executedAt": "2026-09-24T12:00:00.000Z",
+  "approvedAt": "2026-09-24T18:00:00.000Z",
+  "expiresAt": "2026-10-20T18:00:00.000Z",
+  "caseResults": [],
+  "approvals": [
+    { "role": "PRODUCT_OWNER", "approverRef": "pessoa/proprietario", "evidenceRef": "aceite/produto" },
+    { "role": "TECHNICAL", "approverRef": "pessoa/tecnico", "evidenceRef": "aceite/tecnico" },
+    { "role": "OPERATIONS", "approverRef": "pessoa/operacao", "evidenceRef": "aceite/operacao" }
+  ],
+  "evidenceRef": "qa/release-candidato"
+}

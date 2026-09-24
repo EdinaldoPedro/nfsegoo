@@ -1,10 +1,13 @@
+import { withApiGuard } from '@/app/utils/api-route';
 import { NextResponse } from 'next/server';
 import nodemailer from 'nodemailer';
+import { isIP } from 'node:net';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 import { isAdminRole } from '@/app/utils/access-control';
 import { decrypt } from '@/app/utils/crypto';
 import { prisma } from '@/app/utils/prisma';
 import { getErrorDiagnostics, inferDebugHint, sanitizeLogValue } from '@/app/services/logger';
+import { assertSmtpHostAllowed, normalizeSmtpHost } from '@/app/utils/smtp-security';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,7 +31,7 @@ async function withTiming<T>(fn: () => Promise<T>) {
   }
 }
 
-export async function GET(request: Request) {
+export const GET = withApiGuard(async function GET(request: Request) {
   const user = await getAuthenticatedUser(request);
   if (!user) return unauthorized();
   if (!isAdminRole(user.role) && user.role !== 'SUPORTE_TI') return forbidden();
@@ -53,17 +56,17 @@ export async function GET(request: Request) {
 
   if (smtpConfigured && config) {
     smtpCheck = await withTiming(async () => {
+      const host = normalizeSmtpHost(config.smtpHost || '');
+      await assertSmtpHostAllowed(host);
       const transporter = nodemailer.createTransport({
-        host: config.smtpHost || '',
+        host,
         port: config.smtpPort || 587,
         secure: config.smtpSecure,
         auth: {
           user: config.smtpUser || '',
           pass: decrypt(config.smtpPass || '') || '',
         },
-        tls: {
-          rejectUnauthorized: process.env.NODE_ENV === 'production',
-        },
+        tls: { rejectUnauthorized: true, servername: isIP(host) ? undefined : host },
       });
 
       await transporter.verify();
@@ -87,6 +90,18 @@ export async function GET(request: Request) {
     orderBy: { createdAt: 'desc' },
   });
 
+  const [emailQueue, activeWorkers, overduePrivacy, overdueIncidents] = await Promise.all([
+    prisma.emailOutbox.groupBy({ by: ['status'], _count: { _all: true } }),
+    prisma.workerHeartbeat.findMany({ where: { updatedAt: { gt: new Date(Date.now() - 45_000) } },
+      select: { productionEnabled: true, updatedAt: true }, take: 20 }),
+    prisma.privacyRequest.count({ where: { status: { in: ['PENDENTE', 'EM_ANALISE', 'AGUARDANDO_TITULAR'] }, dueAt: { lt: new Date() } } }),
+    prisma.securityIncident.count({ where: { status: { notIn: ['COMUNICADO', 'ENCERRADO'] }, riskToSubjects: 'RELEVANTE', regulatoryDeadlineAt: { lt: new Date() } } }),
+  ]);
+  const queuedEmails = emailQueue.filter(item => ['PENDENTE', 'ERRO_TEMPORARIO', 'PROCESSANDO'].includes(item.status))
+    .reduce((sum, item) => sum + item._count._all, 0);
+  const failedEmails = emailQueue.filter(item => ['ERRO_FINAL', 'EXPIRADO'].includes(item.status))
+    .reduce((sum, item) => sum + item._count._all, 0);
+
   return NextResponse.json({
     generatedAt: new Date().toISOString(),
     checks: [
@@ -109,6 +124,33 @@ export async function GET(request: Request) {
         hint: smtpCheck.ok ? null : smtpCheck.hint || 'Verifique host, porta, modo seguro, usuario, senha e limites do provedor.',
       },
       {
+        id: 'worker',
+        label: 'Worker operacional',
+        status: activeWorkers.some(item => item.productionEnabled) ? 'OK' : 'ERRO',
+        durationMs: null,
+        message: activeWorkers.some(item => item.productionEnabled) ? 'Worker de produção enviando heartbeat.' : 'Nenhum worker de produção respondeu nos últimos 45 segundos.',
+        details: { activeInstances: activeWorkers.length, productionInstances: activeWorkers.filter(item => item.productionEnabled).length },
+        hint: activeWorkers.length ? 'Confirme FISCAL_WORKER_ALLOW_PRODUCTION no processo correto.' : 'Inicie o worker separado e confira sua conexão com o banco.',
+      },
+      {
+        id: 'email-outbox',
+        label: 'Fila durável de e-mail',
+        status: failedEmails ? 'ALERTA' : 'OK',
+        durationMs: null,
+        message: `${queuedEmails} mensagem(ns) aguardando; ${failedEmails} expirada(s) ou em falha final.`,
+        details: Object.fromEntries(emailQueue.map(item => [item.status, item._count._all])),
+        hint: failedEmails ? 'Confirme SMTP e trate as falhas finais sem copiar conteúdo sensível para logs.' : null,
+      },
+      {
+        id: 'regulatory-deadlines',
+        label: 'Prazos de privacidade e incidentes',
+        status: overduePrivacy || overdueIncidents ? 'ERRO' : 'OK',
+        durationMs: null,
+        message: `${overduePrivacy} solicitação(ões) de titular atrasada(s); ${overdueIncidents} incidente(s) relevante(s) sem comunicação registrada no prazo.`,
+        details: { overduePrivacy, overdueIncidents },
+        hint: overduePrivacy || overdueIncidents ? 'Abra as bancadas restritas e trate imediatamente os prazos.' : null,
+      },
+      {
         id: 'email-last-error',
         label: 'Ultima falha de e-mail',
         status: lastEmailError ? 'ALERTA' : 'OK',
@@ -128,4 +170,4 @@ export async function GET(request: Request) {
       },
     ],
   });
-}
+});

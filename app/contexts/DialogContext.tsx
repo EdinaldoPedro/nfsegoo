@@ -11,6 +11,7 @@ export interface DialogOptions {
   cancelText?: string;
   type?: 'info' | 'danger' | 'warning' | 'prompt' | 'success';
   placeholder?: string; // Apenas para prompt
+  inputType?: 'text' | 'password';
   validationText?: string; // Texto que o usuário deve digitar para confirmar (ex: "DELETAR")
   audience?: 'client' | 'backoffice';
 }
@@ -53,12 +54,14 @@ export function DialogProvider({ children }: { children: ReactNode }) {
     } else {
       resolver.current(true);
     }
+    setInputValue('');
     setIsOpen(false);
   };
 
   const handleCancel = () => {
     if (options.type === 'prompt') resolver.current(null);
     else resolver.current(false);
+    setInputValue('');
     setIsOpen(false);
   };
 
@@ -136,6 +139,8 @@ export function DialogProvider({ children }: { children: ReactNode }) {
                 )}
                 <input 
                   autoFocus
+                  type={options.inputType || 'text'}
+                  autoComplete={options.inputType === 'password' ? 'current-password' : 'off'}
                   className="w-full p-2.5 bg-white border border-slate-300 rounded-md outline-none focus:ring-2 focus:ring-blue-500 text-slate-800 text-sm transition"
                   placeholder={options.placeholder || "Digite aqui..."}
                   value={inputValue}

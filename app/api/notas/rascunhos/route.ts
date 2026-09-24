@@ -1,3 +1,4 @@
+import { withApiGuard } from '@/app/utils/api-route';
 import { NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/app/utils/prisma';
@@ -32,7 +33,7 @@ async function enforceLimit(userId: string, empresaId: string) {
   }
 }
 
-export async function GET(request: Request) {
+export const GET = withApiGuard(async function GET(request: Request) {
   const { user, targetId, errorResponse } = await validateRequest(request);
   if (errorResponse) return errorResponse;
   if (!user || !targetId) return unauthorized();
@@ -56,9 +57,9 @@ export async function GET(request: Request) {
       payloadJson: undefined,
     })),
   });
-}
+});
 
-export async function POST(request: Request) {
+export const POST = withApiGuard(async function POST(request: Request) {
   const { user, targetId, errorResponse } = await validateRequest(request);
   if (errorResponse) return errorResponse;
   if (!user || !targetId) return unauthorized();
@@ -98,9 +99,9 @@ export async function POST(request: Request) {
       payloadJson: undefined,
     },
   }, { status: 201 });
-}
+});
 
-export async function DELETE(request: Request) {
+export const DELETE = withApiGuard(async function DELETE(request: Request) {
   const { user, targetId, errorResponse } = await validateRequest(request);
   if (errorResponse) return errorResponse;
   if (!user || !targetId) return unauthorized();
@@ -119,4 +120,4 @@ export async function DELETE(request: Request) {
   `;
 
   return NextResponse.json({ success: true });
-}
+});

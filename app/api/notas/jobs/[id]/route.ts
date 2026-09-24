@@ -1,12 +1,9 @@
+import { withApiGuard } from '@/app/utils/api-route';
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '@/app/utils/prisma';
 import { validateRequest } from '@/app/utils/api-security';
 import { unauthorized, forbidden } from '@/app/utils/api-middleware';
-import { dispararProcessamentoEmissaoJob, retomarEmissoesPendentes } from '@/app/services/emissaoJobService';
-import { hasEmpresaAccess } from '@/app/utils/access-control';
-
-const prisma = new PrismaClient();
-const emissaoJobModel = (prisma as any).emissaoJob;
+import { hasCustomerCompanyAccess } from '@/app/utils/access-control';
 
 function parseLastError(lastError?: string | null) {
   if (!lastError) return null;
@@ -17,44 +14,43 @@ function parseLastError(lastError?: string | null) {
   }
 }
 
-export async function GET(request: Request, { params }: { params: { id: string } }) {
+export const GET = withApiGuard(async function GET(request: Request, { params: routeParams }: { params: Promise<{ id: string }> }) {
+  const params = await routeParams;
   const { targetId, errorResponse } = await validateRequest(request);
   if (errorResponse) return errorResponse;
 
   const user = await prisma.user.findUnique({ where: { id: targetId } });
   if (!user) return unauthorized();
 
-  const job = await emissaoJobModel.findUnique({ where: { id: params.id } });
+  const job = await prisma.emissaoJob.findUnique({ where: { id: params.id }, select: {
+    id: true, empresaId: true, vendaId: true, status: true, statusMessage: true, attempts: true, maxAttempts: true,
+    resultNotaId: true, ambiente: true, nextAttemptAt: true, startedAt: true, finishedAt: true, lastError: true,
+    createdAt: true,
+  } });
   if (!job) {
     return NextResponse.json({ error: 'Job de emissao nao encontrado.' }, { status: 404 });
   }
 
-  const allowed = await hasEmpresaAccess(user, job.empresaId);
+  const allowed = await hasCustomerCompanyAccess(user, job.empresaId);
   if (!allowed) return forbidden();
 
   const erro = parseLastError(job.lastError);
-  const retryDue = !job.nextAttemptAt || new Date(job.nextAttemptAt) <= new Date();
-  const staleMinutes = Number(process.env.EMISSION_STALE_PROCESSING_MINUTES || 15);
-  const staleProcessing =
-    job.status === 'PROCESSANDO' &&
-    (!job.lockedAt || new Date(job.lockedAt).getTime() < Date.now() - staleMinutes * 60 * 1000);
-
-  if (['PENDENTE', 'ERRO_TEMPORARIO'].includes(job.status) && retryDue) {
-    dispararProcessamentoEmissaoJob(job.id);
-  } else if (staleProcessing) {
-    retomarEmissoesPendentes({ limit: 10, recuperarTravados: true }).catch(console.error);
-  }
-
+  const active = ['PENDENTE', 'PROCESSANDO', 'ERRO_TEMPORARIO'].includes(job.status);
+  const processorOffline = active && Date.now() - job.createdAt.getTime() > 60_000
+    && !await prisma.workerHeartbeat.findFirst({ where: { id: { startsWith: 'emission-' },
+      updatedAt: { gt: new Date(Date.now() - 45_000) } }, select: { id: true } });
   return NextResponse.json({
     id: job.id,
     status: job.status,
     statusMessage: job.statusMessage,
+    processorOffline: Boolean(processorOffline),
     attempts: job.attempts,
     maxAttempts: job.maxAttempts,
     empresaId: job.empresaId,
     vendaId: job.vendaId,
     notaId: job.resultNotaId,
-    isHomologation: job.status === 'AUTORIZADA' && !job.resultNotaId,
+    isHomologation: job.status === 'AUTORIZADA' && job.ambiente === 'HOMOLOGACAO',
+    requiresReconciliation: job.status === 'RECONCILIACAO_MANUAL',
     nextAttemptAt: job.nextAttemptAt,
     startedAt: job.startedAt,
     finishedAt: job.finishedAt,
@@ -64,4 +60,4 @@ export async function GET(request: Request, { params }: { params: { id: string }
     details: erro?.details || null,
     error: erro?.motivo || erro?.error || null,
   });
-}
+});

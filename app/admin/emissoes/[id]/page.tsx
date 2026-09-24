@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useDialog } from '@/app/contexts/DialogContext';
 import {
@@ -97,20 +97,18 @@ export default function DetalheEmissor() {
   const [paginaAtual, setPaginaAtual] = useState(1);
   const itensPorPagina = 12;
 
-  useEffect(() => {
-    carregarDados();
-  }, [id]);
-
-  useEffect(() => {
-    setPaginaAtual(1);
-  }, [busca, filtro]);
-
-  const carregarDados = (silent = false) => {
+  const carregarDados = useCallback((silent = false) => {
     if (silent) setRefreshing(true);
     else setLoading(true);
 
-    fetch(`/api/admin/emissoes/${id}`)
+    fetch(`/api/admin/emissoes/${encodeURIComponent(String(id))}`, { cache: 'no-store' })
       .then(async (res) => {
+        const contentType = res.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+          throw new Error(res.status === 404
+            ? 'A rota de detalhes não foi carregada pelo servidor. Reinicie o servidor de desenvolvimento e tente novamente.'
+            : `O servidor retornou uma resposta inesperada (HTTP ${res.status}). Tente novamente; se persistir, verifique os logs do servidor.`);
+        }
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || 'Erro na API');
         return json;
@@ -125,7 +123,15 @@ export default function DetalheEmissor() {
         setLoading(false);
         setRefreshing(false);
       });
-  };
+  }, [id]);
+
+  useEffect(() => {
+    carregarDados();
+  }, [carregarDados]);
+
+  useEffect(() => {
+    setPaginaAtual(1);
+  }, [busca, filtro]);
 
   const handleMudarAmbiente = async (novoAmbiente: string) => {
     if (!await dialog.showConfirm({
@@ -158,7 +164,7 @@ export default function DetalheEmissor() {
   };
 
   const empresa = data?.empresa;
-  const vendas = data?.vendas || [];
+  const vendas = useMemo(() => data?.vendas || [], [data?.vendas]);
 
   const resumo = useMemo(() => {
     return vendas.reduce(
@@ -218,6 +224,7 @@ export default function DetalheEmissor() {
         <AlertTriangle className="text-red-500" size={50} />
         <h2 className="text-xl font-bold text-slate-700">Erro ao carregar dados</h2>
         <p className="text-red-600 bg-red-50 p-4 rounded border border-red-200 font-mono text-sm">{error}</p>
+        <button type="button" onClick={() => carregarDados()} className="rounded-xl bg-blue-600 px-4 py-2 font-bold text-white hover:bg-blue-700">Tentar novamente</button>
       </div>
     );
   }

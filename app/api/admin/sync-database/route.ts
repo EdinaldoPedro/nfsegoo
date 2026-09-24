@@ -1,13 +1,13 @@
+import { withApiGuard } from '@/app/utils/api-route';
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
-import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
+import { prisma } from '@/app/utils/prisma';
+import { authorizeMaintenance } from '@/app/utils/maintenance-security';
+import { createLog } from '@/app/services/logger';
 
-const prisma = new PrismaClient();
-
-export async function GET(request: Request) {
-  const user = await getAuthenticatedUser(request);
-  if (!user) return unauthorized();
-  if (!['MASTER', 'ADMIN', 'SUPORTE_TI'].includes(user.role)) return forbidden();
+export const POST = withApiGuard(async function POST(request: Request) {
+  const { actor, body, error } = await authorizeMaintenance(request, 'SYNC_FISCAL_CATALOG', 'SINCRONIZAR CATALOGO FISCAL');
+  if (error) return error;
+  if (!actor || !body) return NextResponse.json({ error: 'Nao autorizado.' }, { status: 401 });
 
   try {
     // 1. Busca todos os CNAEs existentes nas empresas
@@ -59,6 +59,7 @@ export async function GET(request: Request) {
               cnae: codigoLimpo, // Salva LIMPO
               codigoIbge: item.empresa.codigoIbge,
               codigoTributacaoMunicipal: 'A_DEFINIR', 
+              ativo: false,
               descricaoServicoMunicipal: item.descricao
             }
           });
@@ -66,6 +67,12 @@ export async function GET(request: Request) {
         }
       }
     }
+
+    await createLog({
+      level: 'ALERTA', action: 'FISCAL_CATALOG_MAINTENANCE', module: 'SEGURANCA', userId: actor.id,
+      message: 'Catalogo fiscal sincronizado; novas regras municipais permanecem inativas.',
+      details: { globalCount, municipalCount, justification: body.justification },
+    });
 
     return NextResponse.json({
       success: true,
@@ -81,4 +88,4 @@ export async function GET(request: Request) {
     console.error(error);
     return NextResponse.json({ error: 'Erro ao sincronizar.' }, { status: 500 });
   }
-}
+});

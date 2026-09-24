@@ -1,6 +1,9 @@
 import type { ICanonicalRps } from '../interfaces/ICanonicalRps';
+import { normalizeDpsEnvironment, normalizeDpsNumber, normalizeDpsSeries } from '../../../utils/dps-identity.ts';
 import { retentionType } from '../fiscal/FiscalMath.ts';
 import { validateNationalAddress } from '../../../utils/customer-address.ts';
+import { fiscalCnpj } from '../../../utils/fiscal-identifiers.ts';
+import { validarCPF } from '../../../utils/cpf.ts';
 
 export class NacionalAdapter {
     
@@ -108,16 +111,16 @@ export class NacionalAdapter {
         const dhEmi = this.formatData(m.dataEmissao);
         // Usa a data de competência fornecida ou cai para a data de emissão como fallback
         const dCompet = m.dataCompetencia ? m.dataCompetencia : dhEmi.split('T')[0]; 
-        const documentoPrestador = this.clean(p.documento);
+        const documentoPrestador = fiscalCnpj(p.documento);
         const municipioPrestador = this.clean(p.endereco.codigoIbge);
-        const serie = this.clean(m.serie);
-        if (documentoPrestador.length !== 14) throw new Error('CNPJ do prestador deve possuir 14 digitos no leiaute de producao vigente.');
+        const serie = normalizeDpsSeries(m.serie);
+        if (!documentoPrestador) throw new Error('CNPJ do prestador inválido para o leiaute fiscal vigente.');
         if (municipioPrestador.length !== 7) throw new Error('Codigo IBGE do prestador deve possuir 7 digitos.');
         if (!/^\d{1,5}$/.test(serie)) throw new Error('Serie da DPS deve possuir de 1 a 5 digitos.');
-        if (!Number.isInteger(Number(m.numero)) || Number(m.numero) <= 0 || String(m.numero).length > 15) throw new Error('Numero da DPS invalido.');
-        const idDps = `DPS${municipioPrestador}2${documentoPrestador}${serie.padStart(5,'0')}${String(m.numero).padStart(15,'0')}`;
+        const numero = normalizeDpsNumber(m.numero);
+        const idDps = `DPS${municipioPrestador}2${documentoPrestador}${serie.padStart(5,'0')}${String(numero).padStart(15,'0')}`;
         
-        const tpAmb = m.ambiente === 'PRODUCAO' ? '1' : '2';
+        const tpAmb = normalizeDpsEnvironment(m.ambiente) === 'PRODUCAO' ? '1' : '2';
         const opSimpNac = this.mapRegime(p.regimeTributario);
         
         const paisNormalizado = String(t.pais || '').trim().toUpperCase();
@@ -125,11 +128,14 @@ export class NacionalAdapter {
         const codPais = isExterior ? this.mapPais(t.pais || '') : 'BR';
         const codMoeda = isExterior ? this.mapMoeda(t.moeda || '') : '986';
 
-        const docTomador = this.clean(t.documento);
-        if (!isExterior && ![11, 14].includes(docTomador.length)) {
+        const tipoTomador = String(t.tipo || '').toUpperCase();
+        const cpfTomador = tipoTomador === 'PF' ? this.clean(t.documento) : '';
+        const cnpjTomador = tipoTomador !== 'PF' ? fiscalCnpj(t.documento) : '';
+        const docTomador = cpfTomador || cnpjTomador;
+        if (!isExterior && !((cpfTomador && validarCPF(cpfTomador)) || cnpjTomador)) {
             throw new Error('CPF/CNPJ do tomador nacional invalido para a DPS.');
         }
-        const tagDocTomador = docTomador.length === 11 ? `<CPF>${docTomador}</CPF>` : `<CNPJ>${docTomador}</CNPJ>`;
+        const tagDocTomador = cpfTomador ? `<CPF>${cpfTomador}</CPF>` : `<CNPJ>${cnpjTomador}</CNPJ>`;
         if (!isExterior) {
             const endereco = validateNationalAddress(t.endereco || {});
             if (!endereco.valid) throw new Error(`Endereco do tomador incompleto: ${endereco.message}`);
@@ -198,14 +204,16 @@ export class NacionalAdapter {
         if (t.endereco?.complemento) tomaXml += `<xCpl>${this.escapeXml(t.endereco.complemento)}</xCpl>`;
         if (enderecoBairro) tomaXml += `<xBairro>${enderecoBairro}</xBairro>`;
         tomaXml += `</end>`;
-        if (t.email) tomaXml += `<email>${this.escapeXml(t.email)}</email>`;
         if (t.telefone) tomaXml += `<fone>${this.clean(t.telefone)}</fone>`;
+        if (t.email) tomaXml += `<email>${this.escapeXml(t.email)}</email>`;
         tomaXml += `</toma>`;
 
         // --- SERVIÇO ---
+        const municipioPrestacao = String(s.localPrestacaoIbge ?? p.endereco.codigoIbge);
+        if (!isExterior && !/^[0-9]{7}$/.test(municipioPrestacao)) throw new Error('Codigo IBGE do local da prestacao invalido.');
         let locPrestXml = isExterior 
             ? `<locPrest><cPaisPrestacao>${codPais}</cPaisPrestacao></locPrest>` 
-            : `<locPrest><cLocPrestacao>${this.clean(p.endereco.codigoIbge)}</cLocPrestacao></locPrest>`;
+            : `<locPrest><cLocPrestacao>${municipioPrestacao}</cLocPrestacao></locPrest>`;
 
         let servXml = `<serv>` + locPrestXml + `<cServ>` +
                       `<cTribNac>${this.clean(s.codigoTributacaoNacional)}</cTribNac>`;
@@ -354,8 +362,8 @@ export class NacionalAdapter {
                 `<tpAmb>${tpAmb}</tpAmb>` + 
                 `<dhEmi>${dhEmi}</dhEmi>` + 
                 `<verAplic>1.10</verAplic>` + 
-                `<serie>${m.serie}</serie>` + 
-                `<nDPS>${m.numero}</nDPS>` + 
+                `<serie>${serie}</serie>` +
+                `<nDPS>${numero}</nDPS>` +
                 `<dCompet>${dCompet}</dCompet>` + 
                 `<tpEmit>1</tpEmit>` + 
                 `<cLocEmi>${this.clean(p.endereco.codigoIbge)}</cLocEmi>` + 

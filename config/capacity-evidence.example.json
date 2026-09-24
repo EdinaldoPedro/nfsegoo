@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "status": "APPROVED",
+  "environment": "STAGING_ISOLATED",
+  "releaseId": "0.1.0+COMMIT.BUILD_ID",
+  "testedAt": "2026-09-24T12:00:00.000Z",
+  "approvedAt": "2026-09-24T14:00:00.000Z",
+  "expiresAt": "2026-12-20T12:00:00.000Z",
+  "profile": {
+    "webReplicas": 1,
+    "emissionWorkers": 1,
+    "documentWorkers": 1,
+    "consultationWorkers": 1,
+    "databaseTierRef": "staging/database-tier-equivalent",
+    "connectionBudget": 40,
+    "companies": 30,
+    "notes": 2000
+  },
+  "workload": {
+    "durationMinutes": 30,
+    "peakConcurrentUsers": 20,
+    "totalRequests": 5000,
+    "syntheticDataOnly": true,
+    "productionFiscalTransmissions": 0,
+    "scenarios": ["AUTHENTICATED_READS", "EMISSION_ENQUEUE_HOMOLOGATION", "DOCUMENT_GENERATION", "REPORTS", "QUEUE_RECOVERY", "TENANT_ISOLATION"]
+  },
+  "results": {
+    "httpErrorRatePercent": 0.1,
+    "httpP95Ms": 800,
+    "httpP99Ms": 1500,
+    "readinessAvailabilityPercent": 99.9,
+    "maxCpuPercent": 65,
+    "maxMemoryPercent": 70,
+    "maxDatabaseConnectionsPercent": 60,
+    "emissionQueueP95Seconds": 20,
+    "documentQueueP95Seconds": 20,
+    "consultationQueueP95Seconds": 20,
+    "crossTenantLeaks": 0
+  },
+  "failureTests": ["WEB_RESTART", "EMISSION_WORKER_RESTART", "DOCUMENT_WORKER_RESTART", "CONSULTATION_WORKER_RESTART"],
+  "approvals": [
+    { "role": "TECHNICAL", "approverRef": "responsavel-tecnico", "evidenceRef": "capacity/technical-approval" },
+    { "role": "OPERATIONS", "approverRef": "responsavel-operacao", "evidenceRef": "capacity/operations-approval" }
+  ],
+  "evidenceRef": "capacity/report/release-candidate"
+}

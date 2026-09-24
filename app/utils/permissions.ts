@@ -1,6 +1,6 @@
 // Cargos internos que tem acesso ao Painel Admin.
 // CONTADOR e um perfil operacional/parceiro, nao equipe interna do SaaS.
-export const STAFF_ROLES = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'];
+export const STAFF_ROLES = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI', 'COMERCIAL'];
 
 export const checkIsStaff = (role: string | null) => {
   if (!role) return false;
@@ -12,6 +12,7 @@ export const ROLE_LABELS: Record<string, string> = {
   ADMIN: 'Administrador',
   SUPORTE: 'Suporte',
   SUPORTE_TI: 'Suporte T.I.',
+  COMERCIAL: 'Comercial',
   CONTADOR: 'Contador',
   COMUM: 'Cliente',
 };

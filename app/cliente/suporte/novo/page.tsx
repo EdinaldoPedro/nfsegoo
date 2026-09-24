@@ -24,20 +24,20 @@ export default function NovoTicketPage() {
 
   // Carrega opções de assunto
   useEffect(() => {
-      const role = localStorage.getItem('userRole') || '';
-      const isSupportMode = localStorage.getItem('isSupportMode') === 'true';
-      const isInternalSupport = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(role);
-
-      if (isInternalSupport && !isSupportMode) {
-          router.replace('/admin/suporte');
-          return;
+      const params = new URLSearchParams(window.location.search);
+      const vendaId = params.get('cancelamentoExterno');
+      if (vendaId && /^[0-9a-f-]{36}$/i.test(vendaId)) {
+          const numero = (params.get('nota') || '').replace(/[^0-9]/g, '').slice(0, 13);
+          setForm(atual => ({ ...atual,
+              tituloManual: `Cancelamento realizado fora do SaaS${numero ? ` - Nota ${numero}` : ''}`,
+              descricao: `Solicito conferência de um cancelamento realizado fora do SaaS. Venda: ${vendaId}${numero ? `; nota: ${numero}` : ''}.\n\nInforme a data, o protocolo e anexe o comprovante do portal, se disponível. A situação da nota no SaaS não será alterada automaticamente.`,
+          }));
       }
-
       const userId = localStorage.getItem('userId');
 
       fetch('/api/admin/suporte/catalogo', {
           headers: { 
-              'x-user-id': userId || ''
+              'x-user-id': userId || '', 'x-portal-mode': 'customer'
           }
       })
       .then(r => r.json())
@@ -45,7 +45,7 @@ export default function NovoTicketPage() {
           if(Array.isArray(data)) setCatalogo(data);
       })
       .catch(() => {});
-  }, []);
+  }, [router]);
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
@@ -76,7 +76,7 @@ export default function NovoTicketPage() {
                   method: 'POST',
                   headers: { 
                       'Content-Type': 'application/json', 
-                      'x-user-id': userId || ''
+                      'x-user-id': userId || '', 'x-portal-mode': 'customer'
                   },
                   // Adiciona checkDuplicity
                   body: JSON.stringify({ ...form, checkDuplicity: !force })

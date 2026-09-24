@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   Building2,
@@ -15,6 +15,8 @@ import {
   XCircle,
 } from 'lucide-react';
 import { useDialog } from '@/app/contexts/DialogContext';
+import { useAdminAuthorization } from '@/app/hooks/useAdminAuthorization';
+import { formatCnpj } from '@/app/utils/cnpj';
 
 type VinculoCustodia = {
   id: string;
@@ -33,9 +35,7 @@ type VinculoCustodia = {
 };
 
 function formatDoc(doc?: string) {
-  const value = (doc || '').replace(/\D/g, '');
-  if (value.length !== 14) return doc || '-';
-  return value.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+  return doc ? formatCnpj(doc) : '-';
 }
 
 function formatDate(date?: string) {
@@ -45,11 +45,12 @@ function formatDate(date?: string) {
 
 export default function VinculosCustodiaAdminPage() {
   const dialog = useDialog();
+  const authorize = useAdminAuthorization();
   const [items, setItems] = useState<VinculoCustodia[]>([]);
   const [loading, setLoading] = useState(true);
   const [processandoId, setProcessandoId] = useState<string | null>(null);
 
-  const carregar = async () => {
+  const carregar = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch('/api/admin/vinculos-custodia', { cache: 'no-store' });
@@ -60,11 +61,11 @@ export default function VinculosCustodiaAdminPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [dialog]);
 
   useEffect(() => {
     carregar();
-  }, []);
+  }, [carregar]);
 
   const resumo = useMemo(() => ({
     pendentes: items.length,
@@ -90,6 +91,8 @@ export default function VinculosCustodiaAdminPage() {
     });
 
     if (confirmacao !== phrase) return;
+    const authorization = await authorize(`resolver o vínculo contábil: ${acao}. Inclua a referência da comprovação de titularidade ou da autorização recebida`);
+    if (!authorization) return;
 
     setProcessandoId(item.id);
     try {
@@ -99,6 +102,7 @@ export default function VinculosCustodiaAdminPage() {
         body: JSON.stringify({
           vinculoId: item.id,
           acao,
+          ...authorization,
           observacao: `Resolvido pela bancada interna: ${acao}.`,
         }),
       });
@@ -128,7 +132,7 @@ export default function VinculosCustodiaAdminPage() {
           <p className="text-xs font-black uppercase tracking-[0.28em] text-blue-600">Bancada interna</p>
           <h1 className="mt-2 text-4xl font-black tracking-tight text-slate-950">Vinculos de custodia</h1>
           <p className="mt-2 max-w-3xl text-slate-500">
-            Resolva solicitacoes de empresas orfas que ja possuem um contador custodiante.
+            Revise a comprovação de titularidade ou autorização antes de liberar acesso aos dados fiscais. Não aprove apenas pelo conhecimento do CNPJ.
           </p>
         </div>
         <button

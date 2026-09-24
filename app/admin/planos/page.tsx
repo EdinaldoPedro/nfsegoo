@@ -18,6 +18,7 @@ import {
   Zap
 } from 'lucide-react';
 import { useDialog } from '@/app/contexts/DialogContext';
+import { useAdminAuthorization } from '@/app/hooks/useAdminAuthorization';
 
 type TabType = 'PLANO' | 'PACOTE';
 
@@ -52,6 +53,7 @@ function inputClasses(tone = 'blue') {
 
 export default function AdminPlanos() {
   const dialog = useDialog();
+  const authorize = useAdminAuthorization();
   const [plans, setPlans] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<TabType>('PLANO');
   const [editing, setEditing] = useState<any>(null);
@@ -90,6 +92,8 @@ export default function AdminPlanos() {
   };
 
   const handleSave = async () => {
+    const authorization = await authorize(editing.id ? 'alterar o catálogo para novas contratações' : 'criar um produto');
+    if (!authorization) return;
     const method = editing.id ? 'PUT' : 'POST';
     const token = localStorage.getItem('token');
 
@@ -104,7 +108,7 @@ export default function AdminPlanos() {
       const res = await fetch('/api/plans', {
         method,
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ ...editing, features: parsedFeatures })
+        body: JSON.stringify({ ...editing, features: parsedFeatures, ...authorization })
       });
 
       if (res.ok) {
@@ -121,13 +125,14 @@ export default function AdminPlanos() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!await dialog.showConfirm({ title: 'Excluir plano?', description: 'A exclusão é permanente e pode afetar ofertas e contratações vinculadas.', type: 'danger', confirmText: 'Excluir plano', cancelText: 'Cancelar' })) return;
+    const authorization = await authorize('desativar o produto para novas vendas, preservando contratos e pedidos existentes');
+    if (!authorization) return;
     const token = localStorage.getItem('token');
     try {
-      const res = await fetch(`/api/plans?id=${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch('/api/plans', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, ...authorization }) });
       if (res.ok) {
         await carregar();
-        dialog.showAlert({ type: 'success', description: 'Removido.' });
+        dialog.showAlert({ type: 'success', description: 'Desativado para novas vendas. Histórico e contratos preservados.' });
       } else {
         const data = await res.json();
         dialog.showAlert({ type: 'danger', description: data.error });
