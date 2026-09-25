@@ -17,7 +17,9 @@ test('cofre: recriptografia tardia usa CAS e nao sobrescreve certificado trocado
     const iv = crypto.randomBytes(16); const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(process.env.ENCRYPTION_KEY), iv);
     return iv.toString('hex') + ':' + Buffer.concat([cipher.update(text), cipher.final()]).toString('hex');
   };
-  const source = { empresaId: 'qa-vault-no-database', certificadoA1: legacyEncrypt(base64), senhaCertificado: legacyEncrypt(password), purpose: 'SIGN_CANCEL' };
+  // This test exercises only CAS re-encryption with a synthetic, non-ICP
+  // certificate. Production trust-chain behavior is covered by pkcs12.test.cjs.
+  const source = { empresaId: 'qa-vault-no-database', certificadoA1: legacyEncrypt(base64), senhaCertificado: legacyEncrypt(password), purpose: 'SIGN_CANCEL', requireTrustedChain: false };
   const originalUpdate = prisma.empresa.updateMany; const originalLog = logger.createLog;
   let pending; let current = { ...source, certificadoA1: 'already-rotated-ciphertext', senhaCertificado: 'already-rotated-password' };
   prisma.empresa.updateMany = async (params) => {
