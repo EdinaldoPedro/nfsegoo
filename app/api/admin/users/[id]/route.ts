@@ -65,7 +65,7 @@ export const PATCH = withApiGuard(async function PATCH(request: Request, { param
 
     const userAtual = await prisma.user.findUnique({ where: { id: params.id } });
     if (!userAtual) return NextResponse.json({ error: 'Usuario nao encontrado' }, { status: 404 });
-    if (admin.role !== 'MASTER' && ['MASTER', 'ADMIN'].includes(userAtual.role)) return forbidden();
+    if (admin.role !== 'MASTER' && userAtual.role === 'MASTER') return forbidden();
 
     const reauthError = await requireAdminReauthentication({
       actorId: admin.id,
@@ -119,7 +119,7 @@ export const PUT = withApiGuard(async function PUT(request: Request, { params: r
     if (Object.hasOwn(body, 'email')) return NextResponse.json({ error: 'O e-mail de login só pode ser alterado pelo titular após confirmação do novo endereço.' }, { status: 409 });
     const targetUser = await prisma.user.findUnique({ where: { id: params.id } });
     if (!targetUser) return NextResponse.json({ error: 'Usuario nao encontrado.' }, { status: 404 });
-    if (admin.role !== 'MASTER' && ['MASTER', 'ADMIN'].includes(targetUser.role)) return forbidden();
+    if (admin.role !== 'MASTER' && targetUser.role === 'MASTER') return forbidden();
 
     const reauthError = await requireAdminReauthentication({
       actorId: admin.id,

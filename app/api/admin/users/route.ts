@@ -40,8 +40,8 @@ export const PUT = withApiGuard(async function PUT(request: Request) {
     if (!targetUser) {
       return NextResponse.json({ error: 'Usuario nao encontrado.' }, { status: 404 });
     }
-    if (userAuth.role !== 'MASTER' && ['MASTER', 'ADMIN'].includes(targetUser.role)) {
-      return NextResponse.json({ error: 'Somente MASTER pode administrar contas internas privilegiadas.' }, { status: 403 });
+    if (userAuth.role !== 'MASTER' && targetUser.role === 'MASTER') {
+      return NextResponse.json({ error: 'Somente MASTER pode administrar uma conta MASTER.' }, { status: 403 });
     }
 
     const sensitiveAction = body.plano || body.role;

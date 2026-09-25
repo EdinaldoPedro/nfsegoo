@@ -2,6 +2,11 @@ import { NextResponse } from 'next/server';
 import { getAuthenticatedUser, forbidden, unauthorized } from './api-middleware';
 import { requireAdminReauthentication } from './admin-security';
 import { validateJsonContentLength } from './request-guards';
+import { isAdminRole } from './access-control';
+
+export function canAuthorizeMaintenance(role: string | null | undefined) {
+  return isAdminRole(role);
+}
 
 /** One-off maintenance routes are disabled unless explicitly enabled by operations. */
 export async function authorizeMaintenance(request: Request, action: string, confirmation: string) {
@@ -10,7 +15,7 @@ export async function authorizeMaintenance(request: Request, action: string, con
   }
   const actor = await getAuthenticatedUser(request);
   if (!actor) return { actor: null, body: null, error: unauthorized() };
-  if (actor.role !== 'MASTER') return { actor: null, body: null, error: forbidden() };
+  if (!canAuthorizeMaintenance(actor.role)) return { actor: null, body: null, error: forbidden() };
   const sizeError = validateJsonContentLength(request, 16 * 1024);
   if (sizeError) return { actor: null, body: null, error: sizeError };
   const body = await request.json().catch(() => null);

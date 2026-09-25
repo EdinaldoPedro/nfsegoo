@@ -71,9 +71,6 @@ export function validateRoleTransition(params: {
     if (params.targetRole === 'MASTER' || params.newRole === 'MASTER') {
       return 'Somente MASTER pode criar ou alterar uma conta MASTER.';
     }
-    if (params.targetRole === 'ADMIN' || params.newRole === 'ADMIN') {
-      return 'Somente MASTER pode criar ou alterar uma conta ADMIN.';
-    }
   }
 
   if (params.actorId === params.targetId && params.newRole !== params.targetRole) {

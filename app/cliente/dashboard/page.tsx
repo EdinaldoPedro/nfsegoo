@@ -139,7 +139,7 @@ export default function ClienteDashboard() {
       return {
         title: tituloAlerta,
         description: descAlerta,
-        href: '/configuracoes/minha-conta',
+        href: '/configuracoes/minha-conta?voltar=%2Fcliente%2Fdashboard',
         action: planoDetalhes?.status === 'INATIVO' ? 'Ver planos' : 'Renovar agora',
         tone: 'red',
         icon: Lock,
@@ -255,7 +255,7 @@ export default function ClienteDashboard() {
                             <p className="text-red-600 text-sm mt-1">{descAlerta}</p>
                         </div>
                     </div>
-                    <Link href="/configuracoes/minha-conta" className="bg-red-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-red-700 transition shadow-lg shadow-red-200">
+                    <Link href="/configuracoes/minha-conta?voltar=%2Fcliente%2Fdashboard" className="bg-red-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-red-700 transition shadow-lg shadow-red-200">
                         {planoDetalhes?.status === 'INATIVO' ? 'Ver Planos' : 'Renovar Agora'}
                     </Link>
                 </div>
@@ -274,7 +274,7 @@ export default function ClienteDashboard() {
                             </p>
                         </div>
                     </div>
-                    <Link href="/configuracoes/minha-conta" className="bg-white text-indigo-700 px-6 py-3 rounded-xl font-bold text-sm hover:bg-indigo-50 transition shadow-md w-full md:w-auto text-center">
+                    <Link href="/configuracoes/minha-conta?voltar=%2Fcliente%2Fdashboard" className="bg-white text-indigo-700 px-6 py-3 rounded-xl font-bold text-sm hover:bg-indigo-50 transition shadow-md w-full md:w-auto text-center">
                         Assinar Agora 🚀
                     </Link>
                 </div>
@@ -496,7 +496,7 @@ function ProximaAcaoCard({ data, bloqueado }: { data: any; bloqueado: boolean })
       </div>
 
       <Link
-        href={bloqueado && data.href === '/emitir' ? '/configuracoes/minha-conta' : data.href}
+        href={bloqueado && data.href === '/emitir' ? '/configuracoes/minha-conta?voltar=%2Fcliente%2Fdashboard' : data.href}
         className={`mt-6 inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-black transition w-full sm:w-fit ${buttonTones[data.tone] || buttonTones.blue}`}
       >
         {data.action}

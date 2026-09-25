@@ -78,10 +78,18 @@ export async function consultarEntidadeFiscalPublica(documento: string): Promise
   const cep = clean(raw.cep, 11)?.replace(/\D/g, '') || null;
   let codigoIbge = clean(raw.codigo_municipio, 7)?.replace(/\D/g, '') || null;
   let fonte: FiscalRegistryResult['fonte'] = 'BRASILAPI';
-  if (!/^\d{7}$/.test(codigoIbge || '') && /^\d{8}$/.test(cep || '')) {
-    const viaCep = await fetchJson(`https://viacep.com.br/ws/${cep}/json/`, 5_000);
+  const brasilAddress = {
+    logradouro: clean(raw.logradouro, 200), complemento: clean(raw.complemento, 100),
+    bairro: clean(raw.bairro, 100), cidade: clean(raw.municipio, 100),
+    uf: clean(raw.uf, 2)?.toUpperCase() || null,
+  };
+  let viaCep: Record<string, any> | null = null;
+  if (/^\d{8}$/.test(cep || '') && (!/^\d{7}$/.test(codigoIbge || '')
+    || Object.values(brasilAddress).some(value => !value))) {
+    viaCep = await fetchJson(`https://viacep.com.br/ws/${cep}/json/`, 5_000);
     const code = clean(viaCep?.ibge, 7)?.replace(/\D/g, '') || null;
-    if (/^\d{7}$/.test(code || '')) { codigoIbge = code; fonte = 'BRASILAPI_VIACEP'; }
+    if (!/^\d{7}$/.test(codigoIbge || '') && /^\d{7}$/.test(code || '')) codigoIbge = code;
+    if (viaCep && !viaCep.erro) fonte = 'BRASILAPI_VIACEP';
   }
   const data: FiscalEntityPublicData = {
     documento: cnpj,
@@ -90,9 +98,11 @@ export async function consultarEntidadeFiscalPublica(documento: string): Promise
     situacaoCadastral: clean(raw.descricao_situacao_cadastral || raw.situacao_cadastral, 100),
     emailPublico: clean(raw.email, 254)?.toLowerCase() || null,
     telefonePublico: clean(raw.ddd_telefone_1 || raw.telefone, 30),
-    cep, logradouro: clean(raw.logradouro, 200), numero: clean(raw.numero, 20),
-    complemento: clean(raw.complemento, 100), bairro: clean(raw.bairro, 100),
-    cidade: clean(raw.municipio, 100), uf: clean(raw.uf, 2)?.toUpperCase() || null,
+    cep, logradouro: brasilAddress.logradouro || clean(viaCep?.logradouro, 200), numero: clean(raw.numero, 20),
+    complemento: brasilAddress.complemento || clean(viaCep?.complemento, 100),
+    bairro: brasilAddress.bairro || clean(viaCep?.bairro, 100),
+    cidade: brasilAddress.cidade || clean(viaCep?.localidade, 100),
+    uf: brasilAddress.uf || clean(viaCep?.uf, 2)?.toUpperCase() || null,
     pais: 'Brasil', codigoIbge,
   };
   const seen = new Set<string>();
@@ -160,10 +170,10 @@ function fallbackPublicData(documento: string, input: Record<string, unknown>): 
 }
 
 function publicUpdate(result: FiscalRegistryResult) {
-  // A consulta representa uma fotografia completa da fonte naquele instante.
-  // Valores nulos também participam da atualização para que a última origem
-  // prevaleça, em vez de manter silenciosamente um valor mais antigo.
-  return Object.fromEntries(Object.entries(result.data).filter(([key]) => key !== 'documento'));
+  // Ausência na fonte significa dado desconhecido, não uma ordem para apagar.
+  // Remoções explícitas continuam sendo possíveis pelas edições manuais.
+  return Object.fromEntries(Object.entries(result.data)
+    .filter(([key, value]) => key !== 'documento' && value !== null));
 }
 
 function manualUpdate(documento: string, fallback: Record<string, unknown>) {

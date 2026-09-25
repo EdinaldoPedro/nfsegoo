@@ -23,7 +23,7 @@ export async function listAdminUsers(actorId: string, query: URLSearchParams) {
   return prisma.$transaction(async tx => {
     const actor = await tx.user.findUnique({ where: { id: actorId }, select: { role: true } });
     if (!actor || !['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(actor.role)) throw new CommercialError('Acesso administrativo não permitido.', 403);
-    const allowed = actor.role === 'MASTER' ? ROLES : actor.role === 'ADMIN' ? ROLES.filter(role => role !== 'MASTER') : ['COMUM', 'CONTADOR'];
+    const allowed = ['MASTER', 'ADMIN'].includes(actor.role) ? ROLES : ['COMUM', 'CONTADOR'];
     if (parsed.roles.some(role => !allowed.includes(role))) throw new CommercialError('Este perfil não pode listar as contas solicitadas.', 403);
     const activeHistory: Prisma.PlanHistoryWhereInput = { status: 'ATIVO', arquivadoEm: null, dataInicio: { lte: new Date() },
       OR: [{ dataFim: null }, { dataFim: { gt: new Date() } }], tipoContratado: { in: ['PLANO', 'CUSTOM'] } };

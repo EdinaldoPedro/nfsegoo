@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { Mail, ArrowLeft, CheckCircle, Loader2, AlertCircle } from 'lucide-react';
+import { Mail, ArrowLeft, CheckCircle, Loader2, AlertCircle, KeyRound, Send } from 'lucide-react';
+import AuthRecoveryShell from '@/components/AuthRecoveryShell';
 
 export default function RecuperarSenha() {
   const [email, setEmail] = useState('');
@@ -43,45 +44,55 @@ export default function RecuperarSenha() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-      <div className="bg-white w-full max-w-md p-8 rounded-2xl shadow-xl border border-slate-100">
-        <Link href="/login" className="text-slate-400 hover:text-slate-600 flex items-center gap-2 text-sm font-bold mb-6 transition">
-          <ArrowLeft size={16} /> Voltar para Login
+    <AuthRecoveryShell>
+        <Link href="/login" className="mb-7 flex w-fit items-center gap-2 text-sm font-bold text-slate-500 transition hover:text-blue-700">
+          <ArrowLeft size={16} /> Voltar ao login
         </Link>
 
         {sucesso ? (
-          <div className="text-center py-8 animate-in fade-in zoom-in">
-            <div className="bg-green-100 text-green-600 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+          <div className="animate-in fade-in zoom-in py-3 text-center">
+            <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-600 ring-8 ring-emerald-50">
               <CheckCircle size={32} />
             </div>
-            <h2 className="text-2xl font-bold text-slate-800 mb-2">Solicitação recebida</h2>
-            <p className="text-slate-500 mb-6">
+            <p className="text-xs font-black uppercase tracking-[0.2em] text-emerald-600">Solicitação protegida</p>
+            <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-950">Confira seu e-mail</h1>
+            <p className="mx-auto mt-3 max-w-sm text-sm leading-6 text-slate-500">
               Se houver uma conta elegível para <strong>{email}</strong>, você receberá as instruções de recuperação. Confira também a pasta de spam.
             </p>
-            <button onClick={resetarTentativa} className="text-blue-600 font-bold hover:underline">
+            <div className="mt-6 rounded-2xl border border-blue-100 bg-blue-50 p-4 text-left text-xs leading-5 text-blue-900">
+              Por segurança, não informamos se o endereço está cadastrado. O link enviado é individual e possui prazo de validade.
+            </div>
+            <Link href="/login" className="mt-6 inline-flex w-full items-center justify-center rounded-xl bg-blue-600 px-5 py-3.5 text-sm font-black text-white shadow-lg shadow-blue-200 transition hover:bg-blue-700">
+              Voltar ao login
+            </Link>
+            <button onClick={resetarTentativa} className="mt-4 text-sm font-bold text-blue-600 transition hover:text-blue-800">
               Tentar outro e-mail
             </button>
           </div>
         ) : (
           <>
-            <div className="mb-6">
-              <h1 className="text-2xl font-bold text-slate-800 mb-2">Recuperar senha</h1>
-              <p className="text-slate-500 text-sm">Digite o e-mail cadastrado para receber o link de redefinicao.</p>
+            <div className="mb-8">
+              <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-blue-50 text-blue-600 ring-1 ring-blue-100">
+                <KeyRound size={24} />
+              </div>
+              <p className="text-xs font-black uppercase tracking-[0.2em] text-blue-600">Acesso à conta</p>
+              <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-950">Recuperar senha</h1>
+              <p className="mt-2 text-sm leading-6 text-slate-500">Informe o e-mail da sua conta. Enviaremos um link seguro para você criar uma nova senha.</p>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-5">
               <div>
-                <label htmlFor="recovery-email" className="block text-xs font-bold text-slate-500 uppercase mb-1">E-mail cadastrado</label>
+                <label htmlFor="recovery-email" className="mb-2 block text-sm font-bold text-slate-700">E-mail cadastrado</label>
                 <div className="relative">
-                  <Mail className="absolute left-3 top-3 text-slate-400" size={20} />
+                  <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={19} />
                   <input
                     id="recovery-email"
                     autoComplete="email"
                     maxLength={254}
                     type="email"
                     required
-                    className="w-full pl-10 p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition"
-                    placeholder="ex: seu@email.com"
+                    className="w-full rounded-xl border border-slate-300 bg-white py-3.5 pl-11 pr-4 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+                    placeholder="seu@email.com"
                     value={email}
                     onChange={e => {
                       setEmail(e.target.value);
@@ -92,7 +103,7 @@ export default function RecuperarSenha() {
               </div>
 
               {erro && (
-                <div role="alert" className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                <div role="alert" className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">
                   <AlertCircle size={18} className="mt-0.5 shrink-0" />
                   <span>{erro}</span>
                 </div>
@@ -100,14 +111,13 @@ export default function RecuperarSenha() {
 
               <button
                 disabled={loading}
-                className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold hover:bg-blue-700 transition flex items-center justify-center gap-2 shadow-lg disabled:opacity-70"
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3.5 text-sm font-black text-white shadow-lg shadow-blue-200 transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
               >
-                {loading ? <Loader2 className="animate-spin" /> : 'Enviar link de recuperacao'}
+                {loading ? <><Loader2 className="animate-spin" size={19} /> Enviando...</> : <><Send size={18} /> Enviar link de recuperação</>}
               </button>
             </form>
           </>
         )}
-      </div>
-    </div>
+    </AuthRecoveryShell>
   );
 }

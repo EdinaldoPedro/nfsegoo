@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { User, Save, ArrowLeft, Mail, CreditCard, Settings, Monitor, X, Calendar, TrendingUp, Building2, Plus, KeyRound, Lock, CheckCircle, Loader2, ShieldCheck } from 'lucide-react';
+import { User, Save, ArrowLeft, Mail, CreditCard, Settings, Monitor, X, Calendar, TrendingUp, KeyRound, Lock, CheckCircle, Loader2, ShieldCheck, Fingerprint, ArrowRightLeft, ChevronRight } from 'lucide-react';
 import PlanSelector from '@/components/PlanSelector';
 import { useAppConfig } from '@/app/contexts/AppConfigContext';
 import AppHeader from '@/components/AppHeader';
@@ -33,15 +33,11 @@ export default function MinhaContaPage() {
   const [showPasswordForm, setShowPasswordForm] = useState(false);
   const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
   const [pedidoContratacao, setPedidoContratacao] = useState<any>(null);
+  const [requestedReturnPath, setRequestedReturnPath] = useState<string | null>(null);
   const [securitySummary, setSecuritySummary] = useState<null | {
     enabled: boolean; required: boolean; recoveryCodesRemaining: number; sessions: number; trustedDevices: number;
   }>(null);
   
-  // === ESTADOS PARA NOVA EMPRESA ===
-  const [showAddPJ, setShowAddPJ] = useState(false);
-  const [addingPJ, setAddingPJ] = useState(false);
-  const [newPJ, setNewPJ] = useState({ razaoSocial: '', documento: '' });
-
   const [data, setData] = useState({
     role: '',
     nome: '', email: '', cpf: '', telefone: '',
@@ -55,14 +51,10 @@ export default function MinhaContaPage() {
         dataInicio: '', dataFim: '', unlimited: false
     },
     planoCiclo: 'MENSAL',
-    empresasAdicionais: 0,
-    limiteEmpresasTotal: 0,
-    empresasUsadas: 0,
-    podeCadastrarEmpresa: false,
-    listaEmpresas: [] as any[]
   });
 
   useEffect(() => {
+    setRequestedReturnPath(new URLSearchParams(window.location.search).get('voltar'));
     const userId = localStorage.getItem('userId');
 
     if (!userId) { router.push('/login'); return; }
@@ -88,11 +80,6 @@ export default function MinhaContaPage() {
             },
             planoDetalhado: apiData.planoDetalhado || prev.planoDetalhado,
             planoCiclo: apiData.planoCiclo || 'MENSAL',
-            empresasAdicionais: apiData.empresasAdicionais || 0,
-            limiteEmpresasTotal: apiData.limiteEmpresasTotal ?? 0,
-            empresasUsadas: apiData.empresasUsadas ?? 0,
-            podeCadastrarEmpresa: apiData.podeCadastrarEmpresa === true,
-            listaEmpresas: apiData.listaEmpresas || []
         }));
 
         if (apiData.configuracoes) {
@@ -264,37 +251,20 @@ export default function MinhaContaPage() {
       }
   };
 
-  const handleCreatePJ = async (e: React.FormEvent) => {
-      e.preventDefault();
-      setAddingPJ(true);
-      try {
-          const res = await fetch('/api/empresas/adicional', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json'},
-              body: JSON.stringify(newPJ)
-          });
-          if(res.ok) {
-              await dialog.showAlert({ type: 'success', title: 'Empresa adicionada', description: 'A nova empresa foi vinculada à sua conta.' });
-              window.location.reload();
-          } else {
-              const err = await res.json();
-              await dialog.showAlert({ type: 'danger', title: 'Não foi possível adicionar a empresa', description: err.error || 'Revise os dados informados e tente novamente.' });
-          }
-      } catch(e) {
-          await dialog.showAlert({ type: 'danger', title: 'Falha de conexão', description: 'A empresa não foi adicionada. Verifique sua internet e tente novamente.' });
-      } finally {
-          setAddingPJ(false);
-      }
-  };
-
   const p = data.planoDetalhado;
   const percentUso = p.limiteEmissoes > 0 ? Math.min(100, (p.usoEmissoes / p.limiteEmissoes) * 100) : 0;
   const dataFimFormatada = p.dataFim ? new Date(p.dataFim).toLocaleDateString('pt-BR') : 'Sem vencimento informado';
 
-  // Lógica de limite de PJs
-  const limiteAtingido = !data.podeCadastrarEmpresa || (!p.unlimited && data.empresasUsadas >= data.limiteEmpresasTotal);
   const senhaForte = passwordForm.newPassword.length >= 8 && /[A-Z]/.test(passwordForm.newPassword) && /[0-9]/.test(passwordForm.newPassword) && /[^A-Za-z0-9]/.test(passwordForm.newPassword);
   const senhaPodeSalvar = Boolean(passwordForm.currentPassword && senhaForte && passwordForm.newPassword === passwordForm.confirmPassword);
+  const safeReturnPath = requestedReturnPath
+    && requestedReturnPath.startsWith('/')
+    && !requestedReturnPath.startsWith('//')
+    && !requestedReturnPath.startsWith('/configuracoes/minha-conta')
+      ? requestedReturnPath
+      : null;
+  const accountReturnPath = safeReturnPath || (checkIsStaff(data.role) ? '/admin/minha-conta' : '/cliente/dashboard');
+  const openedFromClientArea = safeReturnPath?.startsWith('/cliente') === true;
 
   if (loading) return (
     <div className="saas-shell flex items-center justify-center">
@@ -313,9 +283,9 @@ export default function MinhaContaPage() {
         title="Minha conta"
         subtitle="Gerencie assinatura, dados pessoais e preferências de uso."
         eyebrow="Configurações"
-        backHref={checkIsStaff(data.role) ? '/admin/minha-conta' : '/cliente/dashboard'}
+        backHref={accountReturnPath}
       />
-      {checkIsStaff(data.role) && <div className="saas-container !pt-0"><AdminAccountNav active="profile" /></div>}
+      {checkIsStaff(data.role) && !openedFromClientArea && <div className="saas-container !pt-0"><AdminAccountNav active="profile" /></div>}
 
       {/* MODAL PLANOS */}
       {showPlans && (
@@ -334,35 +304,6 @@ export default function MinhaContaPage() {
                     <PlanSelector currentPlan={p.slug} currentCycle={data.planoCiclo} />
                 </div>
             </div>
-         </div>
-      )}
-
-      {/* MODAL NOVA EMPRESA */}
-      {showAddPJ && (
-         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
-             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden dark:bg-slate-800">
-                <div className="p-6 border-b flex justify-between items-center bg-gray-50 dark:bg-slate-900 dark:border-slate-700">
-                    <h2 className="text-lg font-bold text-slate-800 dark:text-white flex items-center gap-2"><Building2 size={20}/> Novo CNPJ</h2>
-                    <button onClick={() => setShowAddPJ(false)} className="p-2 hover:bg-gray-200 rounded-full transition dark:hover:bg-slate-700">
-                        <X size={20} className="text-gray-500"/>
-                    </button>
-                </div>
-                <form onSubmit={handleCreatePJ} className="p-6 space-y-4">
-                    <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Razão Social</label>
-                        <input required className="w-full p-2.5 border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:border-slate-600 dark:text-white" 
-                               value={newPJ.razaoSocial} onChange={e => setNewPJ({...newPJ, razaoSocial: e.target.value})} placeholder="Nome da Empresa" />
-                    </div>
-                    <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">CNPJ</label>
-                        <input required className="w-full p-2.5 border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:border-slate-600 dark:text-white" 
-                               value={newPJ.documento} onChange={e => setNewPJ({...newPJ, documento: e.target.value})} placeholder="00.000.000/0000-00" />
-                    </div>
-                    <button type="submit" disabled={addingPJ} className="w-full py-3 mt-4 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition disabled:opacity-50">
-                        {addingPJ ? 'Criando...' : 'Vincular Empresa'}
-                    </button>
-                </form>
-             </div>
          </div>
       )}
 
@@ -552,33 +493,6 @@ export default function MinhaContaPage() {
                 </button>}
               </div>
 
-              {/* === NOVO: CARD DE MÚLTIPLAS EMPRESAS === */}
-              {(['COMUM', 'CONTADOR'].includes(data.role) || data.listaEmpresas.length > 0) && (
-                  <div className="saas-card p-6 dark:bg-slate-800 dark:border-slate-700 flex flex-col gap-4">
-                      <div className="flex justify-between items-start gap-4">
-                          <div>
-                            <h3 className="text-sm font-black text-gray-400 uppercase tracking-wider flex items-center gap-2 dark:text-gray-500"><Building2 size={14}/> Empresas</h3>
-                            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{p.unlimited ? 'Benefício administrativo sem limite de empresas.' : 'Limite total da conta, incluindo adicionais contratados.'}</p>
-                          </div>
-                          <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">{data.empresasUsadas}/{p.unlimited ? 'Ilimitado' : data.limiteEmpresasTotal}</span>
-                      </div>
-                      <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 dark:bg-slate-900 dark:border-slate-700">
-                          {!p.unlimited && <div className="h-2 rounded-full bg-slate-200 dark:bg-slate-700">
-                            <div className="h-2 rounded-full bg-blue-600" style={{ width: `${Math.min(100, (data.empresasUsadas / Math.max(1, data.limiteEmpresasTotal)) * 100)}%` }}></div>
-                          </div>}
-                      </div>
-                      <button 
-                          type="button" 
-                          onClick={() => setShowAddPJ(true)} 
-                          disabled={limiteAtingido}
-                          className="saas-btn-secondary w-full disabled:opacity-50"
-                      >
-                          <Plus size={16}/> Adicionar Empresa
-                      </button>
-                      {limiteAtingido && <p className="text-xs text-red-600 text-center">{data.podeCadastrarEmpresa ? 'Limite de empresas atingido. Consulte os benefícios disponíveis.' : 'É necessária uma assinatura vigente para cadastrar empresas.'}</p>}
-                  </div>
-              )}
-
             </div>
 
             <div className="grid grid-cols-1 gap-6">
@@ -588,8 +502,8 @@ export default function MinhaContaPage() {
                     <h3 className="saas-section-title flex items-center gap-2 dark:text-white"><ShieldCheck size={20}/> Segurança da conta</h3>
                     <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">Gerencie o segundo fator, dispositivos confiáveis e sessões conectadas.</p>
                   </div>
-                  <Link href="/seguranca" className="saas-btn-secondary justify-center">
-                    <KeyRound size={18}/> Abrir central de segurança
+                  <Link href={`/seguranca?voltar=${encodeURIComponent(accountReturnPath)}`} className="saas-btn-secondary justify-center">
+                    <KeyRound size={18}/> {securitySummary ? (securitySummary.enabled ? 'Gerenciar ou trocar 2FA' : 'Configurar autenticação em duas etapas') : 'Abrir central de segurança'}
                   </Link>
                 </div>
                 <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -710,6 +624,23 @@ export default function MinhaContaPage() {
               </div>
 
               <div className="saas-card order-4 p-8 dark:bg-slate-800 dark:border-slate-700">
+                <h3 className="saas-section-title mb-2 flex items-center gap-2 dark:text-white"><ShieldCheck size={20}/> Privacidade e titularidade</h3>
+                <p className="mb-5 text-sm text-slate-500 dark:text-slate-400">Gerencie seus direitos sobre dados pessoais e solicitações que alteram o responsável por empresas.</p>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <Link href="/configuracoes/titularidade" className="group flex items-center gap-4 rounded-2xl border border-slate-200 bg-white p-4 transition hover:border-blue-300 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-blue-700">
+                    <span className="rounded-xl bg-blue-100 p-3 text-blue-700 dark:bg-blue-950 dark:text-blue-300"><ArrowRightLeft size={20}/></span>
+                    <span className="min-w-0 flex-1"><span className="block text-sm font-black text-slate-800 dark:text-slate-100">Transferências pendentes</span><span className="mt-1 block text-xs leading-5 text-slate-500">Analise consentimentos e mudanças de responsabilidade por empresas.</span></span>
+                    <ChevronRight size={18} className="shrink-0 text-slate-400 transition group-hover:translate-x-0.5 group-hover:text-blue-600"/>
+                  </Link>
+                  <Link href="/privacidade" className="group flex items-center gap-4 rounded-2xl border border-slate-200 bg-white p-4 transition hover:border-emerald-300 hover:bg-emerald-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-emerald-700">
+                    <span className="rounded-xl bg-emerald-100 p-3 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"><Fingerprint size={20}/></span>
+                    <span className="min-w-0 flex-1"><span className="block text-sm font-black text-slate-800 dark:text-slate-100">Meus dados e privacidade</span><span className="mt-1 block text-xs leading-5 text-slate-500">Consulte seus dados e acompanhe solicitações relacionadas à privacidade.</span></span>
+                    <ChevronRight size={18} className="shrink-0 text-slate-400 transition group-hover:translate-x-0.5 group-hover:text-emerald-600"/>
+                  </Link>
+                </div>
+              </div>
+
+              <div className="saas-card order-5 p-8 dark:bg-slate-800 dark:border-slate-700">
                 <h3 className="saas-section-title mb-4 flex items-center gap-2 dark:text-white"><CheckCircle size={20}/> Documentos e termos</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <Link href="/termos-de-uso" className="rounded-2xl border border-slate-200 bg-white p-4 text-sm font-bold text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-200">

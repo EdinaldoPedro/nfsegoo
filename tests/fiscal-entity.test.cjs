@@ -56,3 +56,23 @@ test('consulta pública identifica o cliente HTTP exigido pela fonte externa', a
     global.fetch = originalFetch;
   }
 });
+
+test('consulta pública complementa endereço incompleto pelo CEP sem inventar número', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async url => new Response(JSON.stringify(String(url).includes('viacep') ? {
+    cep: '50870-005', logradouro: 'Avenida Doutor José Rufino', complemento: 'lado ímpar',
+    bairro: 'Areias', localidade: 'Recife', uf: 'PE', ibge: '2611606',
+  } : {
+    cnpj: '54545869000140', razao_social: '54.545.869 EDINALDO PEDRO DA SILVA', cep: '50870005',
+    bairro: 'AREIAS', municipio: 'RECIFE', uf: 'PE', codigo_municipio: 2531,
+    cnae_fiscal: 6201501, cnaes_secundarios: [],
+  }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  try {
+    const result = await consultarEntidadeFiscalPublica('54545869000140');
+    assert.equal(result?.fonte, 'BRASILAPI_VIACEP');
+    assert.equal(result?.data.logradouro, 'Avenida Doutor José Rufino');
+    assert.equal(result?.data.bairro, 'AREIAS');
+    assert.equal(result?.data.codigoIbge, '2611606');
+    assert.equal(result?.data.numero, null);
+  } finally { global.fetch = originalFetch; }
+});

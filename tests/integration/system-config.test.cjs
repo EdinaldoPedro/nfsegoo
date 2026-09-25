@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const bcrypt = require('bcryptjs');
 
-test('PostgreSQL: configuração global é versionada, hierárquica e auditada', { skip: process.env.ALLOW_TEST_DATABASE_WRITES !== 'true' }, async (t) => {
+test('PostgreSQL: configuração global é versionada, compartilhada entre ADMIN/MASTER e auditada', { skip: process.env.ALLOW_TEST_DATABASE_WRITES !== 'true' }, async (t) => {
   require('./require-test-database.cjs')();
   const { prisma } = require('../../app/utils/prisma.ts');
   const { parseSystemConfigMutation, publicSystemConfig, updateSystemConfig } = require('../../app/services/systemConfigService.ts');
@@ -15,10 +15,11 @@ test('PostgreSQL: configuração global é versionada, hierárquica e auditada',
       senha: await bcrypt.hash('Config@Senha1', 10), role: 'MASTER' } });
     const base = await prisma.configuracaoSistema.upsert({ where: { id: 'config' }, create: { id: 'config' }, update: {} });
 
-    await t.test('ADMIN não altera chaves fiscais globais', async () => {
+    await t.test('ADMIN altera chaves fiscais globais com a mesma trilha do MASTER', async () => {
       const mutation = parseSystemConfigMutation({ expectedVersion: base.version,
         ibsCbsPilotoAtivo: !base.ibsCbsPilotoAtivo, adminPassword: 'não usado no serviço', justification: 'Teste de hierarquia fiscal' });
-      await assert.rejects(updateSystemConfig({ id: actor.id, role: 'ADMIN' }, mutation), error => error.status === 403);
+      const result = await updateSystemConfig({ id: actor.id, role: 'ADMIN' }, mutation);
+      assert.equal(result.ibsCbsPilotoAtivo, !base.ibsCbsPilotoAtivo);
     });
 
     await t.test('duas telas com a mesma versão geram uma alteração e um conflito', async () => {

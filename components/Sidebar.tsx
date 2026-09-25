@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Menu, X, User, Briefcase, FileText, Settings, LogOut, Phone, Shield, ArrowLeft, Building2, Search, ChevronDown, BadgeHelp, Fingerprint } from 'lucide-react';
+import { Menu, X, User, Briefcase, FileText, Settings, LogOut, Phone, Shield, ArrowLeft, Building2, Search, ChevronDown, BadgeHelp } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { checkIsStaff } from '@/app/utils/permissions';
@@ -216,14 +216,8 @@ export default function Sidebar() {
                   <p><span className="font-medium">Plano:</span> <span className="text-green-600 font-bold">{userData?.planoDetalhado?.nome || 'Sem plano vigente'}</span></p>
               )}
               
-              <Link href="/configuracoes/minha-conta" onClick={() => setIsOpen(false)} className="text-blue-600 hover:underline text-xs block mt-2">
-                Editar Dados Pessoais
-              </Link>
-              <Link href="/configuracoes/titularidade" onClick={() => setIsOpen(false)} className="text-blue-600 hover:underline text-xs block mt-2">
-                Transferências pendentes
-              </Link>
-              <Link href="/privacidade" onClick={() => setIsOpen(false)} className="flex items-center gap-1 text-blue-600 hover:underline text-xs mt-2">
-                <Fingerprint size={13} /> Meus dados e privacidade
+              <Link href={`/configuracoes/minha-conta?voltar=${encodeURIComponent(pathname)}`} onClick={() => setIsOpen(false)} className="text-blue-600 hover:underline text-xs block mt-2">
+                Configurações da minha conta
               </Link>
             </div>
           </section>
@@ -319,6 +313,9 @@ export default function Sidebar() {
               <Link href="/configuracoes" onClick={() => setIsOpen(false)} className="text-blue-600 hover:underline text-xs block mt-2">
                 Configurações da Empresa
               </Link>
+              {userRole === 'COMUM' && <Link href="/cliente/empresas" onClick={() => setIsOpen(false)} className="text-blue-600 hover:underline text-xs block mt-2">
+                Minhas empresas
+              </Link>}
             </div>
           </section>
 

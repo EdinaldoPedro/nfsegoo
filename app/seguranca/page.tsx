@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { ShieldCheck, KeyRound, LogOut, Monitor, RefreshCw } from 'lucide-react';
@@ -20,11 +20,14 @@ export default function SegurancaPage({ adminMode = false }: { adminMode?: boole
   const [code, setCode] = useState('');
   const [setup, setSetup] = useState<{ secret: string; qrCode: string } | null>(null);
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
+  const [mustFinishOnboarding, setMustFinishOnboarding] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [backHref, setBackHref] = useState('/cliente/dashboard');
   const [staff, setStaff] = useState(false);
+  const [openedFromClientArea, setOpenedFromClientArea] = useState(false);
+  const allowRecoveryNavigation = useRef(false);
 
   const load = async () => {
     const [mfaResponse, sessionsResponse, devicesResponse] = await Promise.all([
@@ -51,10 +54,29 @@ export default function SegurancaPage({ adminMode = false }: { adminMode?: boole
 
   useEffect(() => {
     const role = localStorage.getItem('userRole');
+    const requestedReturnPath = new URLSearchParams(window.location.search).get('voltar');
+    const safeReturnPath = requestedReturnPath
+      && requestedReturnPath.startsWith('/')
+      && !requestedReturnPath.startsWith('//')
+      && !requestedReturnPath.startsWith('/seguranca')
+        ? requestedReturnPath
+        : null;
     setStaff(checkIsStaff(role));
-    setBackHref(adminMode ? '/admin/minha-conta' : checkIsStaff(role) ? '/admin/dashboard' : role === 'CONTADOR' ? '/contador' : '/cliente/dashboard');
+    setOpenedFromClientArea(safeReturnPath?.startsWith('/cliente') === true);
+    setBackHref(adminMode ? '/admin/minha-conta' : safeReturnPath || (checkIsStaff(role) ? '/admin/dashboard' : role === 'CONTADOR' ? '/contador' : '/cliente/dashboard'));
     void load().catch((cause) => setError(cause.message));
   }, [adminMode]);
+
+  useEffect(() => {
+    if (recoveryCodes.length === 0) return;
+    const warnBeforeLeaving = (event: BeforeUnloadEvent) => {
+      if (allowRecoveryNavigation.current) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warnBeforeLeaving);
+    return () => window.removeEventListener('beforeunload', warnBeforeLeaving);
+  }, [recoveryCodes.length]);
 
   const execute = async (action: string) => {
     setBusy(true); setError(''); setMessage('');
@@ -69,13 +91,43 @@ export default function SegurancaPage({ adminMode = false }: { adminMode?: boole
         setCode('');
         setMessage('Leia o QR code no autenticador e informe o novo codigo. Esta configuracao expira em 10 minutos.');
       } else {
+        const finishingRequiredSetup = action === 'enable' && Boolean(status?.required && !status.enabled);
         setSetup(null); setPassword(''); setCode('');
-        if (data.recoveryCodes) setRecoveryCodes(data.recoveryCodes);
+        if (data.recoveryCodes) {
+          setRecoveryCodes(data.recoveryCodes);
+          setMustFinishOnboarding(finishingRequiredSetup);
+        }
         setMessage(action === 'disable' ? 'MFA desativado. As outras sessoes foram encerradas.' : 'Configuracao de seguranca atualizada.');
         await load();
       }
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Erro de conexao.'); }
     finally { setBusy(false); }
+  };
+
+  const acknowledgeRecoveryCodes = async () => {
+    if (!mustFinishOnboarding) {
+      setRecoveryCodes([]);
+      return;
+    }
+
+    setBusy(true); setError('');
+    try {
+      const response = await fetch('/api/system/status', { cache: 'no-store' });
+      if (!response.ok) throw new Error('Não foi possível verificar a próxima etapa. Seus códigos continuam visíveis.');
+      const runtime = await response.json() as { legalAcceptanceRequired?: boolean; role?: string | null };
+      const destination = runtime.legalAcceptanceRequired
+        ? '/aceite-legal'
+        : runtime.role === 'CONTADOR' ? '/contador'
+          : ['ADMIN', 'MASTER', 'SUPORTE', 'SUPORTE_TI', 'COMERCIAL'].includes(runtime.role || '') ? '/admin/dashboard'
+            : '/cliente/dashboard';
+      allowRecoveryNavigation.current = true;
+      setRecoveryCodes([]);
+      setMustFinishOnboarding(false);
+      window.location.replace(destination);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Não foi possível continuar. Seus códigos continuam visíveis.');
+      setBusy(false);
+    }
   };
 
   const revoke = async (sessionId?: string) => {
@@ -99,12 +151,12 @@ export default function SegurancaPage({ adminMode = false }: { adminMode?: boole
   return (
     <main className={adminMode ? 'text-slate-900' : 'min-h-screen bg-slate-50 px-4 py-8 text-slate-900'}>
       <div className="mx-auto max-w-4xl space-y-6">
-        {staff && !adminMode && <AdminAccountNav active="security" />}
+        {staff && !adminMode && !openedFromClientArea && <AdminAccountNav active="security" />}
         <header className="flex flex-wrap items-center justify-between gap-4">
           <div><p className="text-sm font-bold text-blue-700">{adminMode ? 'Minha conta administrativa' : 'NFSe Goo'}</p><h1 className="mt-1 flex items-center gap-2 text-2xl font-black"><ShieldCheck /> Segurança da conta</h1></div>
           <div className="flex gap-4 text-sm font-bold">
-            {(!status?.required || status.enabled) && <Link href={backHref} className="text-blue-700">Voltar ao painel</Link>}
-            <button onClick={() => void logoutAndRedirect()} className="flex items-center gap-1 text-slate-600"><LogOut size={16} /> Sair</button>
+            {recoveryCodes.length === 0 && (!status?.required || status.enabled) && <Link href={backHref} className="text-blue-700">Voltar ao painel</Link>}
+            {recoveryCodes.length === 0 && <button onClick={() => void logoutAndRedirect()} className="flex items-center gap-1 text-slate-600"><LogOut size={16} /> Sair</button>}
           </div>
         </header>
 
@@ -160,7 +212,9 @@ export default function SegurancaPage({ adminMode = false }: { adminMode?: boole
           <h2 className="text-lg font-bold">Guarde seus codigos de recuperacao</h2>
           <p className="mt-2 text-sm leading-6">Eles aparecem somente agora. Guarde-os em um gerenciador de senhas ou local seguro, separado do autenticador. Cada codigo funciona uma unica vez. Os codigos anteriores deixaram de funcionar.</p>
           <ul className="mt-4 grid gap-2 font-mono text-xs sm:grid-cols-2">{recoveryCodes.map((value) => <li key={value} className="break-all rounded bg-white p-2 select-all">{value}</li>)}</ul>
-          <button onClick={() => setRecoveryCodes([])} className="mt-4 rounded-xl bg-amber-900 px-4 py-2 text-sm font-bold text-white">Ja guardei os codigos</button>
+          <button disabled={busy} onClick={() => void acknowledgeRecoveryCodes()} className="mt-4 rounded-xl bg-amber-900 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">
+            {mustFinishOnboarding ? 'Guardei os códigos e continuar' : 'Já guardei os códigos'}
+          </button>
         </section>}
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-7">

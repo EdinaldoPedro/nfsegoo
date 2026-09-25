@@ -4,15 +4,19 @@ const { validateRoleTransition } = require('../app/utils/admin-security.ts');
 const { isSupportTicketRole } = require('../app/utils/access-control.ts');
 const { isSafeImpersonationMethod } = require('../app/utils/impersonation.ts');
 const { stripUserSecrets } = require('../app/utils/safe-data.ts');
+const { canAuthorizeMaintenance } = require('../app/utils/maintenance-security.ts');
 
-test('ADMIN nao pode promover a MASTER/ADMIN nem alterar pares superiores', () => {
-  for (const newRole of ['MASTER', 'ADMIN']) {
-    assert.ok(validateRoleTransition({ actorId: 'actor', actorRole: 'ADMIN', targetId: 'target', targetRole: 'COMUM', newRole }));
-  }
-  for (const targetRole of ['MASTER', 'ADMIN']) {
-    assert.ok(validateRoleTransition({ actorId: 'actor', actorRole: 'ADMIN', targetId: 'target', targetRole, newRole: 'COMUM' }));
-  }
+test('ADMIN gerencia ADMIN, mas nao cria nem altera MASTER', () => {
+  assert.equal(validateRoleTransition({ actorId: 'actor', actorRole: 'ADMIN', targetId: 'target', targetRole: 'COMUM', newRole: 'ADMIN' }), null);
+  assert.equal(validateRoleTransition({ actorId: 'actor', actorRole: 'ADMIN', targetId: 'target', targetRole: 'ADMIN', newRole: 'COMUM' }), null);
+  assert.ok(validateRoleTransition({ actorId: 'actor', actorRole: 'ADMIN', targetId: 'target', targetRole: 'COMUM', newRole: 'MASTER' }));
+  assert.ok(validateRoleTransition({ actorId: 'actor', actorRole: 'ADMIN', targetId: 'target', targetRole: 'MASTER', newRole: 'COMUM' }));
   assert.equal(validateRoleTransition({ actorId: 'actor', actorRole: 'MASTER', targetId: 'target', targetRole: 'COMUM', newRole: 'ADMIN' }), null);
+});
+
+test('ADMIN e MASTER podem autorizar manutencao com as mesmas salvaguardas', () => {
+  for (const role of ['ADMIN', 'MASTER']) assert.equal(canAuthorizeMaintenance(role), true);
+  for (const role of ['SUPORTE', 'SUPORTE_TI', 'COMERCIAL', 'CONTADOR', 'COMUM', null]) assert.equal(canAuthorizeMaintenance(role), false);
 });
 
 test('Nenhum administrador altera o proprio papel; papeis desconhecidos sao rejeitados', () => {

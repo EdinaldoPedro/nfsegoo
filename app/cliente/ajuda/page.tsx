@@ -174,12 +174,12 @@ const artigos: HelpArticle[] = [
     id: 'minha-conta',
     title: 'Alterar dados pessoais, e-mail e senha',
     category: 'Conta',
-    path: 'Menu > Configurações > Editar Dados Pessoais',
+    path: 'Menu > Configurações da minha conta',
     summary: 'Onde ajustar nome, telefone, e-mail, senha, preferências e assinatura.',
     icon: UserCog,
     steps: [
       'Abra o menu no canto superior direito.',
-      'Clique em Editar Dados Pessoais.',
+      'Clique em Configurações da minha conta.',
       'Atualize dados básicos como nome e telefone quando necessário.',
       'Use as áreas de e-mail e senha para iniciar alterações sensíveis.',
       'Confira assinatura, limites e vencimento no painel lateral da página.',
@@ -192,7 +192,7 @@ const artigos: HelpArticle[] = [
     id: 'limites-assinatura',
     title: 'Entender limites do plano',
     category: 'Conta',
-    path: 'Menu > Editar Dados Pessoais > Assinatura',
+    path: 'Menu > Configurações da minha conta > Assinatura',
     summary: 'Como acompanhar limite de NFS-e, clientes, empresas e renovação.',
     icon: CalendarClock,
     steps: [
@@ -502,7 +502,7 @@ const artigos: HelpArticle[] = [
     id: 'seguranca-acesso',
     title: 'Boas práticas de segurança',
     category: 'Conta',
-    path: 'Menu > Editar Dados Pessoais e rotina de acesso',
+    path: 'Menu > Configurações da minha conta e rotina de acesso',
     summary: 'Cuidados para proteger certificado, senha e operação fiscal.',
     icon: LockKeyhole,
     steps: [
@@ -737,7 +737,7 @@ const guiasVisuais: VisualGuide[] = [
     chapters: [
       {
         title: 'Atualize dados e senha',
-        path: 'Menu > Editar Dados Pessoais',
+        path: 'Menu > Configurações da minha conta',
         text: 'Minha Conta concentra dados pessoais, assinatura, alteração de senha, e-mail e preferências.',
         mockup: 'conta',
       },

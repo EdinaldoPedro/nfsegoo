@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { parseAdminCompanyQuery, parseAdminCompanyMutation, adminCompanySelect, adminCustomerSelect,
-  companyPublicRegistryData } = require('../app/services/adminCompanyService.ts');
+  companyPublicRegistryData, companyPublicRegistryPatch } = require('../app/services/adminCompanyService.ts');
 const input = { id: 'company-id', origem: 'PRESTADOR', expectedUpdatedAt: '2026-09-03T00:00:00.000Z', action: 'UPDATE',
   data: { razaoSocial: 'Empresa QA', email: 'COMERCIAL@EXAMPLE.INVALID' }, adminPassword: 'synthetic-password', justification: 'Correção solicitada em QA' };
 
@@ -50,4 +50,11 @@ test('admin prestador: atualização pública exige prévia e não alcança camp
   assert.equal(publicData.numero, '4023');
   for (const protectedField of ['documento', 'email', 'emailPublico', 'telefonePublico', 'inscricaoMunicipal',
     'certificadoA1', 'ambiente', 'serieDPS', 'ultimoDPS']) assert.equal(Object.hasOwn(publicData, protectedField), false);
+  const patch = companyPublicRegistryPatch({ data: { documento: '37414793000103', razaoSocial: 'AK PRODUCOES LTDA',
+    nomeFantasia: null, situacaoCadastral: 'ATIVA', emailPublico: null, telefonePublico: null,
+    cep: '51021040', logradouro: null, numero: null, complemento: null, bairro: 'BOA VIAGEM',
+    cidade: 'RECIFE', uf: 'PE', pais: 'Brasil', codigoIbge: '2611606' }, atividades: [],
+    fonte: 'BRASILAPI', payloadHash: 'b'.repeat(64), consultedAt: new Date() });
+  assert.equal(patch.bairro, 'BOA VIAGEM');
+  for (const omitted of ['nomeFantasia', 'logradouro', 'numero', 'complemento']) assert.equal(Object.hasOwn(patch, omitted), false);
 });

@@ -5,6 +5,7 @@ import { prisma } from '@/app/utils/prisma';
 import { requireAdminReauthentication } from '@/app/utils/admin-security';
 import { createLog } from '@/app/services/logger';
 import { validateJsonContentLength } from '@/app/utils/request-guards';
+import { isAdminRole } from '@/app/utils/access-control';
 
 export const DELETE = withApiGuard(async function DELETE(request: Request) {
   try {
@@ -15,8 +16,8 @@ export const DELETE = withApiGuard(async function DELETE(request: Request) {
     const user = await getAuthenticatedUser(request);
     if (!user) return unauthorized();
     
-    // Limpeza em massa e exclusiva do papel de maior privilegio.
-    if (user.role !== 'MASTER') {
+    // Permissão administrativa, ainda protegida por opt-in, confirmação e reautenticação.
+    if (!isAdminRole(user.role)) {
         return forbidden();
     }
 
@@ -47,7 +48,7 @@ export const DELETE = withApiGuard(async function DELETE(request: Request) {
       action: 'FISCAL_SUPPORT_TABLES_CLEARED',
       module: 'SEGURANCA',
       userId: user.id,
-      message: 'Tabelas fiscais de apoio foram limpas pelo MASTER.',
+      message: 'Tabelas fiscais de apoio foram limpas por administrador autorizado.',
       details: { result, justification: body.justification },
     });
 

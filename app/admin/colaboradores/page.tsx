@@ -41,6 +41,7 @@ export default function GestaoColaboradores() {
   const [totalPages, setTotalPages] = useState(1);
   const [listError, setListError] = useState('');
   const [totalManaged, setTotalManaged] = useState(0);
+  const [actorRole, setActorRole] = useState('');
 
   // Estado para Edição
   const [selectedUserFull, setSelectedUserFull] = useState<any>(null); 
@@ -120,10 +121,11 @@ export default function GestaoColaboradores() {
   };
 
   const carregarDados = () => {
+    setActorRole(localStorage.getItem('userRole') || '');
     const candidateQuery = new URLSearchParams({ roles: 'COMUM', limit: '25' });
     if (filtroCandidato.trim()) candidateQuery.set('search', filtroCandidato.trim());
     Promise.all([
-      fetch(`/api/admin/users?roles=${localStorage.getItem('userRole') === 'MASTER' ? 'MASTER,' : ''}ADMIN,SUPORTE,SUPORTE_TI,COMERCIAL,CONTADOR&limit=25&page=${page}`).then(async r => { const data = await r.json(); if (!r.ok) throw new Error(data.error); return data; }),
+      fetch(`/api/admin/users?roles=MASTER,ADMIN,SUPORTE,SUPORTE_TI,COMERCIAL,CONTADOR&limit=25&page=${page}`).then(async r => { const data = await r.json(); if (!r.ok) throw new Error(data.error); return data; }),
       fetch(`/api/admin/users?${candidateQuery}`).then(async r => { const data = await r.json(); if (!r.ok) throw new Error(data.error); return data; }),
     ]).then(([managed, candidates]) => {
       if (Array.isArray(managed?.data)) { setColabs(managed.data); setTotalPages(managed.meta?.totalPages || 1); setTotalManaged(managed.meta?.total || 0); }
@@ -457,7 +459,7 @@ export default function GestaoColaboradores() {
                           <option value="COMUM">Usuário comum</option><option value="SUPORTE">Suporte</option>
                           <option value="SUPORTE_TI">Suporte T.I.</option><option value="COMERCIAL">Comercial</option>
                           <option value="CONTADOR">Contador parceiro</option><option value="ADMIN">Administrador</option>
-                          <option value="MASTER">Master</option>
+                          {actorRole === 'MASTER' && <option value="MASTER">Master</option>}
                         </select>
                       </label>
                       <label className="text-sm font-bold">Limite de empresas (salvo junto com o acesso)
@@ -587,9 +589,9 @@ export default function GestaoColaboradores() {
                         </td>
                         <td className="p-4">
                           <div className="flex justify-end gap-2">
-                            <button onClick={() => handleOpenEdit(user.id)} className="text-blue-600 hover:bg-blue-50 p-2 border border-transparent hover:border-blue-200 rounded transition" title="Editar Limites / Cargo">
+                            {(actorRole === 'MASTER' || user.role !== 'MASTER') && <button onClick={() => handleOpenEdit(user.id)} className="text-blue-600 hover:bg-blue-50 p-2 border border-transparent hover:border-blue-200 rounded transition" title="Editar Limites / Cargo">
                                 <Edit size={16} />
-                            </button>
+                            </button>}
                             {user.role !== 'MASTER' && (
                                 <button onClick={() => handleDemitir(user.id)} className="text-red-400 hover:text-red-600 hover:bg-red-50 p-2 rounded transition" title="Remover acesso">
                                     <Trash2 size={16} />

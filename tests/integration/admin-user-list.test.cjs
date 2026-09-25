@@ -28,7 +28,8 @@ test('PostgreSQL: listagem administrativa de contas é mínima, paginada e hier�
     await t.test('suporte enxerga clientes/contadores, não equipe interna', async () => {
       assert.equal((await listAdminUsers(users[2].id, new URLSearchParams(`roles=COMUM,CONTADOR&limit=50&search=${encodeURIComponent(prefix)}`))).data.length, 4);
       await assert.rejects(listAdminUsers(users[2].id, new URLSearchParams('roles=ADMIN')), { status: 403 });
-      await assert.rejects(listAdminUsers(users[1].id, new URLSearchParams('roles=MASTER')), { status: 403 });
+      const visibleMaster = await listAdminUsers(users[1].id, new URLSearchParams(`roles=MASTER&search=${encodeURIComponent(prefix)}`));
+      assert.equal(visibleMaster.data.length, 1);
     });
     await t.test('MASTER pode listar equipe de modo delimitado', async () => {
       const result = await listAdminUsers(users[0].id, new URLSearchParams(`roles=MASTER,ADMIN,SUPORTE&search=${encodeURIComponent(prefix)}`));

@@ -38,8 +38,11 @@ export const GET = withApiGuard(async function GET(request: Request) {
           }, select: { id: true } })).map(({ id }) => id))
         : await getAccessibleEmpresaIds(user) || [];
       const companies = accessibleIds.length ? await prisma.empresa.findMany({ where: { id: { in: accessibleIds }, arquivadoEm: null },
-        select: { id: true, razaoSocial: true, documento: true }, orderBy: [{ razaoSocial: 'asc' }, { id: 'asc' }] }) : [];
-      const listaEmpresas = companies.map(emp => ({ id: emp.id, razaoSocial: emp.razaoSocial, cnpj: emp.documento, isPrimary: emp.id === user.empresaId }));
+        select: { id: true, razaoSocial: true, documento: true, ambiente: true, cadastroCompleto: true,
+          certificadoVencimento: true, certificadoValidadoEm: true }, orderBy: [{ razaoSocial: 'asc' }, { id: 'asc' }] }) : [];
+      const listaEmpresas = companies.map(emp => ({ id: emp.id, razaoSocial: emp.razaoSocial, cnpj: emp.documento,
+        ambiente: emp.ambiente, cadastroCompleto: emp.cadastroCompleto, certificadoVencimento: emp.certificadoVencimento,
+        certificadoValidado: Boolean(emp.certificadoValidadoEm), isPrimary: emp.id === user.empresaId }));
       const limits = await getEffectivePlanLimits(user.id);
       const planoDetalhado = {
         nome: limits.planoBase?.nome || 'Sem plano vigente', slug: limits.planoBase?.slug || 'FREE',

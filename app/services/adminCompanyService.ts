@@ -29,6 +29,13 @@ export function companyPublicRegistryData(registry: FiscalRegistryResult): Recor
   return Object.fromEntries(COMPANY_PUBLIC_FIELDS.map(field => [field, registry.data[field]])) as Record<CompanyPublicField, string | null>;
 }
 
+export function companyPublicRegistryPatch(registry: FiscalRegistryResult): Partial<Record<CompanyPublicField, string>> {
+  return Object.fromEntries(COMPANY_PUBLIC_FIELDS.flatMap(field => {
+    const value = registry.data[field];
+    return value === null ? [] : [[field, value]];
+  })) as Partial<Record<CompanyPublicField, string>>;
+}
+
 function id(input: unknown): string {
   if (typeof input !== 'string' || !/^[a-z0-9_-]{1,100}$/i.test(input)) throw new AdminCompanyError('Identificador inválido. Atualize a tela.');
   return input;
@@ -185,7 +192,7 @@ export async function mutateAdminCompany(actorId: string, input: unknown, regist
           }
           if (mutation.action === 'REFRESH' && (!registry || registry.data.documento !== company.documento
             || registry.payloadHash !== mutation.sourceHash)) throw new AdminCompanyError('A fonte pública mudou ou não confirmou este CNPJ. Consulte novamente antes de aplicar.', 409);
-          const data = mutation.action === 'REFRESH' ? companyPublicRegistryData(registry!) : { ...mutation.data };
+          const data = mutation.action === 'REFRESH' ? companyPublicRegistryPatch(registry!) : { ...mutation.data };
           if (mutation.action === 'REFRESH' && !data.razaoSocial) throw new AdminCompanyError('A fonte pública não retornou uma razão social válida.', 424);
           validateAddressPatch(data, false);
           const merged = { ...company, ...data };

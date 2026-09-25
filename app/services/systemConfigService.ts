@@ -3,6 +3,7 @@ import { prisma } from '@/app/utils/prisma';
 import { encrypt } from '@/app/utils/crypto';
 import { CommercialError } from '@/app/utils/commercial-pricing';
 import { assertSmtpHostAllowed, normalizeSmtpHost } from '@/app/utils/smtp-security';
+import { isAdminRole } from '@/app/utils/access-control';
 
 const editable = ['smtpHost', 'smtpPort', 'smtpUser', 'smtpPass', 'smtpSecure', 'emailRemetente',
   'ibsCbsPilotoAtivo', 'ibsCbsMeiAtivo', 'ibsCbsSimplesAtivo', 'ibsCbsLucroPresumidoAtivo',
@@ -80,6 +81,7 @@ function same(left: unknown, right: unknown) {
 }
 
 export async function updateSystemConfig(actor: { id: string; role: Role }, mutation: ReturnType<typeof parseSystemConfigMutation>) {
+  if (!isAdminRole(actor.role)) throw new CommercialError('Acesso administrativo não permitido.', 403);
   const targetHost = mutation.data.smtpHost;
   if (typeof targetHost === 'string') {
     const preview = await prisma.configuracaoSistema.findUnique({ where: { id: 'config' }, select: { smtpHost: true } });
@@ -91,9 +93,6 @@ export async function updateSystemConfig(actor: { id: string; role: Role }, muta
     if ((current?.version ?? null) !== mutation.expectedVersion) throw new CommercialError('A configuração mudou em outra tela. Recarregue antes de salvar.', 409);
     const changed = Object.entries(mutation.data).filter(([key, value]) => key === 'smtpPass' || !same(current?.[key as keyof ConfiguracaoSistema] ?? (defaults as Record<string, unknown>)[key], value)).map(([key]) => key);
     if (!changed.length) return publicSystemConfig(current);
-    if (actor.role !== 'MASTER' && changed.some(field => fiscalFields.includes(field as typeof fiscalFields[number]))) {
-      throw new CommercialError('Somente MASTER pode alterar chaves fiscais globais.', 403);
-    }
     if (changed.includes('manutencaoAtiva') && !mutation.maintenanceConfirmed) throw new CommercialError('Confirme explicitamente a mudança do modo de manutenção.');
 
     const nextHost = 'smtpHost' in mutation.data ? mutation.data.smtpHost : current?.smtpHost;

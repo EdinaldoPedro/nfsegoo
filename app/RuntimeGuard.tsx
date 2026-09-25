@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { redirectToLogin } from '@/app/utils/client-session';
+import { runtimeSetupRedirect } from '@/app/utils/profile-session-gate';
 
 type RuntimeStatus = {
   authenticated: boolean;
@@ -76,11 +77,8 @@ export default function RuntimeGuard({ children }: { children: React.ReactNode }
           return Response.json({ error: 'Servico temporariamente indisponivel.' }, { status: 503 });
         }
         if (status.authenticated) {
-          if (status.mfaRequired && window.location.pathname !== '/seguranca') {
-            window.location.replace('/seguranca');
-          } else if (status.legalAcceptanceRequired && window.location.pathname !== '/aceite-legal') {
-            window.location.replace('/aceite-legal');
-          }
+          const setupRedirect = runtimeSetupRedirect(status, window.location.pathname);
+          if (setupRedirect) window.location.replace(setupRedirect);
           // A sessão continua válida. O 401 pertence ao gate da rota (MFA,
           // aceite jurídico ou autorização), portanto não apaga a sessão.
         } else {
@@ -140,14 +138,13 @@ export default function RuntimeGuard({ children }: { children: React.ReactNode }
           return;
         }
 
-        if (protectedPath && status.mfaRequired && pathname !== '/seguranca') {
-          window.location.replace('/seguranca');
-          return;
-        }
-
-        if (protectedPath && status.legalAcceptanceRequired && pathname !== '/aceite-legal' && !status.mfaRequired) {
-          window.location.replace('/aceite-legal');
-          return;
+        if (protectedPath) {
+          const setupRedirect = runtimeSetupRedirect(status, pathname);
+          if (setupRedirect) {
+            if (setupRedirect.includes('/login')) redirectToLogin('expired');
+            else window.location.replace(setupRedirect);
+            return;
+          }
         }
 
         if (isCustomerPortalPath(pathname) && !status.customerPortalAllowed && localStorage.getItem('isSupportMode') !== 'true') {
