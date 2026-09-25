@@ -87,3 +87,4 @@ prisma/dev.db-journal
 # Bundle publico e versionado da cadeia ICP-Brasil. A regra geral de PEM
 # continua protegendo certificados e chaves privadas em qualquer outro local.
 !/resources/fiscal/icp-brasil-roots-20260826.pem
+!/resources/fiscal/icp-brasil-intermediates-20260826.pem

@@ -1,0 +1,5 @@
+Fonte oficial: https://acraiz.icpbrasil.gov.br/credenciadas/CertificadosAC-ICP-Brasil/ACcompactado.zip
+Página institucional: https://www.gov.br/iti/pt-br/assuntos/repositorio/certificados-das-acs-da-icp-brasil-arquivo-unico-compactado
+Atualização publicada pelo ITI: 26/08/2026
+SHA-512 verificado: 4585a99955607525e475cf22138302fe8ddce6ca8f0926cd1f01809f007d4bcddff5c1070369d29b1de99c0d2eb058ce0deb856bae0189469ba37e09a59d7985
+Inventário vigente: 5 raízes autoassinadas e 175 autoridades intermediárias.

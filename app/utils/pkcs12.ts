@@ -193,23 +193,15 @@ function extractCnpj(cert: forge.pki.Certificate): { cnpj: string | null; source
   return { cnpj: null, source: 'NOT_PRESENT' };
 }
 
-function orderedChain(leaf: forge.pki.Certificate, certificates: forge.pki.Certificate[]) {
-  const leafPem = forge.pki.certificateToPem(leaf);
-  const remaining = certificates.filter(cert => forge.pki.certificateToPem(cert) !== leafPem);
-  const chain = [leaf];
-  while (remaining.length && chain.length <= 10) {
-    const current = chain[chain.length - 1];
-    const index = remaining.findIndex(parent => {
-      try { return current.isIssuer(parent) && parent.verify(current); } catch { return false; }
-    });
-    if (index < 0) break;
-    chain.push(remaining[index]);
-    remaining.splice(index, 1);
-  }
-  return chain;
+function x509Fingerprint(cert: X509Certificate) {
+  return cert.fingerprint256.replace(/:/g, '').toLowerCase();
 }
 
-export function loadIcpTrustBundle(): forge.pki.Certificate[] {
+function uniqueX509(certificates: X509Certificate[]) {
+  return [...new Map(certificates.map(cert => [x509Fingerprint(cert), cert])).values()];
+}
+
+export function loadIcpTrustBundle(): X509Certificate[] {
   let pem = process.env.ICP_BRASIL_TRUST_BUNDLE_PEM;
   const bundleFile = process.env.ICP_BRASIL_TRUST_BUNDLE_FILE || (!pem ? join(process.cwd(), 'resources', 'fiscal', 'icp-brasil-roots-20260826.pem') : undefined);
   if (!pem && bundleFile) {
@@ -226,15 +218,47 @@ export function loadIcpTrustBundle(): forge.pki.Certificate[] {
   if (!blocks.length || blocks.length > 100) throw certificateError('A cadeia de confiança ICP-Brasil configurada é inválida.');
   try {
     return blocks.map(block => {
-      const cert = forge.pki.certificateFromPem(block);
       const root = new X509Certificate(block);
       if (!root.ca || !root.checkIssued(root) || !root.verify(root.publicKey)) {
         throw new Error('Not a verified root CA');
       }
-      return cert;
+      return root;
     });
   }
   catch { throw certificateError('A cadeia de confiança ICP-Brasil configurada contém um certificado inválido.'); }
+}
+
+/** Intermediates help build a chain but are never trusted as roots. */
+export function loadIcpIntermediateBundle(): X509Certificate[] {
+  let pem = process.env.ICP_BRASIL_INTERMEDIATE_BUNDLE_PEM;
+  const bundleFile = process.env.ICP_BRASIL_INTERMEDIATE_BUNDLE_FILE
+    || (!pem ? join(process.cwd(), 'resources', 'fiscal', 'icp-brasil-intermediates-20260826.pem') : undefined);
+  if (!pem && bundleFile) {
+    try {
+      const file = statSync(bundleFile);
+      if (!file.isFile() || file.size > 10 * 1024 * 1024) throw new Error('Invalid intermediate file');
+      pem = readFileSync(bundleFile, 'utf8');
+    }
+    catch { throw certificateError('O arquivo de autoridades intermediárias ICP-Brasil configurado no servidor não pôde ser lido.'); }
+  }
+  if (!pem) return [];
+  if (Buffer.byteLength(pem, 'utf8') > 10 * 1024 * 1024) {
+    throw certificateError('O arquivo de autoridades intermediárias ICP-Brasil excede o limite permitido.');
+  }
+  const blocks = pem.match(/-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/g) || [];
+  if (!blocks.length || blocks.length > 1_000) {
+    throw certificateError('O arquivo de autoridades intermediárias ICP-Brasil é inválido.');
+  }
+  try {
+    return uniqueX509(blocks.map(block => {
+      const x509 = new X509Certificate(block);
+      if (!x509.ca) throw new Error('Not a CA certificate');
+      return x509;
+    }).filter(x509 => {
+      return !(x509.checkIssued(x509) && x509.verify(x509.publicKey));
+    }));
+  }
+  catch { throw certificateError('O arquivo de autoridades intermediárias ICP-Brasil contém um certificado inválido.'); }
 }
 
 function verifyChain(leaf: forge.pki.Certificate, certificates: forge.pki.Certificate[], required: boolean): CertificateChainStatus {
@@ -244,8 +268,33 @@ function verifyChain(leaf: forge.pki.Certificate, certificates: forge.pki.Certif
     if (required) throw certificateError('A cadeia de confiança ICP-Brasil não está configurada no ambiente de produção.');
     return 'UNVERIFIED_DEVELOPMENT';
   }
+  const intermediates = loadIcpIntermediateBundle();
   try {
-    forge.pki.verifyCertificateChain(forge.pki.createCaStore(trusted), orderedChain(leaf, certificates), { validityCheckDate: new Date() });
+    const leafX509 = new X509Certificate(forge.pki.certificateToPem(leaf));
+    const candidates = uniqueX509([
+      ...certificates.map(cert => new X509Certificate(forge.pki.certificateToPem(cert))),
+      ...intermediates,
+      ...trusted,
+    ]).filter(cert => x509Fingerprint(cert) !== x509Fingerprint(leafX509));
+    const trustedFingerprints = new Set(trusted.map(x509Fingerprint));
+    const pending: Array<{ cert: X509Certificate; depth: number; visited: Set<string> }> = [
+      { cert: leafX509, depth: 0, visited: new Set([x509Fingerprint(leafX509)]) },
+    ];
+    let verified = false;
+    const now = Date.now();
+    while (pending.length && !verified) {
+      const current = pending.shift()!;
+      if (current.depth >= 10) continue;
+      for (const parent of candidates) {
+        const fingerprint = x509Fingerprint(parent);
+        if (current.visited.has(fingerprint) || !parent.ca
+          || Date.parse(parent.validFrom) > now || Date.parse(parent.validTo) < now) continue;
+        if (!current.cert.checkIssued(parent) || !current.cert.verify(parent.publicKey)) continue;
+        if (trustedFingerprints.has(fingerprint)) { verified = true; break; }
+        pending.push({ cert: parent, depth: current.depth + 1, visited: new Set([...current.visited, fingerprint]) });
+      }
+    }
+    if (!verified) throw new Error('No path to trusted ICP-Brasil root');
     return 'TRUSTED_CONFIGURED_BUNDLE';
   } catch {
     throw certificateError('A cadeia do certificado não foi validada pelas raízes ICP-Brasil configuradas.');

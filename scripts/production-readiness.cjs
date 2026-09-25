@@ -87,9 +87,12 @@ async function main() {
   check('backups', enabled('BACKUP_POLICY_CONFIRMED') && recentPastDate('BACKUP_RESTORE_TESTED_AT', 120), 'restauração comprovada nos últimos 120 dias');
   check('bootstrap', !present('BOOTSTRAP_ADMIN_EMAIL'), 'remova BOOTSTRAP_ADMIN_EMAIL depois de criar a primeira conta');
   let fiscalTrustConfigured = false;
-  try { fiscalTrustConfigured = require('../app/utils/pkcs12.ts').loadIcpTrustBundle().length > 0; }
+  try {
+    const { loadIcpTrustBundle, loadIcpIntermediateBundle } = require('../app/utils/pkcs12.ts');
+    fiscalTrustConfigured = loadIcpTrustBundle().length > 0 && loadIcpIntermediateBundle().length > 0;
+  }
   catch { /* Ausência, arquivo ilegível ou raiz inválida bloqueiam produção. */ }
-  check('fiscal_trust', fiscalTrustConfigured, 'raízes ICP-Brasil oficiais configuradas e legíveis');
+  check('fiscal_trust', fiscalTrustConfigured, 'raízes e intermediárias ICP-Brasil oficiais configuradas e legíveis');
   check('production_worker_flag', enabled('FISCAL_WORKER_ALLOW_PRODUCTION') && enabled('READINESS_REQUIRE_PRODUCTION_WORKER'), 'worker de produção habilitado e obrigatório no readiness');
   check('fiscal_homologation_enforcement', enabled('FISCAL_HOMOLOGATION_ENFORCEMENT'), 'worker final deve exigir evidência fiscal válida antes de habilitar produção');
   const fiscalHomologation = inspectFiscalHomologationEvidence({

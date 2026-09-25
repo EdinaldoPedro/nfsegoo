@@ -5,7 +5,7 @@ const { writeFileSync, unlinkSync } = require('node:fs');
 const { join } = require('node:path');
 const { tmpdir } = require('node:os');
 const { randomUUID } = require('node:crypto');
-const { parsePkcs12, Pkcs12ValidationError, loadIcpTrustBundle } = require('../app/utils/pkcs12.ts');
+const { parsePkcs12, Pkcs12ValidationError, loadIcpTrustBundle, loadIcpIntermediateBundle } = require('../app/utils/pkcs12.ts');
 
 const cnpj = '12ABC34501DE35';
 
@@ -55,20 +55,57 @@ function fixture() {
   return { rootKeys, root, leafKeys, leaf };
 }
 
+function fixtureWithIntermediate() {
+  const { rootKeys, root } = fixture();
+  const intermediateKeys = forge.pki.rsa.generateKeyPair(2048);
+  const intermediate = forge.pki.createCertificate();
+  intermediate.publicKey = intermediateKeys.publicKey; intermediate.serialNumber = '10'; validity(intermediate);
+  intermediate.setSubject([{ name: 'commonName', value: 'QA synthetic intermediate - never trust' }]);
+  intermediate.setIssuer(root.subject.attributes);
+  intermediate.setExtensions([
+    { name: 'basicConstraints', cA: true, pathLenConstraint: 0, critical: true },
+    { name: 'keyUsage', keyCertSign: true, cRLSign: true, critical: true },
+  ]);
+  intermediate.sign(rootKeys.privateKey, forge.md.sha256.create());
+
+  const leafKeys = forge.pki.rsa.generateKeyPair(2048);
+  const leaf = forge.pki.createCertificate();
+  leaf.publicKey = leafKeys.publicKey; leaf.serialNumber = '11'; validity(leaf);
+  leaf.setSubject([{ name: 'commonName', value: `Empresa QA:${cnpj}` }]);
+  leaf.setIssuer(intermediate.subject.attributes);
+  leaf.setExtensions([
+    { name: 'basicConstraints', cA: false, critical: true },
+    { name: 'keyUsage', digitalSignature: true, nonRepudiation: true, critical: true },
+    { name: 'extKeyUsage', clientAuth: true },
+    subjectAltNameCnpj(cnpj),
+  ]);
+  leaf.sign(intermediateKeys.privateKey, forge.md.sha256.create());
+  return { root, intermediate, leafKeys, leaf };
+}
+
 function pfxBase64(key, certs, password = 'qa-pfx-password') {
   const pfx = forge.pkcs12.toPkcs12Asn1(key, certs, password, { algorithm: '3des' });
   return Buffer.from(forge.asn1.toDer(pfx).getBytes(), 'binary').toString('base64');
 }
 
-test('bundle oficial versionado carrega somente raízes compatíveis', () => {
+test('bundle oficial versionado carrega raízes e intermediárias vigentes separadamente', () => {
   const previousPem = process.env.ICP_BRASIL_TRUST_BUNDLE_PEM;
   const previousFile = process.env.ICP_BRASIL_TRUST_BUNDLE_FILE;
+  const previousIntermediatePem = process.env.ICP_BRASIL_INTERMEDIATE_BUNDLE_PEM;
+  const previousIntermediateFile = process.env.ICP_BRASIL_INTERMEDIATE_BUNDLE_FILE;
   delete process.env.ICP_BRASIL_TRUST_BUNDLE_PEM;
   delete process.env.ICP_BRASIL_TRUST_BUNDLE_FILE;
-  try { assert.equal(loadIcpTrustBundle().length, 2); }
+  delete process.env.ICP_BRASIL_INTERMEDIATE_BUNDLE_PEM;
+  delete process.env.ICP_BRASIL_INTERMEDIATE_BUNDLE_FILE;
+  try {
+    assert.equal(loadIcpTrustBundle().length, 5);
+    assert.equal(loadIcpIntermediateBundle().length, 175);
+  }
   finally {
     if (previousPem !== undefined) process.env.ICP_BRASIL_TRUST_BUNDLE_PEM = previousPem;
     if (previousFile !== undefined) process.env.ICP_BRASIL_TRUST_BUNDLE_FILE = previousFile;
+    if (previousIntermediatePem !== undefined) process.env.ICP_BRASIL_INTERMEDIATE_BUNDLE_PEM = previousIntermediatePem;
+    if (previousIntermediateFile !== undefined) process.env.ICP_BRASIL_INTERMEDIATE_BUNDLE_FILE = previousIntermediateFile;
   }
 });
 
@@ -86,6 +123,42 @@ test('PFX: CNPJ alfanumerico vem do OID ICP-Brasil e cadeia configurada e valida
   } finally {
     if (previous === undefined) delete process.env.ICP_BRASIL_TRUST_BUNDLE_PEM;
     else process.env.ICP_BRASIL_TRUST_BUNDLE_PEM = previous;
+  }
+});
+
+test('PFX: cadeia ausente no arquivo é completada por intermediária oficial configurada', () => {
+  const { root, intermediate, leafKeys, leaf } = fixtureWithIntermediate();
+  const base64 = pfxBase64(leafKeys.privateKey, [leaf]);
+  const previousRoot = process.env.ICP_BRASIL_TRUST_BUNDLE_PEM;
+  const previousIntermediate = process.env.ICP_BRASIL_INTERMEDIATE_BUNDLE_PEM;
+  process.env.ICP_BRASIL_TRUST_BUNDLE_PEM = forge.pki.certificateToPem(root);
+  process.env.ICP_BRASIL_INTERMEDIATE_BUNDLE_PEM = forge.pki.certificateToPem(intermediate);
+  try {
+    assert.equal(loadIcpIntermediateBundle().length, 1);
+    const result = parsePkcs12({ base64, password: 'qa-pfx-password', expectedCnpj: cnpj, requireCnpj: true, requireTrustedChain: true });
+    assert.equal(result.chainStatus, 'TRUSTED_CONFIGURED_BUNDLE');
+  } finally {
+    if (previousRoot === undefined) delete process.env.ICP_BRASIL_TRUST_BUNDLE_PEM;
+    else process.env.ICP_BRASIL_TRUST_BUNDLE_PEM = previousRoot;
+    if (previousIntermediate === undefined) delete process.env.ICP_BRASIL_INTERMEDIATE_BUNDLE_PEM;
+    else process.env.ICP_BRASIL_INTERMEDIATE_BUNDLE_PEM = previousIntermediate;
+  }
+});
+
+test('intermediária configurada não vira âncora de confiança', () => {
+  const { intermediate, leafKeys, leaf } = fixtureWithIntermediate();
+  const base64 = pfxBase64(leafKeys.privateKey, [leaf]);
+  const previousRoot = process.env.ICP_BRASIL_TRUST_BUNDLE_PEM;
+  const previousIntermediate = process.env.ICP_BRASIL_INTERMEDIATE_BUNDLE_PEM;
+  process.env.ICP_BRASIL_TRUST_BUNDLE_PEM = forge.pki.certificateToPem(intermediate);
+  process.env.ICP_BRASIL_INTERMEDIATE_BUNDLE_PEM = forge.pki.certificateToPem(intermediate);
+  try {
+    assert.throws(() => parsePkcs12({ base64, password: 'qa-pfx-password', expectedCnpj: cnpj, requireTrustedChain: true }), Pkcs12ValidationError);
+  } finally {
+    if (previousRoot === undefined) delete process.env.ICP_BRASIL_TRUST_BUNDLE_PEM;
+    else process.env.ICP_BRASIL_TRUST_BUNDLE_PEM = previousRoot;
+    if (previousIntermediate === undefined) delete process.env.ICP_BRASIL_INTERMEDIATE_BUNDLE_PEM;
+    else process.env.ICP_BRASIL_INTERMEDIATE_BUNDLE_PEM = previousIntermediate;
   }
 });
 
