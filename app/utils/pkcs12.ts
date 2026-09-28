@@ -60,17 +60,22 @@ function validatePassword(value: unknown): asserts value is string {
   }
 }
 
-/** Iterative DER envelope validation avoids handing deeply nested or unbounded data to forge. */
+/** Iterative BER/DER envelope validation avoids handing deeply nested or unbounded data to forge. */
 function preflightDer(bytes: Buffer) {
-  const stack: Array<{ end: number; depth: number }> = [{ end: bytes.length, depth: 0 }];
+  const stack: Array<{ end: number; depth: number; indefinite: boolean }> = [{ end: bytes.length, depth: 0, indefinite: false }];
   let cursor = 0;
   let nodes = 0;
   let roots = 0;
 
   while (stack.length) {
     const parent = stack[stack.length - 1];
-    if (cursor === parent.end) { stack.pop(); continue; }
-    if (cursor > parent.end || cursor >= bytes.length) throw certificateError('Estrutura ASN.1 inválida no PFX/P12.');
+    if (parent.indefinite && cursor + 2 <= parent.end && bytes[cursor] === 0 && bytes[cursor + 1] === 0) {
+      cursor += 2;
+      stack.pop();
+      continue;
+    }
+    if (!parent.indefinite && cursor === parent.end) { stack.pop(); continue; }
+    if (cursor >= parent.end || cursor >= bytes.length) throw certificateError('Estrutura ASN.1 inválida no PFX/P12.');
     if (parent.depth === 0) roots += 1;
     nodes += 1;
     if (nodes > MAX_ASN1_NODES) throw certificateError('Estrutura ASN.1 excessivamente complexa.');
@@ -86,7 +91,14 @@ function preflightDer(bytes: Buffer) {
     }
     if (cursor >= parent.end) throw certificateError('Comprimento ASN.1 ausente.');
     const firstLength = bytes[cursor++];
-    if (firstLength === 0x80) throw certificateError('Comprimento ASN.1 indefinido não é aceito.');
+    if (firstTag === 0 && firstLength === 0) throw certificateError('Marcador de fim ASN.1 inesperado.');
+    if (firstLength === 0x80) {
+      if (!constructed) throw certificateError('Comprimento ASN.1 indefinido exige um objeto construído.');
+      const depth = parent.depth + 1;
+      if (depth > MAX_ASN1_DEPTH) throw certificateError('Estrutura ASN.1 excessivamente profunda.');
+      stack.push({ end: parent.end, depth, indefinite: true });
+      continue;
+    }
     let length = firstLength;
     if ((firstLength & 0x80) !== 0) {
       const octets = firstLength & 0x7f;
@@ -100,7 +112,7 @@ function preflightDer(bytes: Buffer) {
     if (constructed && length > 0) {
       const depth = parent.depth + 1;
       if (depth > MAX_ASN1_DEPTH) throw certificateError('Estrutura ASN.1 excessivamente profunda.');
-      stack.push({ end, depth });
+      stack.push({ end, depth, indefinite: false });
     } else {
       cursor = end;
     }
@@ -315,7 +327,16 @@ export function parsePkcs12(input: {
   let root: any;
   let p12: forge.pkcs12.Pkcs12Pfx;
   try {
-    root = forge.asn1.fromDer(bytes.toString('binary'), true);
+    const fromDerWithLimits = forge.asn1.fromDer as unknown as (
+      value: string,
+      options: { strict: boolean; parseAllBytes: boolean; decodeBitStrings: boolean; maxDepth: number },
+    ) => forge.asn1.Asn1;
+    root = fromDerWithLimits(bytes.toString('binary'), {
+      strict: true,
+      parseAllBytes: true,
+      decodeBitStrings: true,
+      maxDepth: MAX_ASN1_DEPTH + 1,
+    });
     assertKdfBounds(root);
     p12 = forge.pkcs12.pkcs12FromAsn1(root, true, input.password);
   } catch (error: any) {

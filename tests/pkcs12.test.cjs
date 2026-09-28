@@ -88,6 +88,15 @@ function pfxBase64(key, certs, password = 'qa-pfx-password') {
   return Buffer.from(forge.asn1.toDer(pfx).getBytes(), 'binary').toString('base64');
 }
 
+function indefiniteOuterBase64(base64) {
+  const bytes = Buffer.from(base64, 'base64');
+  assert.equal(bytes[0], 0x30);
+  const firstLength = bytes[1];
+  const lengthOctets = firstLength & 0x80 ? firstLength & 0x7f : 0;
+  const contentOffset = lengthOctets ? 2 + lengthOctets : 2;
+  return Buffer.concat([Buffer.from([0x30, 0x80]), bytes.subarray(contentOffset), Buffer.from([0, 0])]).toString('base64');
+}
+
 test('bundle oficial versionado carrega raízes e intermediárias vigentes separadamente', () => {
   const previousPem = process.env.ICP_BRASIL_TRUST_BUNDLE_PEM;
   const previousFile = process.env.ICP_BRASIL_TRUST_BUNDLE_FILE;
@@ -124,6 +133,20 @@ test('PFX: CNPJ alfanumerico vem do OID ICP-Brasil e cadeia configurada e valida
     if (previous === undefined) delete process.env.ICP_BRASIL_TRUST_BUNDLE_PEM;
     else process.env.ICP_BRASIL_TRUST_BUNDLE_PEM = previous;
   }
+});
+
+test('PFX: aceita BER legítimo com sequência construída de comprimento indefinido', () => {
+  const { leafKeys, leaf } = fixture();
+  const base64 = indefiniteOuterBase64(pfxBase64(leafKeys.privateKey, [leaf]));
+  const result = parsePkcs12({ base64, password: 'qa-pfx-password', requireTrustedChain: false });
+  assert.match(result.certPem, /BEGIN CERTIFICATE/);
+
+  const truncated = Buffer.from(base64, 'base64').subarray(0, -2).toString('base64');
+  assert.throws(() => parsePkcs12({ base64: truncated, password: 'qa-pfx-password', requireTrustedChain: false }), /ASN\.1 inválida/);
+  const primitiveIndefinite = Buffer.from([0x04, 0x80, 0x00, 0x00, ...Buffer.alloc(12)]).toString('base64');
+  assert.throws(() => parsePkcs12({ base64: primitiveIndefinite, password: 'x', requireTrustedChain: false }), /objeto construído/);
+  const escapedParent = Buffer.concat([Buffer.from([0x30, 0x04, 0x30, 0x80, 0x02, 0x00]), Buffer.alloc(10)]).toString('base64');
+  assert.throws(() => parsePkcs12({ base64: escapedParent, password: 'x', requireTrustedChain: false }), /ASN\.1 inválida/);
 });
 
 test('PFX: cadeia ausente no arquivo é completada por intermediária oficial configurada', () => {
