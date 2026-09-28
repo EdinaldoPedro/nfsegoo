@@ -597,6 +597,31 @@ export default function DetalheVendaCompleto() {
     finally { setSincronizandoRetorno(false); fetchVenda(true); }
   };
 
+  const retomarConciliacaoEmissao = async (jobId: string) => {
+    const credentials = await pedirReautenticacao('Retomar consultas da emissão');
+    if (!credentials) return;
+    setSincronizandoRetorno(true);
+    try {
+      const res = await fetch('/api/admin/emissoes/retomar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId, ...credentials }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Emissão não retomada.');
+      await dialog.showAlert({
+        type: 'success',
+        title: 'Conciliação retomada',
+        description: data.message || 'O worker consultará somente a DPS original. Nenhuma nova emissão será transmitida.',
+      });
+    } catch (error: any) {
+      await dialog.showAlert({ type: 'warning', title: 'Não foi possível retomar', description: error.message });
+    } finally {
+      setSincronizandoRetorno(false);
+      fetchVenda(true);
+    }
+  };
+
   const handleDelete = async () => {
     const confirmacao = await dialog.showPrompt({
       type: 'danger',
@@ -832,6 +857,7 @@ export default function DetalheVendaCompleto() {
   const ultimaMensagemErro = retornoLogs[0]?.message;
   const erroTemporarioPortal = retornoLogs.some(logIndicaErroTemporario);
   const noteOperation = notaAtual?.fiscalOperations?.[0];
+  const emissionJob = venda.emissionJobs?.[0];
   const canAdminister = typeof window !== 'undefined' && ['ADMIN', 'MASTER'].includes(localStorage.getItem('userRole') || '');
   const integridadePdf = {
     chaveOk: Boolean(notaAtual?.chaveAcesso),
@@ -1026,6 +1052,31 @@ export default function DetalheVendaCompleto() {
                     <p className="text-xs text-slate-500">Operação: {noteOperation.id}</p>
                     {canAdminister && noteOperation.status === 'RECONCILIACAO_MANUAL' && <button disabled={sincronizandoRetorno} onClick={() => retomarConciliacaoNota(noteOperation.id)} className="mt-2 underline font-bold">Retomar somente consultas</button>}
                   </div>}
+                  {emissionJob && ['RECONCILIACAO_MANUAL', 'ERRO_TEMPORARIO', 'PENDENTE', 'PROCESSANDO'].includes(emissionJob.status) && (
+                    <div className={`mt-3 rounded-xl border p-4 text-sm ${emissionJob.status === 'RECONCILIACAO_MANUAL' ? 'border-red-200 bg-red-50 text-red-900' : 'border-blue-200 bg-blue-50 text-blue-900'}`} role="status">
+                      <div className="flex items-start gap-3">
+                        {emissionJob.status === 'RECONCILIACAO_MANUAL' ? <AlertTriangle size={20} className="mt-0.5 shrink-0" /> : <RefreshCw size={20} className={`mt-0.5 shrink-0 ${['PENDENTE', 'PROCESSANDO'].includes(emissionJob.status) ? 'animate-spin' : ''}`} />}
+                        <div className="min-w-0 flex-1">
+                          <strong>{emissionJob.status === 'RECONCILIACAO_MANUAL' ? 'Emissão aguardando conciliação administrativa' : 'Conciliação da emissão em andamento'}</strong>
+                          <p className="mt-1">{emissionJob.statusMessage || 'Aguardando a próxima consulta da DPS original.'}</p>
+                          <p className="mt-2 text-xs opacity-80">
+                            DPS {emissionJob.reservedDpsNumero || 'não informada'} · tentativa {emissionJob.attempts}/{emissionJob.maxAttempts} · job {emissionJob.id}
+                          </p>
+                          <p className="mt-2 text-xs font-semibold">A retomada faz somente consultas à DPS original: não retransmite XML, não altera a numeração e não consome novo crédito.</p>
+                          {canAdminister && emissionJob.status === 'RECONCILIACAO_MANUAL' && (
+                            <button
+                              disabled={sincronizandoRetorno}
+                              onClick={() => retomarConciliacaoEmissao(emissionJob.id)}
+                              className="mt-3 inline-flex items-center gap-2 rounded-xl border border-red-300 bg-white px-4 py-2 font-black text-red-700 hover:bg-red-100 disabled:opacity-60"
+                            >
+                              {sincronizandoRetorno ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                              {sincronizandoRetorno ? 'Agendando consultas...' : 'Retomar somente consultas'}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                   {(integridadePdf.xmlOk || podeSincronizarRetorno || podeReprocessarPdf) && (
                     <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
                       {integridadePdf.xmlOk && (

@@ -232,11 +232,34 @@ export const GET = withApiGuard(async function GET(request: Request, { params: r
     const logDps = logsSeguros.find((l) => l.action === 'EMISSAO_INICIADA' || l.action === 'DPS_GERADA');
     const logErro = logsSeguros.find((l) => l.level === 'ERRO' && l.details?.includes('<'));
     const payloadRecuperado = await montarPayloadRecuperado(venda, logsSeguros);
+    const emissionJobs = (prisma as any).emissaoJob
+      ? await (prisma as any).emissaoJob.findMany({
+          where: { vendaId: venda.id },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          select: {
+            id: true,
+            status: true,
+            statusMessage: true,
+            attempts: true,
+            maxAttempts: true,
+            ambiente: true,
+            dpsId: true,
+            reservedDpsNumero: true,
+            serieDPS: true,
+            transmissionStartedAt: true,
+            nextAttemptAt: true,
+            resultNotaId: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        })
+      : [];
 
     return NextResponse.json({
       ...venda,
       empresa: stripEmpresaSecrets(venda.empresa),
       logs: logsSeguros,
+      emissionJobs,
       payloadJson: logDps ? logDps.details : null,
       payloadRecuperado,
       xmlErro: logErro ? logErro.details : null,
