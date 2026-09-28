@@ -20,6 +20,8 @@ type CertificatePurpose = 'SIGN_XML' | 'TRANSMIT_XML' | 'CONSULT_NFSE' | 'CANCEL
 export abstract class BaseStrategy {
   abstract preparar(dados: IDadosEmissao): Promise<string>;
 
+  protected portalDoubleCheckDelayMs() { return 1200; }
+
   protected cleanString(str: string | null): string {
     return str ? str.replace(/\D/g, '') : '';
   }
@@ -109,18 +111,54 @@ export abstract class BaseStrategy {
   async conciliarDps(xmlAssinado: string, prestador: any): Promise<IResultadoEmissao> {
     try {
       const id = preparedDpsId(xmlAssinado);
-      const dpsResponse = await this.portalRequest(prestador, 'GET', '/dps/' + id);
+      const dpsCheck = await this.portalGetWithDoubleCheck(prestador, '/dps/' + id, 'DPS_LOOKUP');
+      if (!dpsCheck.response) return { sucesso: false, failureKind: 'UNKNOWN',
+        motivo: dpsCheck.diagnostic?.category === 'PORTAL_INSTABILITY'
+          ? 'Instabilidade do Portal Nacional confirmada por uma segunda verificação segura.'
+          : 'Não foi possível consultar a DPS original.',
+        erros: [{ portalDiagnostic: dpsCheck.diagnostic }] };
+      const dpsResponse = dpsCheck.response;
       const chave = dpsResponse.data?.chaveAcesso;
       if (dpsResponse.status !== 200 || !isNfseAccessKey(chave)) {
-        return { sucesso: false, failureKind: 'UNKNOWN', motivo: 'DPS ainda não conciliada no Portal Nacional.' };
+        const category = dpsResponse.status === 404 ? 'DPS_NOT_FOUND'
+          : [401, 403].includes(dpsResponse.status) ? 'PORTAL_AUTHENTICATION'
+          : dpsResponse.status === 200 ? 'INVALID_PORTAL_RESPONSE' : 'PORTAL_REQUEST_REJECTED';
+        return { sucesso: false, failureKind: 'UNKNOWN', motivo: 'DPS ainda não conciliada no Portal Nacional.',
+          erros: [{ portalDiagnostic: { stage: 'DPS_LOOKUP', category, httpStatus: dpsResponse.status, doubleChecked: false } }] };
       }
-      const response = await this.portalRequest(prestador, 'GET', '/nfse/' + chave);
-      if (response.status !== 200) return { sucesso: false, failureKind: 'UNKNOWN', motivo: 'XML oficial ainda não recuperado.' };
+      const nfseCheck = await this.portalGetWithDoubleCheck(prestador, '/nfse/' + chave, 'NFSE_DOWNLOAD');
+      if (!nfseCheck.response) return { sucesso: false, failureKind: 'UNKNOWN',
+        motivo: nfseCheck.diagnostic?.category === 'PORTAL_INSTABILITY'
+          ? 'Instabilidade do Portal Nacional confirmada por uma segunda verificação segura.'
+          : 'Não foi possível recuperar o XML oficial.',
+        erros: [{ portalDiagnostic: nfseCheck.diagnostic }] };
+      const response = nfseCheck.response;
+      if (response.status !== 200) return { sucesso: false, failureKind: 'UNKNOWN', motivo: 'XML oficial ainda não recuperado.',
+        erros: [{ portalDiagnostic: { stage: 'NFSE_DOWNLOAD', category: [401, 403].includes(response.status) ? 'PORTAL_AUTHENTICATION' : 'PORTAL_REQUEST_REJECTED', httpStatus: response.status, doubleChecked: false } }] };
       const notaGov = await validateAuthorizedNfse(response.data?.nfseXmlGZipB64 || response.data?.xmlProcessado || response.data, xmlAssinado, prestador.ambiente, chave);
       return { sucesso: true, notaGov };
     } catch {
       return { sucesso: false, failureKind: 'UNKNOWN', motivo: 'Não foi possível confirmar a DPS original. Não reenvie a venda.' };
     }
+  }
+
+  private async portalGetWithDoubleCheck(empresa: any, path: string, stage: 'DPS_LOOKUP' | 'NFSE_DOWNLOAD') {
+    let firstDiagnostic: Record<string, unknown> | null = null;
+    for (let check = 1; check <= 2; check += 1) {
+      try {
+        const response = await this.portalRequest(empresa, 'GET', path);
+        const transient = response.status === 408 || response.status === 429 || response.status >= 500;
+        if (!transient) return { response, diagnostic: null };
+        firstDiagnostic = { stage, category: 'PORTAL_INSTABILITY', httpStatus: response.status, doubleChecked: false };
+      } catch (error: any) {
+        const code = String(error?.code || '').toUpperCase().slice(0, 40);
+        const authentication = [400, 401, 403].includes(Number(error?.status)) || /CERT|TLS|SSL/.test(code);
+        if (authentication) return { response: null, diagnostic: { stage, category: 'PORTAL_AUTHENTICATION', transportCode: code, doubleChecked: false } };
+        firstDiagnostic = { stage, category: 'PORTAL_INSTABILITY', transportCode: code || 'NETWORK_ERROR', doubleChecked: false };
+      }
+      if (check === 1) await new Promise((resolve) => setTimeout(resolve, this.portalDoubleCheckDelayMs()));
+    }
+    return { response: null, diagnostic: { ...firstDiagnostic, doubleChecked: true, checks: 2 } };
   }
 
   private async cancellationEvents(chave: string, empresa: any) {

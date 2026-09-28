@@ -552,8 +552,8 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
                                 <td className="p-4 text-right">
                                     {emConciliacao ? (
                                         <button onClick={() => handlePedirAjuda(venda.id, venda.emissaoMensagem)} className="rounded-lg border border-amber-300 px-3 py-2 text-xs font-bold text-amber-900">Solicitar conciliação</button>
-                                    ) : venda.status === 'PROCESSANDO' ? (
-                                        <button onClick={() => router.push('/emitir')} className="rounded-lg border px-3 py-2 text-xs font-bold">Acompanhar</button>
+                                    ) : venda.status === 'PROCESSANDO' && venda.emissaoJobId ? (
+                                        <button onClick={() => router.push(`/cliente/emissoes/${venda.emissaoJobId}`)} className="rounded-lg border px-3 py-2 text-xs font-bold">Acompanhar</button>
                                     ) : venda.status === 'ERRO_EMISSAO' ? (
                                         <div className="flex justify-end gap-2">
                                             <button onClick={() => handlePedirAjuda(venda.id, venda.motivoErro)} className="text-xs font-bold text-orange-600 bg-orange-50 hover:bg-orange-100 border border-orange-200 px-3 py-1.5 rounded-lg inline-flex items-center gap-1 transition">

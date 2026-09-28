@@ -8,6 +8,7 @@ import { resumeFiscalNoteReconciliation } from '@/app/services/fiscalNoteService
 import { consultationQueueHealth } from '@/app/services/consultationQueueHealth';
 import { documentQueueHealth } from '@/app/services/documentQueueHealth';
 import { emissionQueueHealth } from '@/app/services/emissionQueueHealth';
+import { portalHealth } from '@/app/services/portalHealthService';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,17 +16,18 @@ export const GET = withApiGuard(async function GET(request: Request) {
   const user = await getAuthenticatedUser(request);
   if (!user) return unauthorized();
   if (!isSupportRole(user.role)) return forbidden();
-  const [emissionHealth, documents, noteOperations, consultations, documentHealth] = await Promise.all([
+  const [emissionHealth, documents, noteOperations, consultations, documentHealth, fiscalPortal] = await Promise.all([
     emissionQueueHealth(),
     prisma.emissionDocumentTask.groupBy({ by: ['status'], _count: { _all: true } }),
     prisma.fiscalNoteOperation.groupBy({ by: ['tipo', 'status'], _count: { _all: true } }),
     consultationQueueHealth(),
     documentQueueHealth(),
+    portalHealth(),
   ]);
   return NextResponse.json({ workerOnline: emissionHealth.workerOnline,
     productionWorkerOnline: emissionHealth.productionWorkerOnline,
     lastHeartbeatAt: emissionHealth.lastHeartbeatAt, counts: Object.entries(emissionHealth.counts).map(([status, count]) => ({ status, _count: { _all: count } })),
-    emissionHealth, documents, noteOperations, consultations, documentHealth });
+    emissionHealth, documents, noteOperations, consultations, documentHealth, fiscalPortal });
 });
 
 // No HTTP-triggered fiscal processing and no shared cron secret.

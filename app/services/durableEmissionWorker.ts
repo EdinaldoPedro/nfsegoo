@@ -70,9 +70,13 @@ export async function finishEmissionFailure(job: LeasedEmission, definitive: boo
     } });
     if (next.releaseCredit) await releaseEmissionCredit(current.creditReservationId, tx);
     if (current.vendaId && next.status === 'ERRO_FINAL') await tx.venda.update({ where: { id: current.vendaId }, data: { status: 'ERRO_EMISSAO' } });
+    const portalDiagnostic = Array.isArray(errors)
+      ? errors.find((item: any) => item?.portalDiagnostic)?.portalDiagnostic || null
+      : null;
     await tx.systemLog.create({ data: { level: next.status === 'ERRO_FINAL' ? 'ERRO' : 'ALERTA', action: 'EMISSION_' + next.status,
       message: statusMessage, empresaId: current.empresaId, vendaId: current.vendaId, userId: current.actorUserId,
-      details: JSON.stringify({ jobId: job.id, attempts: current.attempts, transmitted: !!current.transmissionStartedAt }) } });
+      details: JSON.stringify({ jobId: job.id, attempts: current.attempts, transmitted: !!current.transmissionStartedAt,
+        reason: message, portalDiagnostic }) } });
     await notifyInTransaction(tx, current, next.status, statusMessage);
     return next;
   });

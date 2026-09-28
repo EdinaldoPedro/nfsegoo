@@ -24,6 +24,8 @@ type FiltroStatus = 'todos' | 'falhas' | 'processando' | 'saudaveis' | 'pendenci
 type EmissionHealth = { workerOnline: boolean; productionWorkerOnline: boolean; lastHeartbeatAt: string | null;
   active: number; productionActive: number; waitingTooLong: number; retryOverdue: number; processingExpired: number;
   manual: number; needsAttention: boolean };
+type FiscalPortalHealth = { status: 'OPERACIONAL' | 'OSCILANDO' | 'INDISPONIVEL' | 'RECUPERANDO'; confirmedFailures: number;
+  affectedCompanies: number; lastConfirmedFailureAt: string | null; lastAuthorizationAt: string | null };
 
 function normalizar(value: string) {
   return String(value || '')
@@ -84,6 +86,7 @@ export default function ListaEmissores() {
   const [paginaAtual, setPaginaAtual] = useState(1);
   const [emissionHealth, setEmissionHealth] = useState<EmissionHealth | null>(null);
   const [healthError, setHealthError] = useState(false);
+  const [fiscalPortal, setFiscalPortal] = useState<FiscalPortalHealth | null>(null);
   const itensPorPagina = 10;
 
   useEffect(() => {
@@ -115,7 +118,7 @@ export default function ListaEmissores() {
         const response = await fetch('/api/admin/emissoes/retomar', { cache: 'no-store' });
         if (!response.ok) throw new Error('Saúde do processador indisponível.');
         const data = await response.json();
-        if (mounted) { setEmissionHealth(data.emissionHealth); setHealthError(false); }
+        if (mounted) { setEmissionHealth(data.emissionHealth); setFiscalPortal(data.fiscalPortal); setHealthError(false); }
       } catch { if (mounted) setHealthError(true); }
     };
     void refresh();
@@ -183,6 +186,13 @@ export default function ListaEmissores() {
 
   return (
     <div className="space-y-6">
+      {fiscalPortal && fiscalPortal.status !== 'OPERACIONAL' && (
+        <section role="status" className={`rounded-2xl border p-5 ${fiscalPortal.status === 'INDISPONIVEL' ? 'border-red-300 bg-red-50 text-red-950' : 'border-amber-300 bg-amber-50 text-amber-950'}`}>
+          <h2 className="font-black">Portal Nacional: {fiscalPortal.status === 'INDISPONIVEL' ? 'indisponibilidade confirmada' : fiscalPortal.status === 'RECUPERANDO' ? 'em recuperação' : 'oscilação confirmada'}</h2>
+          <p className="mt-1 text-sm">Diagnóstico baseado em consultas fiscais GET verificadas duas vezes: {fiscalPortal.confirmedFailures} falha(s), envolvendo {fiscalPortal.affectedCompanies} empresa(s) nos últimos 5 minutos.</p>
+          <p className="mt-1 text-xs">Nenhuma DPS é retransmitida por este monitoramento. Última falha confirmada: {formatarData(fiscalPortal.lastConfirmedFailureAt || undefined)}.</p>
+        </section>
+      )}
       {(healthError || emissionHealth?.needsAttention) && <section role="alert" className="rounded-2xl border border-amber-300 bg-amber-50 p-5 text-amber-950">
         <h2 className="font-black">Fila de emissões exige acompanhamento</h2>
         <p className="mt-1 text-sm">{healthError ? 'Não foi possível consultar a saúde do processador. Verifique o serviço e o banco.'

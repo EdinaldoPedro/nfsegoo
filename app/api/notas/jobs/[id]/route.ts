@@ -35,6 +35,9 @@ export const GET = withApiGuard(async function GET(request: Request, { params: r
   if (!allowed) return forbidden();
 
   const erro = parseLastError(job.lastError);
+  const portalDiagnostic = Array.isArray(erro?.details)
+    ? erro.details.find((item: any) => item?.portalDiagnostic)?.portalDiagnostic || null
+    : null;
   const active = ['PENDENTE', 'PROCESSANDO', 'ERRO_TEMPORARIO'].includes(job.status);
   const processorOffline = active && Date.now() - job.createdAt.getTime() > 60_000
     && !await prisma.workerHeartbeat.findFirst({ where: { id: { startsWith: 'emission-' },
@@ -58,6 +61,7 @@ export const GET = withApiGuard(async function GET(request: Request, { params: r
     draftEligible: erro?.draftEligible || false,
     draftReasonType: erro?.draftReasonType || null,
     details: erro?.details || null,
+    portalDiagnostic,
     error: erro?.motivo || erro?.error || null,
   });
 });

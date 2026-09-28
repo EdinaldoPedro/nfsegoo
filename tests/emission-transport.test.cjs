@@ -9,6 +9,7 @@ const dps = makeDps(); const id = preparedDpsId(dps);
 const xml = makeNfse(dps, { numero: '25' });
 class FixtureStrategy extends BaseStrategy {
   extrairCredenciais() { return { cert: 'synthetic-not-for-TLS', key: 'synthetic-not-for-TLS', senha: 'must-not-be-sent' }; }
+  portalDoubleCheckDelayMs() { return 0; }
 }
 const company = { ambiente: 'PRODUCAO' };
 
@@ -57,5 +58,31 @@ test('transporte: conciliacao usa somente GET, valida XML original e nunca trans
     axios.request = async (config) => { assert.equal(config.method, 'GET'); return { status: 404 }; };
     const missing = await new FixtureStrategy().conciliarDps(dps, company);
     assert.equal(missing.sucesso, false); assert.equal(missing.failureKind, 'UNKNOWN');
+  } finally { axios.request = original; }
+});
+test('transporte: somente confirma instabilidade apos duas falhas GET seguras', async () => {
+  const original = axios.request; const calls = [];
+  axios.request = async (config) => { calls.push(config); return { status: 503, data: {} }; };
+  try {
+    const result = await new FixtureStrategy().conciliarDps(dps, company);
+    assert.equal(result.sucesso, false);
+    assert.equal(result.failureKind, 'UNKNOWN');
+    assert.equal(calls.length, 2);
+    assert.ok(calls.every((call) => call.method === 'GET'));
+    assert.deepEqual(result.erros[0].portalDiagnostic, {
+      stage: 'DPS_LOOKUP', category: 'PORTAL_INSTABILITY', httpStatus: 503,
+      doubleChecked: true, checks: 2,
+    });
+  } finally { axios.request = original; }
+});
+test('transporte: falha de certificado nao e anunciada como instabilidade do Portal', async () => {
+  const original = axios.request; let calls = 0;
+  axios.request = async () => { calls++; throw Object.assign(new Error('certificado'), { status: 400 }); };
+  try {
+    const result = await new FixtureStrategy().conciliarDps(dps, company);
+    assert.equal(result.sucesso, false);
+    assert.equal(calls, 1);
+    assert.equal(result.erros[0].portalDiagnostic.category, 'PORTAL_AUTHENTICATION');
+    assert.equal(result.erros[0].portalDiagnostic.doubleChecked, false);
   } finally { axios.request = original; }
 });

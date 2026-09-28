@@ -144,8 +144,8 @@ export const GET = withApiGuard(async function GET(request: Request) {
             prisma.venda.count({ where: whereClause })
         ]);
 
-        const jobs = vendas.length ? await prisma.$queryRaw<Array<{ vendaId: string; status: string; statusMessage: string | null; ambiente: string }>>`
-            SELECT DISTINCT ON ("vendaId") "vendaId", "status", "statusMessage", "ambiente" FROM "EmissaoJob"
+        const jobs = vendas.length ? await prisma.$queryRaw<Array<{ id: string; vendaId: string; status: string; statusMessage: string | null; ambiente: string }>>`
+            SELECT DISTINCT ON ("vendaId") "id", "vendaId", "status", "statusMessage", "ambiente" FROM "EmissaoJob"
             WHERE "empresaId" = ${empresaIdAlvo} AND "vendaId" IN (${Prisma.join(vendas.map(v => v.id))})
             ORDER BY "vendaId", "createdAt" DESC, "id" DESC
         ` : [];
@@ -220,6 +220,7 @@ export const GET = withApiGuard(async function GET(request: Request) {
 
             return {
                 ...sale,
+                emissaoJobId: latestJob.get(v.id)?.id || null,
                 emissaoStatus: latestJob.get(v.id)?.status || null,
                 emissaoAmbiente: latestJob.get(v.id)?.ambiente || null,
                 emissaoMensagem: latestJob.get(v.id)?.statusMessage || null,
