@@ -4,7 +4,6 @@ import { prisma } from '@/app/utils/prisma';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 import { validateSelectableNbs } from '@/app/utils/nbs';
 import { canReadFiscalCatalog, canWriteFiscalCatalog } from '@/app/utils/fiscal-admin-access';
-import { requireAdminReauthentication } from '@/app/utils/admin-security';
 import {
   assertFiscalRuleVersion, changedFiscalRuleFields, FiscalRuleGovernanceError, fiscalRuleSnapshot,
   parseFiscalRuleGovernance, validateNormativeSource,
@@ -173,11 +172,6 @@ export const POST = withApiGuard(async function POST(request: Request) {
   try {
     const body = await request.json();
     const governance = parseFiscalRuleGovernance(body, false);
-    const reauthenticationError = await requireAdminReauthentication({
-      actorId: user.id, password: governance.adminPassword, justification: governance.justification,
-      action: 'MUNICIPAL_RULE_CREATE',
-    });
-    if (reauthenticationError) return reauthenticationError;
     body.fonteNormativa = validateNormativeSource(body.fonteNormativa);
     const validationError = validateFiscalRuleBody(body);
     if (validationError) return NextResponse.json({ error: validationError }, { status: 400 });
@@ -215,7 +209,7 @@ export const POST = withApiGuard(async function POST(request: Request) {
       const after = fiscalRuleSnapshot(criado);
       await tx.systemLog.create({ data: {
         level: 'ALERTA', module: 'REGRAS_FISCAIS', action: 'MUNICIPAL_RULE_CREATED', userId: user.id,
-        message: 'Regra municipal criada com reautenticação e justificativa.',
+        message: 'Regra municipal criada com justificativa e histórico.',
         details: JSON.stringify({ ruleType: 'MUNICIPAL', ruleId: criado.id, cnae: criado.cnae,
           codigoIbge: criado.codigoIbge, justification: governance.justification,
           changedFields: changedFiscalRuleFields(null, after), before: null, after }),
@@ -239,11 +233,6 @@ export const PUT = withApiGuard(async function PUT(request: Request) {
   try {
     const body = await request.json();
     const governance = parseFiscalRuleGovernance(body, true);
-    const reauthenticationError = await requireAdminReauthentication({
-      actorId: user.id, password: governance.adminPassword, justification: governance.justification,
-      action: 'MUNICIPAL_RULE_UPDATE',
-    });
-    if (reauthenticationError) return reauthenticationError;
     body.fonteNormativa = validateNormativeSource(body.fonteNormativa);
     const validationError = validateFiscalRuleBody(body);
     if (validationError) return NextResponse.json({ error: validationError }, { status: 400 });
@@ -281,7 +270,7 @@ export const PUT = withApiGuard(async function PUT(request: Request) {
       const after = fiscalRuleSnapshot(salvo);
       await tx.systemLog.create({ data: {
         level: 'ALERTA', module: 'REGRAS_FISCAIS', action: 'MUNICIPAL_RULE_UPDATED', userId: user.id,
-        message: 'Regra municipal atualizada com reautenticação e histórico.',
+        message: 'Regra municipal atualizada com justificativa e histórico.',
         details: JSON.stringify({ ruleType: 'MUNICIPAL', ruleId: salvo.id, cnae: salvo.cnae,
           codigoIbge: salvo.codigoIbge, justification: governance.justification,
           changedFields: changedFiscalRuleFields(before, after), before, after }),
@@ -304,11 +293,6 @@ export const DELETE = withApiGuard(async function DELETE(request: Request) {
     try {
       const body = await request.json();
       const governance = parseFiscalRuleGovernance(body, true);
-      const reauthenticationError = await requireAdminReauthentication({
-        actorId: user.id, password: governance.adminPassword, justification: governance.justification,
-        action: 'MUNICIPAL_RULE_SUSPEND',
-      });
-      if (reauthenticationError) return reauthenticationError;
       const id = typeof body.id === 'string' ? body.id : '';
       if (!id) return NextResponse.json({ error: 'ID required' }, { status: 400 });
       const suspensa = await prisma.$transaction(async (tx) => {

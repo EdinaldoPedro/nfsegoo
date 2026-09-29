@@ -73,10 +73,14 @@ export async function finishEmissionFailure(job: LeasedEmission, definitive: boo
     const portalDiagnostic = Array.isArray(errors)
       ? errors.find((item: any) => item?.portalDiagnostic)?.portalDiagnostic || null
       : null;
+    const portalErrors = Array.isArray(errors) ? errors.filter((item: any) => item && !item.portalDiagnostic).slice(0, 10).map((item: any) => ({
+      codigo: String(item.codigo || '').slice(0, 20),
+      mensagem: String(item.mensagem || '').slice(0, 500),
+    })) : [];
     await tx.systemLog.create({ data: { level: next.status === 'ERRO_FINAL' ? 'ERRO' : 'ALERTA', action: 'EMISSION_' + next.status,
       message: statusMessage, empresaId: current.empresaId, vendaId: current.vendaId, userId: current.actorUserId,
       details: JSON.stringify({ jobId: job.id, attempts: current.attempts, transmitted: !!current.transmissionStartedAt,
-        reason: message, portalDiagnostic }) } });
+        reason: message, portalDiagnostic, portalErrors }) } });
     await notifyInTransaction(tx, current, next.status, statusMessage);
     return next;
   });

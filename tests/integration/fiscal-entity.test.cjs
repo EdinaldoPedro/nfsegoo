@@ -32,8 +32,7 @@ test('identidade fiscal PostgreSQL: CNPJ global, relações privadas e históric
     assert.notEqual(first.email, second.email); assert.notEqual(first.inscricaoMunicipal, second.inscricaoMunicipal);
     assert.equal(await findTenantCustomer(customers[0].id, companies[1].id), null);
 
-    const correction = { id: entity.id, expectedVersion: entity.version, action: 'CORRECT', data: { codigoIbge: '3550309', cidade: 'São Paulo corrigida' },
-      adminPassword: password, justification: 'Correção sintética global autorizada em QA' };
+    const correction = { id: entity.id, expectedVersion: entity.version, action: 'CORRECT', data: { codigoIbge: '3550309', cidade: 'São Paulo corrigida' } };
     const saved = await mutateAdminFiscalEntity(admin.id, correction);
     const correctedFirst = await findTenantCustomer(customers[0].id, companies[0].id); const correctedSecond = await findTenantCustomer(customers[1].id, companies[1].id);
     assert.equal(correctedFirst.codigoIbge, '3550309'); assert.equal(correctedSecond.codigoIbge, '3550309');

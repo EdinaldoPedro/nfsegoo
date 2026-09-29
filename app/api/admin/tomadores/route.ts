@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { withApiGuard } from '@/app/utils/api-route';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
-import { requireAdminReauthentication } from '@/app/utils/admin-security';
 import { consultarEntidadeFiscalPublica } from '@/app/services/fiscalEntityService';
 import { AdminFiscalEntityError, listAdminFiscalEntities, mutateAdminFiscalEntity, parseAdminFiscalEntityMutation } from '@/app/services/adminFiscalEntityService';
 import { prisma } from '@/app/utils/prisma';
@@ -19,8 +18,8 @@ export const GET = withApiGuard(async function GET(request: Request) {
 });
 
 // Public-source lookup is a read-only preview. Authentication, authorization
-// and throttling protect the external provider; reauthentication is reserved
-// for the later operation that commits a global canonical identity change.
+// and throttling protect the external provider. Applying a reviewed preview
+// uses the authenticated administrator, optimistic version and audit trail.
 export const POST = withApiGuard(async function POST(request: Request) {
   const user = await getAuthenticatedUser(request);
   if (!user) return unauthorized();
@@ -60,9 +59,6 @@ export const PUT = withApiGuard(async function PUT(request: Request) {
   try {
     const body = await request.json();
     const parsed = parseAdminFiscalEntityMutation(body);
-    const denied = await requireAdminReauthentication({ actorId: user.id, password: body.adminPassword,
-      justification: body.justification, action: `ENTIDADE_FISCAL_${parsed.action}` });
-    if (denied) return denied;
     let registry = null;
     if (parsed.action === 'REFRESH') {
       const entity = await prisma.entidadeFiscal.findUnique({ where: { id: parsed.id }, select: { documento: true } });

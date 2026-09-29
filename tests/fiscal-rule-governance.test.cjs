@@ -10,11 +10,11 @@ const {
   validateNormativeSource,
 } = require('../app/utils/fiscal-rule-governance.ts');
 
-test('governanca fiscal exige senha, justificativa e versao nas alteracoes', () => {
-  assert.throws(() => parseFiscalRuleGovernance({}, true), /senha administrativa/i);
-  assert.throws(() => parseFiscalRuleGovernance({ adminPassword: 'segredo', justification: 'curta' }, true), /justificativa/i);
-  assert.throws(() => parseFiscalRuleGovernance({ adminPassword: 'segredo', justification: 'Ajuste fiscal aprovado' }, true), /versão/i);
-  const parsed = parseFiscalRuleGovernance({ adminPassword: 'segredo', justification: 'Ajuste fiscal aprovado', expectedUpdatedAt: '2026-09-24T12:00:00.000Z' }, true);
+test('governanca fiscal exige justificativa de 15 caracteres e versao nas alteracoes', () => {
+  assert.throws(() => parseFiscalRuleGovernance({}, true), /justificativa/i);
+  assert.throws(() => parseFiscalRuleGovernance({ justification: 'Ajuste fiscal' }, true), /justificativa/i);
+  assert.throws(() => parseFiscalRuleGovernance({ justification: 'Ajuste fiscal aprovado' }, true), /versão/i);
+  const parsed = parseFiscalRuleGovernance({ justification: 'Ajuste fiscal aprovado', expectedUpdatedAt: '2026-09-24T12:00:00.000Z' }, true);
   assert.equal(parsed.justification, 'Ajuste fiscal aprovado');
   assert.equal(parsed.expectedUpdatedAt.toISOString(), '2026-09-24T12:00:00.000Z');
 });
@@ -44,11 +44,18 @@ test('rotas fiscais registram antes/depois e suspensao municipal nao apaga histo
   const root = path.resolve(__dirname, '..');
   const globalRoute = fs.readFileSync(path.join(root, 'app/api/admin/cnaes/route.ts'), 'utf8');
   const municipalRoute = fs.readFileSync(path.join(root, 'app/api/admin/tributacao-municipal/route.ts'), 'utf8');
+  const globalPage = fs.readFileSync(path.join(root, 'app/admin/cnaes/page.tsx'), 'utf8');
+  const municipalPage = fs.readFileSync(path.join(root, 'app/admin/tributacao-municipal/page.tsx'), 'utf8');
   for (const source of [globalRoute, municipalRoute]) {
-    assert.match(source, /requireAdminReauthentication\(/);
+    assert.doesNotMatch(source, /requireAdminReauthentication\(/);
     assert.match(source, /changedFiscalRuleFields\(before, after\)/);
     assert.match(source, /before, after/);
     assert.match(source, /justification: governance\.justification/);
+  }
+  for (const source of [globalPage, municipalPage]) {
+    assert.doesNotMatch(source, /adminPassword|senha administrativa/i);
+    assert.match(source, /mínimo 15 caracteres/);
+    assert.match(source, /dialog\.showConfirm\(/);
   }
   assert.doesNotMatch(municipalRoute, /tributacaoMunicipal\.delete\(/);
   assert.match(municipalRoute, /MUNICIPAL_RULE_SUSPENDED/);

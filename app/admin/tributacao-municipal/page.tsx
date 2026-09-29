@@ -16,7 +16,7 @@ const emptyForm = {
   retemIr: '', aliquotaIr: '', retemInss: '', aliquotaInss: '', calculaPisCofinsDevido: '', aliquotaPisDevido: '', aliquotaCofinsDevido: '',
   habilitaIbsCbs: '', inicioObrigatoriedadeIbsCbs: '', codigoIndicadorOperacao: '', cstIbsCbs: '', classeTribIbsCbs: '', finNfsePadrao: '0', indFinalPadrao: '0', indDestPadrao: '0',
   versaoLayout: '1.01', fonteNormativa: '', observacoesFiscal: '',
-  justification: '', adminPassword: '',
+  justification: '',
 };
 
 const toDateInput = (value: any) => value ? new Date(value).toISOString().slice(0, 10) : '';
@@ -78,8 +78,9 @@ export default function TributacaoMunicipalPage() {
   const handleSave = async () => {
     if (!form.cnae || !form.codigoIbge || (form.exigeCodigoTributacaoMunicipal && !form.codigoTributacaoMunicipal)) return dialog.showAlert('Preencha os campos obrigatórios.');
     if (!form.fonteNormativa?.trim()) return dialog.showAlert({ type: 'warning', description: 'Informe a fonte normativa da regra.' });
-    if (!form.justification?.trim() || form.justification.trim().length < 10) return dialog.showAlert({ type: 'warning', description: 'Informe uma justificativa com pelo menos 10 caracteres.' });
-    if (!form.adminPassword) return dialog.showAlert({ type: 'warning', description: 'Informe sua senha administrativa atual.' });
+    if (!form.justification?.trim() || form.justification.trim().length < 15) return dialog.showAlert({ type: 'warning', description: 'Informe uma justificativa com pelo menos 15 caracteres.' });
+    const confirmed = await dialog.showConfirm({ title: editing ? 'Salvar alterações fiscais?' : 'Criar regra municipal?', description: 'A operação ficará registrada no histórico com seu usuário, justificativa e os dados anteriores e posteriores.', type: 'warning', confirmText: editing ? 'Salvar alterações' : 'Criar regra' });
+    if (!confirmed) return;
     const token = localStorage.getItem('token');
     const payload = { ...form, expectedUpdatedAt: editing?.updatedAt, aliquotaIss: form.aliquotaIss ? parseFloat(form.aliquotaIss) : null };
     const res = await fetch('/api/admin/tributacao-municipal', {
@@ -100,12 +101,10 @@ export default function TributacaoMunicipalPage() {
   const handleDelete = async (item: any) => {
     const confirmed = await dialog.showConfirm({ title: 'Suspender regra?', description: 'A regra deixará de ser usada em novas emissões, mas o histórico e as notas anteriores serão preservados.', type: 'warning', confirmText: 'Suspender regra' });
     if (!confirmed) return;
-    const justification = await dialog.showPrompt({ title: 'Justificativa da suspensão', description: 'Informe o motivo com pelo menos 10 caracteres.' });
-    if (!justification || justification.trim().length < 10) return dialog.showAlert({ type: 'warning', description: 'A suspensão não foi realizada. Informe uma justificativa válida.' });
-    const adminPassword = await dialog.showPrompt({ title: 'Confirmar identidade', description: 'Digite sua senha administrativa atual.', inputType: 'password' });
-    if (!adminPassword) return;
+    const justification = await dialog.showPrompt({ title: 'Justificativa da suspensão', description: 'Informe o motivo com pelo menos 15 caracteres.' });
+    if (!justification || justification.trim().length < 15) return dialog.showAlert({ type: 'warning', description: 'A suspensão não foi realizada. Informe uma justificativa com pelo menos 15 caracteres.' });
     const token = localStorage.getItem('token');
-    const response = await fetch('/api/admin/tributacao-municipal', { method: 'DELETE', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ id: item.id, expectedUpdatedAt: item.updatedAt, justification, adminPassword }) });
+    const response = await fetch('/api/admin/tributacao-municipal', { method: 'DELETE', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ id: item.id, expectedUpdatedAt: item.updatedAt, justification }) });
     const data = await response.json().catch(() => null);
     if (!response.ok) return dialog.showAlert({ type: 'danger', description: data?.error || 'Erro ao suspender regra.' });
     carregarRegras(page, termoBusca);
@@ -166,7 +165,7 @@ export default function TributacaoMunicipalPage() {
                 <td className="p-4"><span className="rounded-full border border-orange-200 bg-orange-100 px-3 py-1 text-xs font-black text-orange-800">{item.codigoTributacaoMunicipal}</span></td>
                 <td className="p-4 text-center">{item.aliquotaIss ? <span className="rounded-full border border-emerald-200 bg-emerald-100 px-3 py-1 text-xs font-black text-emerald-800">{Number(item.aliquotaIss).toFixed(2)}%</span> : <span className="text-slate-300">-</span>}</td>
                 <td className="p-4 text-center">{item.exigeNbs ? <span className="rounded-full bg-purple-100 px-3 py-1 text-xs font-black text-purple-700">Sim</span> : <span className="text-slate-300">-</span>}</td>
-                <td className="p-4"><div className="flex justify-end gap-2"><button onClick={() => { setEditing(item); setForm({ ...emptyForm, ...item, justification: '', adminPassword: '', aliquotaIss: item.aliquotaIss ? String(item.aliquotaIss) : '', inicioVigencia: toDateInput(item.inicioVigencia), fimVigencia: toDateInput(item.fimVigencia), inicioObrigatoriedadeIbsCbs: toDateInput(item.inicioObrigatoriedadeIbsCbs) }); setModalOpen(true); }} className="rounded-xl p-2 text-blue-600 hover:bg-blue-50"><Edit size={18} /></button>{item.ativo && <button onClick={() => handleDelete(item)} className="rounded-xl p-2 text-amber-600 hover:bg-amber-50" title="Suspender regra"><Trash2 size={18} /></button>}</div></td>
+                <td className="p-4"><div className="flex justify-end gap-2"><button onClick={() => { setEditing(item); setForm({ ...emptyForm, ...item, justification: '', aliquotaIss: item.aliquotaIss ? String(item.aliquotaIss) : '', inicioVigencia: toDateInput(item.inicioVigencia), fimVigencia: toDateInput(item.fimVigencia), inicioObrigatoriedadeIbsCbs: toDateInput(item.inicioObrigatoriedadeIbsCbs) }); setModalOpen(true); }} className="rounded-xl p-2 text-blue-600 hover:bg-blue-50"><Edit size={18} /></button>{item.ativo && <button onClick={() => handleDelete(item)} className="rounded-xl p-2 text-amber-600 hover:bg-amber-50" title="Suspender regra"><Trash2 size={18} /></button>}</div></td>
               </tr>
             ))}
           </tbody>
@@ -247,7 +246,7 @@ export default function TributacaoMunicipalPage() {
               <section className="rounded-2xl border border-slate-300 bg-slate-50 p-4">
                 <h4 className="text-sm font-black uppercase text-slate-700">Confirmação e histórico</h4>
                 <p className="mt-1 text-xs text-slate-500">A operação ficará registrada com responsável, justificativa e fotografias anterior e posterior.</p>
-                <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2"><div><label className="mb-1 block text-xs font-bold text-slate-600">Justificativa</label><textarea className={`${inputBase} resize-none`} rows={3} value={form.justification || ''} onChange={e => setForm({ ...form, justification: e.target.value })} /></div><div><label className="mb-1 block text-xs font-bold text-slate-600">Sua senha administrativa</label><input type="password" autoComplete="current-password" className={inputBase} value={form.adminPassword || ''} onChange={e => setForm({ ...form, adminPassword: e.target.value })} /></div></div>
+                <div className="mt-3"><label className="mb-1 block text-xs font-bold text-slate-600">Justificativa (mínimo 15 caracteres)</label><textarea className={`${inputBase} resize-none`} rows={3} minLength={15} maxLength={2000} value={form.justification || ''} onChange={e => setForm({ ...form, justification: e.target.value })} /></div>
               </section>
             </div>
             <div className="flex justify-end gap-2 border-t bg-slate-50 p-5"><button onClick={() => setModalOpen(false)} className="rounded-xl px-5 py-3 text-sm font-bold text-slate-600 hover:bg-white">Cancelar</button><button onClick={handleSave} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-6 py-3 text-sm font-bold text-white hover:bg-blue-700"><Save size={18} /> Salvar</button></div>

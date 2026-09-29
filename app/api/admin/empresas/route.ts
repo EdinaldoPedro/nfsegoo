@@ -52,9 +52,6 @@ async function mutate(request: Request) {
   const user = await getAuthenticatedUser(request);
   if (!user) return unauthorized();
   if (!['MASTER', 'ADMIN'].includes(user.role)) return forbidden();
-  if (!(await checkRateLimit(`admin_reauth_${user.id}`, 10, 5 * 60 * 1000))) {
-    return NextResponse.json({ error: 'Muitas verificações administrativas. Aguarde 5 minutos.' }, { status: 429 });
-  }
   try {
     const body = await request.json();
     // DELETE requires the same explicit, versioned body. Old query-string
@@ -62,9 +59,16 @@ async function mutate(request: Request) {
     if (request.method === 'DELETE' && body?.action !== 'ARCHIVE') {
       return NextResponse.json({ error: 'Para arquivar, confirme cadastro, versão, senha e justificativa.' }, { status: 400 });
     }
+    const parsed = parseAdminCompanyMutation(body);
+    if (!(await checkRateLimit(`admin_company_mutation_${user.id}`, 30, 60_000))) {
+      return NextResponse.json({ error: 'Muitas atualizações administrativas. Aguarde um minuto.' }, { status: 429 });
+    }
+    if (['ARCHIVE', 'RESTORE'].includes(parsed.action)
+      && !(await checkRateLimit(`admin_reauth_${user.id}`, 10, 5 * 60 * 1000))) {
+      return NextResponse.json({ error: 'Muitas verificações administrativas. Aguarde 5 minutos.' }, { status: 429 });
+    }
     let registry = null;
     if (body?.action === 'REFRESH') {
-      const parsed = parseAdminCompanyMutation(body);
       const company = await prisma.empresa.findUnique({ where: { id: parsed.id }, select: { documento: true } });
       if (!company) throw new AdminCompanyError('Prestador não encontrado.', 404);
       registry = await consultarEntidadeFiscalPublica(company.documento);

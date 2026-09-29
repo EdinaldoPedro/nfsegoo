@@ -622,6 +622,38 @@ export default function DetalheVendaCompleto() {
     }
   };
 
+  const retransmitirMesmaDps = async (jobId: string, dpsNumber: number) => {
+    const confirmationText = `RETRANSMITIR DPS ${dpsNumber}`;
+    const confirmation = await dialog.showPrompt({
+      type: 'danger',
+      title: 'Recuperação fiscal excepcional',
+      description: `O sistema consultará o Portal duas vezes. Somente se a DPS continuar ausente, o mesmo XML assinado e o mesmo número serão enviados uma única vez. Digite ${confirmationText} para continuar.`,
+      validationText: confirmationText,
+      placeholder: confirmationText,
+    });
+    if (confirmation !== confirmationText) return;
+    setSincronizandoRetorno(true);
+    try {
+      const res = await fetch('/api/admin/emissoes/retransmitir-mesma-dps', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId, confirmation }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'A recuperação fiscal não foi autorizada.');
+      await dialog.showAlert({
+        type: data.retransmitted ? 'warning' : 'info',
+        title: data.retransmitted ? 'Mesma DPS liberada uma única vez' : 'DPS localizada',
+        description: data.message,
+      });
+    } catch (error: any) {
+      await dialog.showAlert({ type: 'warning', title: 'Nenhuma retransmissão realizada', description: error.message });
+    } finally {
+      setSincronizandoRetorno(false);
+      fetchVenda(true);
+    }
+  };
+
   const handleDelete = async () => {
     const confirmacao = await dialog.showPrompt({
       type: 'danger',
@@ -1064,14 +1096,26 @@ export default function DetalheVendaCompleto() {
                           </p>
                           <p className="mt-2 text-xs font-semibold">A retomada faz somente consultas à DPS original: não retransmite XML, não altera a numeração e não consome novo crédito.</p>
                           {canAdminister && emissionJob.status === 'RECONCILIACAO_MANUAL' && (
-                            <button
-                              disabled={sincronizandoRetorno}
-                              onClick={() => retomarConciliacaoEmissao(emissionJob.id)}
-                              className="mt-3 inline-flex items-center gap-2 rounded-xl border border-red-300 bg-white px-4 py-2 font-black text-red-700 hover:bg-red-100 disabled:opacity-60"
-                            >
-                              {sincronizandoRetorno ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-                              {sincronizandoRetorno ? 'Agendando consultas...' : 'Retomar somente consultas'}
-                            </button>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <button
+                                disabled={sincronizandoRetorno}
+                                onClick={() => retomarConciliacaoEmissao(emissionJob.id)}
+                                className="inline-flex items-center gap-2 rounded-xl border border-red-300 bg-white px-4 py-2 font-black text-red-700 hover:bg-red-100 disabled:opacity-60"
+                              >
+                                {sincronizandoRetorno ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                                {sincronizandoRetorno ? 'Verificando...' : 'Retomar somente consultas'}
+                              </button>
+                              {emissionJob.reservedDpsNumero && (
+                                <button
+                                  disabled={sincronizandoRetorno}
+                                  onClick={() => retransmitirMesmaDps(emissionJob.id, emissionJob.reservedDpsNumero!)}
+                                  className="inline-flex items-center gap-2 rounded-xl border border-amber-400 bg-amber-100 px-4 py-2 font-black text-amber-950 hover:bg-amber-200 disabled:opacity-60"
+                                >
+                                  {sincronizandoRetorno ? <Loader2 size={16} className="animate-spin" /> : <AlertTriangle size={16} />}
+                                  Confirmar ausência e reenviar a mesma DPS
+                                </button>
+                              )}
+                            </div>
                           )}
                         </div>
                       </div>

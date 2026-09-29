@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { classifyPortalRejection, emissionFailureState, retryDelayMs } = require('../app/utils/emission-outcome.ts');
+const { classifyPortalRejection, emissionFailureState, retryDelayMs, isConfirmedDpsAbsence } = require('../app/utils/emission-outcome.ts');
 
 test('emissao: somente rejeicao fiscal estruturada e definitiva pode liberar credito', () => {
   assert.equal(classifyPortalRejection(400, [{ Codigo: 'E0180', Descricao: 'Inscricao municipal ausente' }]), 'PORTAL_REJECTION');
@@ -28,4 +28,16 @@ test('emissao: backoff e limitado a quinze minutos e nao depende de temporizador
   assert.equal(retryDelayMs(1), 15000);
   assert.equal(retryDelayMs(2), 30000);
   assert.equal(retryDelayMs(100), 900000);
+});
+test('retransmissao: somente 404 explicito da consulta da DPS confirma ausencia', () => {
+  assert.equal(isConfirmedDpsAbsence({ sucesso: false, erros: [{ portalDiagnostic: {
+    stage: 'DPS_LOOKUP', category: 'DPS_NOT_FOUND', httpStatus: 404,
+  } }] }), true);
+  for (const result of [
+    { sucesso: true },
+    { sucesso: false },
+    { sucesso: false, erros: [{ portalDiagnostic: { stage: 'DPS_LOOKUP', category: 'PORTAL_INSTABILITY', httpStatus: 503 } }] },
+    { sucesso: false, erros: [{ portalDiagnostic: { stage: 'NFSE_DOWNLOAD', category: 'DPS_NOT_FOUND', httpStatus: 404 } }] },
+    { sucesso: false, erros: [{ portalDiagnostic: { stage: 'DPS_LOOKUP', category: 'DPS_NOT_FOUND', httpStatus: 200 } }] },
+  ]) assert.equal(isConfirmedDpsAbsence(result), false);
 });

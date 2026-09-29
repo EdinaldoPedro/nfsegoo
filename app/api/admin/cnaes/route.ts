@@ -4,7 +4,6 @@ import { prisma } from '@/app/utils/prisma';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 import { validateSelectableNbs } from '@/app/utils/nbs';
 import { canReadFiscalCatalog, canWriteFiscalCatalog } from '@/app/utils/fiscal-admin-access';
-import { requireAdminReauthentication } from '@/app/utils/admin-security';
 import {
   assertFiscalRuleVersion, changedFiscalRuleFields, FiscalRuleGovernanceError, fiscalRuleSnapshot,
   parseFiscalRuleGovernance, validateNormativeSource,
@@ -71,12 +70,7 @@ export const PUT = withApiGuard(async function PUT(request: Request) {
   try {
     const body = await request.json();
     const governance = parseFiscalRuleGovernance(body, true);
-    const reauthenticationError = await requireAdminReauthentication({
-      actorId: user.id, password: governance.adminPassword, justification: governance.justification,
-      action: 'GLOBAL_CNAE_RULE_UPDATE',
-    });
-    if (reauthenticationError) return reauthenticationError;
-    
+
     // ATUALIZADO: Recebendo todas as novas regras de retenção
     const { 
         id, 
@@ -194,7 +188,7 @@ export const PUT = withApiGuard(async function PUT(request: Request) {
       const after = fiscalRuleSnapshot(salvo);
       await tx.systemLog.create({ data: {
         level: 'ALERTA', module: 'REGRAS_FISCAIS', action: 'GLOBAL_CNAE_RULE_UPDATED', userId: user.id,
-        message: 'Regra nacional de CNAE atualizada com reautenticação e histórico.',
+        message: 'Regra nacional de CNAE atualizada com justificativa e histórico.',
         details: JSON.stringify({ ruleType: 'GLOBAL_CNAE', ruleId: salvo.id, cnae: salvo.codigo,
           justification: governance.justification, changedFields: changedFiscalRuleFields(before, after), before, after }),
       } });

@@ -1,5 +1,4 @@
 import type { Prisma } from '@prisma/client';
-import bcrypt from 'bcryptjs';
 import { prisma } from '@/app/utils/prisma';
 import {
   FISCAL_ENTITY_PUBLIC_FIELDS, effectiveFiscalEntity, ensureCanonicalFiscalEntity,
@@ -48,11 +47,7 @@ export function parseAdminFiscalEntityMutation(input: unknown) {
   if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1) throw new AdminFiscalEntityError('Versão da identidade fiscal inválida. Recarregue a tela.');
   if (!['CORRECT', 'RESET', 'REFRESH'].includes(String(body.action))) throw new AdminFiscalEntityError('Ação administrativa inválida.');
   const action = body.action as 'CORRECT' | 'RESET' | 'REFRESH';
-  const password = typeof body.adminPassword === 'string' ? body.adminPassword : '';
-  const justification = typeof body.justification === 'string' ? body.justification.trim() : '';
-  if (!password || Buffer.byteLength(password, 'utf8') > 72) throw new AdminFiscalEntityError('Informe sua senha administrativa atual.');
-  // eslint-disable-next-line no-control-regex -- permite quebras de linha, mas rejeita outros controles.
-  if (justification.length < 10 || justification.length > 2000 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(justification)) throw new AdminFiscalEntityError('Informe uma justificativa entre 10 e 2.000 caracteres.');
+  if (body.adminPassword !== undefined || body.justification !== undefined) throw new AdminFiscalEntityError('Esta atualização não utiliza senha nem justificativa manual.');
   const data: Partial<Record<FiscalEntityPublicField, string | null>> = {};
   if (action === 'CORRECT') {
     if (!body.data || typeof body.data !== 'object' || Array.isArray(body.data)) throw new AdminFiscalEntityError('Informe as correções públicas.');
@@ -70,7 +65,10 @@ export function parseAdminFiscalEntityMutation(input: unknown) {
   const sourceHash = typeof body.sourceHash === 'string' ? body.sourceHash : '';
   if (action === 'REFRESH' && !/^[a-f0-9]{64}$/.test(sourceHash)) throw new AdminFiscalEntityError('A prévia da fonte pública expirou ou é inválida. Consulte novamente.');
   if (action !== 'REFRESH' && body.sourceHash !== undefined) throw new AdminFiscalEntityError('A prévia pública só pode ser usada para aplicar uma atualização consultada.');
-  return { id, expectedVersion, action, data, fields, password, justification, sourceHash };
+  const auditReason = action === 'REFRESH' ? 'Atualização confirmada a partir da fonte pública.'
+    : action === 'RESET' ? 'Remoção de correções confirmada na seção administrativa.'
+      : 'Atualização cadastral confirmada na seção administrativa.';
+  return { id, expectedVersion, action, data, fields, auditReason, sourceHash };
 }
 
 export async function listAdminFiscalEntities(search: URLSearchParams) {
@@ -97,9 +95,8 @@ export async function listAdminFiscalEntities(search: URLSearchParams) {
 export async function mutateAdminFiscalEntity(actorId: string, input: unknown, registry?: FiscalRegistryResult | null) {
   const mutation = parseAdminFiscalEntityMutation(input);
   return prisma.$transaction(async tx => {
-    const actor = await tx.user.findUnique({ where: { id: actorId }, select: { role: true, senha: true } });
+    const actor = await tx.user.findUnique({ where: { id: actorId }, select: { role: true } });
     if (!actor || !['ADMIN', 'MASTER'].includes(actor.role)) throw new AdminFiscalEntityError('Acesso administrativo não permitido.', 403);
-    if (!await bcrypt.compare(mutation.password, actor.senha)) throw new AdminFiscalEntityError('Senha administrativa incorreta.', 403);
     await tx.$queryRaw`SELECT "id" FROM "EntidadeFiscal" WHERE "id" = ${mutation.id} FOR UPDATE`;
     const entity = await tx.entidadeFiscal.findUnique({ where: { id: mutation.id }, include: { correcoes: true } });
     if (!entity) throw new AdminFiscalEntityError('Identidade fiscal não encontrada.', 404);
@@ -107,16 +104,20 @@ export async function mutateAdminFiscalEntity(actorId: string, input: unknown, r
     if (mutation.action === 'REFRESH') {
       if (!registry || registry.data.documento !== entity.documento) throw new AdminFiscalEntityError('A fonte pública não confirmou este CNPJ. Nenhum dado foi alterado.', 503);
       const refreshed = await ensureCanonicalFiscalEntity(tx, entity.documento, registry.data, registry, actorId);
+      const before = effectiveFiscalEntity(entity);
+      const after = effectiveFiscalEntity(refreshed);
+      const changes = Object.fromEntries(FISCAL_ENTITY_PUBLIC_FIELDS.flatMap(field => before[field] === after[field]
+        ? [] : [[field, { from: before[field] ?? null, to: after[field] ?? null }]]));
       await tx.systemLog.create({ data: { level: 'INFO', module: 'ENTIDADES_FISCAIS', action: 'ADMIN_ENTIDADE_FISCAL_REFRESH',
-        userId: actorId, message: 'Consulta pública da identidade fiscal concluída após reautenticação administrativa.',
+        userId: actorId, message: 'Atualização pública da identidade fiscal confirmada pelo administrador autenticado.',
         details: JSON.stringify({ entidadeFiscalId: entity.id, documento: entity.documento, previousVersion: entity.version,
-          newVersion: refreshed.version, justification: mutation.justification, changed: refreshed.version !== entity.version }) } });
+          newVersion: refreshed.version, reason: mutation.auditReason, changed: refreshed.version !== entity.version, changes }) } });
       return { success: true, id: refreshed.id, version: refreshed.version };
     }
     if (mutation.action === 'CORRECT') for (const [campo, valor] of Object.entries(mutation.data)) {
       await tx.entidadeFiscalCorrecao.upsert({ where: { entidadeFiscalId_campo: { entidadeFiscalId: entity.id, campo } },
-        create: { entidadeFiscalId: entity.id, campo, valor, justificativa: mutation.justification, actorUserId: actorId },
-        update: { valor, justificativa: mutation.justification, actorUserId: actorId, version: { increment: 1 } } });
+        create: { entidadeFiscalId: entity.id, campo, valor, justificativa: mutation.auditReason, actorUserId: actorId },
+        update: { valor, justificativa: mutation.auditReason, actorUserId: actorId, version: { increment: 1 } } });
     }
     if (mutation.action === 'RESET') await tx.entidadeFiscalCorrecao.deleteMany({ where: { entidadeFiscalId: entity.id, campo: { in: mutation.fields } } });
     const saved = await tx.entidadeFiscal.update({ where: { id: entity.id }, data: { version: { increment: 1 }, eventos: { create: {
@@ -124,10 +125,14 @@ export async function mutateAdminFiscalEntity(actorId: string, input: unknown, r
       camposAlterados: JSON.stringify(mutation.action === 'CORRECT' ? Object.keys(mutation.data) : mutation.fields),
       snapshotJson: JSON.stringify(mutation.action === 'CORRECT' ? mutation.data : { removed: mutation.fields }),
     } } }, select: { id: true, version: true } });
+    const before = effectiveFiscalEntity(entity);
+    const changes = Object.fromEntries((mutation.action === 'CORRECT' ? Object.entries(mutation.data) : mutation.fields.map(field => [field, entity[field]]))
+      .flatMap(([field, value]) => before[field as FiscalEntityPublicField] === value
+        ? [] : [[field, { from: before[field as FiscalEntityPublicField] ?? null, to: value }]]));
     await tx.systemLog.create({ data: { level: 'ALERTA', module: 'ENTIDADES_FISCAIS', action: `ADMIN_ENTIDADE_FISCAL_${mutation.action}`,
-      userId: actorId, message: 'Manutenção da identidade fiscal global registrada com reautenticação e justificativa.',
+      userId: actorId, message: 'Manutenção da identidade fiscal registrada pelo administrador autenticado.',
       details: JSON.stringify({ entidadeFiscalId: entity.id, documento: entity.documento, fields: mutation.action === 'CORRECT' ? Object.keys(mutation.data) : mutation.fields,
-        previousVersion: entity.version, newVersion: saved.version, justification: mutation.justification }) } });
+        previousVersion: entity.version, newVersion: saved.version, reason: mutation.auditReason, changes }) } });
     return { success: true, id: saved.id, version: saved.version };
   }, { isolationLevel: 'ReadCommitted', timeout: 15_000, maxWait: 5_000 });
 }

@@ -22,3 +22,11 @@ export function emissionFailureState(params: { transmitted: boolean; definitive:
 export function retryDelayMs(attempt: number) {
   return Math.min(15 * 60_000, 15_000 * 2 ** Math.min(Math.max(0, attempt - 1), 8));
 }
+
+export function isConfirmedDpsAbsence(result: { sucesso: boolean; erros?: any[] }) {
+  return !result.sucesso && Array.isArray(result.erros) && result.erros.some((item) => (
+    item?.portalDiagnostic?.stage === 'DPS_LOOKUP'
+      && item?.portalDiagnostic?.category === 'DPS_NOT_FOUND'
+      && item?.portalDiagnostic?.httpStatus === 404
+  ));
+}

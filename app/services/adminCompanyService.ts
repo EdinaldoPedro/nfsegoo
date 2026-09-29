@@ -72,9 +72,12 @@ export function parseAdminCompanyMutation(input: unknown) {
   if (body.origem === 'PRESTADOR' && body.empresaId !== undefined && body.empresaId !== body.id) throw new AdminCompanyError('A empresa confirmada não corresponde ao cadastro selecionado.');
   const version = body.expectedUpdatedAt;
   if (typeof version !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(version) || !Number.isFinite(Date.parse(version))) throw new AdminCompanyError('Versão do cadastro ausente ou inválida. Atualize a tela.');
+  const protectedAction = ['ARCHIVE', 'RESTORE'].includes(body.action);
   const password = typeof body.adminPassword === 'string' ? body.adminPassword : '';
-  if (!password || Buffer.byteLength(password, 'utf8') > 72) throw new AdminCompanyError('Informe sua senha administrativa atual (até 72 bytes).');
-  const justification = text(body.justification, 'Justificativa', 2000, 10, true);
+  if (protectedAction && (!password || Buffer.byteLength(password, 'utf8') > 72)) throw new AdminCompanyError('Informe sua senha administrativa atual (até 72 bytes).');
+  if (!protectedAction && (body.adminPassword !== undefined || body.justification !== undefined)) throw new AdminCompanyError('Atualizações cadastrais não utilizam senha nem justificativa manual.');
+  const justification = protectedAction ? text(body.justification, 'Justificativa', 2000, 10, true)
+    : body.action === 'REFRESH' ? 'Atualização confirmada a partir da fonte pública.' : 'Atualização cadastral confirmada na seção administrativa.';
   if (body.action !== 'UPDATE' && body.data !== undefined) throw new AdminCompanyError('Esta operação não permite alterar campos manualmente.');
   const data = body.action === 'UPDATE' ? record(body.data) : {};
   const limits: Record<string, number> = { razaoSocial: 200, nomeFantasia: 200, email: 254, inscricaoMunicipal: 30,
@@ -151,8 +154,8 @@ function assertVersion(actual: Date, expected: string) {
   if (actual.toISOString() !== expected) throw new AdminCompanyError('Cadastro alterado por outra operação. Recarregue e confira os dados antes de tentar novamente.', 409);
 }
 
-/** All writes share the company mutex with fiscal submissions. Reauthentication,
- * optimistic version, tenant scope, archive checks and audit commit together. */
+/** All writes share the company mutex with fiscal submissions. Optimistic version,
+ * tenant scope and audit commit together; archive/restore also reauthenticate. */
 export async function mutateAdminCompany(actorId: string, input: unknown, registry?: FiscalRegistryResult | null) {
   const mutation = parseAdminCompanyMutation(input);
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -162,7 +165,7 @@ export async function mutateAdminCompany(actorId: string, input: unknown, regist
         for (const userId of [...new Set([actorId, ...participants])].sort()) await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${userId} FOR UPDATE`;
         const actor = await tx.user.findUnique({ where: { id: actorId }, select: { role: true, senha: true } });
         if (!actor || !['ADMIN', 'MASTER'].includes(actor.role)) throw new AdminCompanyError('Acesso administrativo não permitido.', 403);
-        if (!await bcrypt.compare(mutation.password, actor.senha)) throw new AdminCompanyError('Senha administrativa incorreta.', 403);
+        if (['ARCHIVE', 'RESTORE'].includes(mutation.action) && !await bcrypt.compare(mutation.password, actor.senha)) throw new AdminCompanyError('Senha administrativa incorreta.', 403);
         await tx.$queryRaw`SELECT "id" FROM "Empresa" WHERE "id" = ${mutation.empresaId} FOR UPDATE`;
         const company = await tx.empresa.findUnique({ where: { id: mutation.empresaId }, select: { ...commonSelect, razaoSocial: true, regimeTributario: true,
           atividades: { take: 1, select: { id: true } } } });
@@ -171,6 +174,7 @@ export async function mutateAdminCompany(actorId: string, input: unknown, regist
         const archival = mutation.action === 'ARCHIVE' ? { arquivadoEm: new Date(), arquivadoPor: actorId, motivoArquivamento: mutation.justification }
           : { arquivadoEm: null, arquivadoPor: null, motivoArquivamento: null };
         let saved: { id: string; updatedAt: Date };
+        let previousRecord: Record<string, unknown> = company as Record<string, unknown>;
         if (mutation.origem === 'PRESTADOR') {
           assertVersion(company.updatedAt, mutation.version);
           if (mutation.action === 'RESTORE' ? !company.arquivadoEm : !!company.arquivadoEm) throw new AdminCompanyError('Situação alterada. Recarregue a lista.', 409);
@@ -207,8 +211,13 @@ export async function mutateAdminCompany(actorId: string, input: unknown, regist
         } else {
           if (company.arquivadoEm) throw new AdminCompanyError('Restaure a empresa antes de alterar sua carteira.', 409);
           await tx.$queryRaw`SELECT "id" FROM "Cliente" WHERE "id" = ${mutation.id} FOR UPDATE`;
-          const customer = await tx.cliente.findFirst({ where: { id: mutation.id, empresaId: company.id }, select: { id: true, updatedAt: true, arquivadoEm: true, tipo: true } });
+          const customer = await tx.cliente.findFirst({ where: { id: mutation.id, empresaId: company.id }, select: {
+            id: true, updatedAt: true, arquivadoEm: true, tipo: true, nome: true, nomeFantasia: true, email: true,
+            inscricaoMunicipal: true, cep: true, logradouro: true, numero: true, complemento: true, bairro: true,
+            cidade: true, uf: true, codigoIbge: true, telefone: true, inscricaoEstadual: true,
+          } });
           if (!customer) throw new AdminCompanyError('Tomador não encontrado nesta empresa. Nenhum vínculo foi alterado.', 404);
+          previousRecord = customer as Record<string, unknown>;
           assertVersion(customer.updatedAt, mutation.version);
           const link = await tx.vinculoCarteira.findUnique({ where: { empresaId_clienteId: { empresaId: company.id, clienteId: customer.id } }, select: { arquivadoEm: true } });
           const archived = !!customer.arquivadoEm || !link || !!link.arquivadoEm;
@@ -238,11 +247,18 @@ export async function mutateAdminCompany(actorId: string, input: unknown, regist
             update: archival, create: { empresaId: company.id, clienteId: customer.id, ...archival },
           });
         }
+        const changedData = mutation.action === 'REFRESH' ? companyPublicRegistryPatch(registry!) : mutation.data;
+        const changes = ['UPDATE', 'REFRESH'].includes(mutation.action) ? Object.fromEntries(Object.entries(changedData).flatMap(([field, value]) => {
+          const previousValue = field === 'razaoSocial' && mutation.origem === 'TOMADOR' ? previousRecord.nome : previousRecord[field] ?? null;
+          return previousValue === value ? [] : [[field, { from: previousValue, to: value }]];
+        })) : undefined;
         await tx.systemLog.create({ data: { userId: actorId, empresaId: company.id, level: 'ALERTA', module: 'EMPRESAS',
-          action: `ADMIN_${mutation.origem}_${mutation.action}`, message: 'Manutenção administrativa com senha, versão e escopo conferidos; histórico preservado.',
+          action: `ADMIN_${mutation.origem}_${mutation.action}`, message: ['ARCHIVE', 'RESTORE'].includes(mutation.action)
+            ? 'Operação administrativa protegida por senha, versão e escopo; histórico preservado.'
+            : 'Atualização cadastral confirmada pelo administrador autenticado; histórico preservado.',
           details: JSON.stringify({ targetId: mutation.id, justification: mutation.justification, previousVersion: mutation.version,
             newVersion: saved.updatedAt.toISOString(), fields: mutation.action === 'REFRESH' ? COMPANY_PUBLIC_FIELDS : Object.keys(mutation.data),
-            ...(mutation.action === 'REFRESH' ? { fonte: registry!.fonte, sourceHash: registry!.payloadHash } : {}) }) } });
+            changes, ...(mutation.action === 'REFRESH' ? { fonte: registry!.fonte, sourceHash: registry!.payloadHash } : {}) }) } });
         return { success: true, id: saved.id, updatedAt: saved.updatedAt.toISOString() };
       }, { isolationLevel: 'ReadCommitted', timeout: 15000, maxWait: 5000 });
     } catch (error) {

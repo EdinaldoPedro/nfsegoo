@@ -34,7 +34,6 @@ export default function BaseEmpresas() {
   const [state, setState] = useState('ATIVOS'); const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1); const [total, setTotal] = useState(0);
   const [search, setSearch] = useState(''); const [revision, setRevision] = useState(0);
-  const [password, setPassword] = useState(''); const [justification, setJustification] = useState('');
   const [busy, setBusy] = useState(false); const busyRef = useRef(false);
   const [operationError, setOperationError] = useState(''); const [message, setMessage] = useState('');
 
@@ -61,11 +60,11 @@ export default function BaseEmpresas() {
     const value = form[field] ?? ''; const original = editing[field] ?? '';
     return value === original ? [] : [[field, value]];
   })) : {}, [editing, form]);
-  const hasPendingChanges = Boolean(editing && (Object.keys(changed).length || preview || justification.trim() || password));
+  const hasPendingChanges = Boolean(editing && (Object.keys(changed).length || preview));
 
   function open(item: Item) {
     setEditing(item); setForm(Object.fromEntries(fields.map(([key]) => [key, item[key] ?? ''])));
-    setPassword(''); setJustification(''); setPreview(null); setOperationError(''); setMessage('');
+    setPreview(null); setOperationError(''); setMessage('');
   }
   function focusReview(id: string) {
     window.setTimeout(() => document.getElementById('company-review-' + id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
@@ -86,32 +85,49 @@ export default function BaseEmpresas() {
     if (hasPendingChanges && !await dialog.showConfirm({ type: 'warning', title: 'Descartar alterações não salvas?',
       description: 'Os campos editados, a prévia pública e a confirmação ainda não aplicada serão descartados.',
       confirmText: 'Descartar e fechar', cancelText: 'Continuar ajustando' })) return;
-    setEditing(null); setPreview(null); setPassword(''); setJustification(''); setOperationError('');
+    setEditing(null); setPreview(null); setOperationError('');
   }
 
   async function mutate(action: 'UPDATE' | 'ARCHIVE' | 'RESTORE' | 'REFRESH') {
     if (busyRef.current || !editing) return;
     busyRef.current = true; setBusy(true); setOperationError(''); setMessage('');
     try {
+      let protectedCredentials: { adminPassword: string; justification: string } | null = null;
       if (action === 'ARCHIVE' || action === 'RESTORE') {
         const confirmed = await dialog.showConfirm({ title: action === 'ARCHIVE' ? 'Arquivar este cadastro?' : 'Restaurar este cadastro?',
           description: action === 'ARCHIVE' ? `Cadastro: ${editing.razaoSocial}. Não haverá exclusão de documentos nem cancelamento fiscal.`
             : `Cadastro: ${editing.razaoSocial}. Os vínculos existentes serão preservados e as cotas conferidas.`,
           confirmText: action === 'ARCHIVE' ? 'Confirmar arquivamento' : 'Confirmar restauração', type: 'warning' });
         if (!confirmed) return;
+        const justification = await dialog.showPrompt({ title: action === 'ARCHIVE' ? 'Motivo do arquivamento' : 'Motivo da restauração',
+          description: 'Informe uma justificativa com pelo menos 10 caracteres.' });
+        if (!justification || justification.trim().length < 10) return;
+        const adminPassword = await dialog.showPrompt({ title: 'Confirmar identidade', description: 'Digite sua senha administrativa atual.', inputType: 'password' });
+        if (!adminPassword) return;
+        protectedCredentials = { adminPassword, justification: justification.trim() };
+      } else {
+        const confirmed = await dialog.showConfirm({
+          title: action === 'REFRESH' ? 'Aplicar atualização consultada?' : 'Salvar alterações cadastrais?',
+          description: action === 'REFRESH' ? `Os dados conferidos da fonte ${preview?.fonte || 'pública'} passarão a ser a atualização mais recente.`
+            : `${Object.keys(changed).length} campo(s) alterado(s) serão salvos e registrados no histórico.`,
+          confirmText: action === 'REFRESH' ? 'Aplicar atualização' : 'Salvar alterações',
+          cancelText: 'Voltar',
+          type: 'info',
+        });
+        if (!confirmed) return;
       }
       const response = await fetch('/api/admin/empresas', { method: action === 'ARCHIVE' ? 'DELETE' : 'PUT',
         headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: editing.id, origem: editing.origem,
           expectedUpdatedAt: editing.updatedAt, action, ...(action === 'UPDATE' ? { data: changed } : {}),
-          ...(action === 'REFRESH' ? { sourceHash: preview?.sourceHash } : {}), adminPassword: password, justification }) });
+          ...(action === 'REFRESH' ? { sourceHash: preview?.sourceHash } : {}), ...(protectedCredentials || {}) }) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Operação não concluída.');
-      setEditing(null); setPreview(null); setJustification(''); setRevision(value => value + 1);
+      setEditing(null); setPreview(null); setRevision(value => value + 1);
       setMessage(action === 'REFRESH' ? 'Fonte pública aplicada ao prestador e registrada na auditoria.'
         : action === 'ARCHIVE' ? 'Cadastro arquivado. Os dados foram preservados.'
           : action === 'RESTORE' ? 'Cadastro restaurado.' : 'Cadastro atualizado e operação registrada na auditoria.');
     } catch (error) { setOperationError(error instanceof Error ? error.message : 'Falha de conexão. Recarregue antes de repetir.'); }
-    finally { setPassword(''); busyRef.current = false; setBusy(false); }
+    finally { busyRef.current = false; setBusy(false); }
   }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -141,7 +157,7 @@ export default function BaseEmpresas() {
       <div><label htmlFor="company-search" className="mb-1 flex items-center gap-2 text-sm font-bold"><Search size={16} /> Buscar por nome ou documento</label>
         <input id="company-search" className={inputClass} value={search} maxLength={120} disabled={busy} onChange={e => { setSearch(e.target.value); setPage(1); }} /></div>
       <div><label htmlFor="company-state" className="mb-1 block text-sm font-bold">Situação</label><select id="company-state" className={inputClass} value={state} disabled={busy}
-        onChange={e => { setState(e.target.value); setPage(1); setEditing(null); setPreview(null); setPassword(''); }}><option value="ATIVOS">Ativos</option><option value="ARQUIVADOS">Arquivados</option></select></div>
+        onChange={e => { setState(e.target.value); setPage(1); setEditing(null); setPreview(null); }}><option value="ATIVOS">Ativos</option><option value="ARQUIVADOS">Arquivados</option></select></div>
     </div>
     {!editing && message && <p role="status" className="rounded-xl bg-emerald-50 p-4 text-emerald-800">{message}</p>}
 
@@ -174,10 +190,6 @@ export default function BaseEmpresas() {
                     <tbody>{publicFields.map(field => { const current = editing[field] || ''; const incoming = preview.data[field];
                       return <tr key={field} className="border-b border-blue-100"><td className="p-2 font-semibold">{labels[field]}</td><td className="p-2">{current || 'Não informado'}</td>
                         <td className="p-2">{incoming || 'Não informado pela fonte'}</td><td className="p-2">{incoming === null ? 'Cadastro atual será mantido' : current === incoming ? 'Sem alteração' : 'Será atualizado'}</td></tr>; })}</tbody></table></div></section>}
-                <fieldset disabled={busy} className="grid gap-4 border-t pt-4 md:grid-cols-2"><legend className="px-1 text-sm font-bold">Confirmação para salvar ou aplicar</legend>
-                  <div><label htmlFor="admin-company-justification" className="mb-1 block text-sm font-bold">Justificativa (10 a 2.000 caracteres)</label><textarea id="admin-company-justification" className={inputClass} value={justification} required minLength={10} maxLength={2000} onChange={e => setJustification(e.target.value)} /></div>
-                  <div><label htmlFor="admin-company-password" className="mb-1 block text-sm font-bold">Sua senha de acesso</label><input id="admin-company-password" type="password" autoComplete="current-password" className={inputClass} value={password} required onChange={e => setPassword(e.target.value)} /><p className="mt-1 text-xs text-slate-500">Não é a senha do cliente nem do certificado.</p></div>
-                </fieldset>
                 <div className="flex flex-wrap gap-3">{editing.archived ? <button type="submit" value="RESTORE" disabled={busy} className={buttonClass}><RotateCcw size={18} /> Restaurar cadastro</button> : <>
                   <button type="submit" value="UPDATE" disabled={busy || !Object.keys(changed).length} className={buttonClass}><Edit size={18} /> Salvar alterações</button>
                   <button type="button" disabled={busy} className={buttonClass} onClick={() => void consultPublicSource()}><RefreshCw size={18} /> Consultar fonte pública</button>

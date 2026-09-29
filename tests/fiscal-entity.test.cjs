@@ -20,13 +20,13 @@ test('identidade fiscal: correção administrativa prevalece sem misturar dados 
 
 test('admin identidade fiscal: entrada é estrita e nunca aceita CNPJ ou campos particulares', () => {
   const valid = { id: 'entity-1', expectedVersion: 1, action: 'CORRECT', data: { codigoIbge: '3550308', uf: 'sp' },
-    adminPassword: 'synthetic-password', justification: 'Correção pública confirmada em QA' };
+  };
   const parsed = parseAdminFiscalEntityMutation(valid);
   assert.deepEqual(parsed.data, { codigoIbge: '3550308', uf: 'SP' });
   for (const field of ['documento', 'email', 'emailPublico', 'telefone', 'telefonePublico', 'inscricaoMunicipal']) {
     assert.throws(() => parseAdminFiscalEntityMutation({ ...valid, data: { [field]: 'x' } }), { status: 400 });
   }
-  for (const change of [{ expectedVersion: 0 }, { adminPassword: '' }, { justification: 'curta' }, { action: 'DELETE' },
+  for (const change of [{ expectedVersion: 0 }, { adminPassword: '' }, { justification: 'não permitida' }, { action: 'DELETE' },
     { data: {} }, { role: 'MASTER' }]) assert.throws(() => parseAdminFiscalEntityMutation({ ...valid, ...change }), { status: 400 });
   assert.deepEqual(parseAdminFiscalEntityMutation({ ...valid, action: 'RESET', data: undefined, fields: ['codigoIbge', 'codigoIbge'] }).fields, ['codigoIbge']);
   const refresh = parseAdminFiscalEntityMutation({ ...valid, action: 'REFRESH', data: undefined, sourceHash: 'a'.repeat(64) });

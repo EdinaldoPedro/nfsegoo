@@ -14,9 +14,10 @@ test('manutencao administrativa PostgreSQL: escopo, versao, arquivo reversivel, 
   const currentInput = async (record, action = 'UPDATE', data = { razaoSocial: 'Nome revisado em QA' }) => {
     const isCompany = companies.includes(record.id);
     const row = await (isCompany ? prisma.empresa : prisma.cliente).findUniqueOrThrow({ where: { id: record.id } });
+    const protectedAction = ['ARCHIVE', 'RESTORE'].includes(action);
     return { id: row.id, origem: isCompany ? 'PRESTADOR' : 'TOMADOR', empresaId: isCompany ? undefined : row.empresaId,
-      expectedUpdatedAt: row.updatedAt.toISOString(), action, ...(action === 'UPDATE' ? { data } : {}), adminPassword: password,
-      justification: 'Operação sintética autorizada para QA' };
+      expectedUpdatedAt: row.updatedAt.toISOString(), action, ...(action === 'UPDATE' ? { data } : {}),
+      ...(protectedAction ? { adminPassword: password, justification: 'Operação sintética autorizada para QA' } : {}) };
   };
   const save = async (record, action, data, actor = admin) => mutate(actor.id, await currentInput(record, action, data));
   try {
@@ -50,10 +51,10 @@ test('manutencao administrativa PostgreSQL: escopo, versao, arquivo reversivel, 
       assert.equal(scoped.data.length, 1); assert.equal(scoped.data[0].id, customer.id); assert.equal(scoped.data[0].empresa.id, company.id);
       assert.equal((await list(new URLSearchParams({ type: 'TOMADOR', search: prefix }))).meta.total, 2);
     });
-    await t.test('papel atual e senha atual sao conferidos antes de qualquer gravacao', async () => {
+    await t.test('papel atual protege atualizacoes e senha atual protege arquivamento/restauracao', async () => {
       const before = await prisma.empresa.findUniqueOrThrow({ where: { id: company.id } });
       for (const actor of users.filter(user => !['ADMIN', 'MASTER'].includes(user.role))) await assert.rejects(save(company, 'UPDATE', undefined, actor), { status: 403 });
-      await assert.rejects(mutate(admin.id, { ...await currentInput(company), adminPassword: 'incorrect' }), { status: 403 });
+      await assert.rejects(mutate(admin.id, { ...await currentInput(company, 'ARCHIVE'), adminPassword: 'incorrect' }), { status: 403 });
       assert.deepEqual(await prisma.empresa.findUniqueOrThrow({ where: { id: company.id } }), before);
       await save(company, 'UPDATE', { razaoSocial: prefix + ' revisada', email: 'CONTATO@EXAMPLE.INVALID', complemento: 'Sala QA' }, master);
       const after = await prisma.empresa.findUniqueOrThrow({ where: { id: company.id } });

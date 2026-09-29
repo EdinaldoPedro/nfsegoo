@@ -12,13 +12,9 @@ export function parseFiscalRuleGovernance(input: unknown, requireVersion: boolea
     throw new FiscalRuleGovernanceError('Operação fiscal inválida.');
   }
   const body = input as Record<string, unknown>;
-  const adminPassword = typeof body.adminPassword === 'string' ? body.adminPassword : '';
   const justification = typeof body.justification === 'string' ? body.justification.trim() : '';
-  if (!adminPassword || Buffer.byteLength(adminPassword, 'utf8') > 72) {
-    throw new FiscalRuleGovernanceError('Informe sua senha administrativa atual.');
-  }
-  if (justification.length < 10 || justification.length > 2000 || hasForbiddenControl(justification)) {
-    throw new FiscalRuleGovernanceError('Informe uma justificativa entre 10 e 2.000 caracteres.');
+  if (justification.length < 15 || justification.length > 2000 || hasForbiddenControl(justification)) {
+    throw new FiscalRuleGovernanceError('Informe uma justificativa entre 15 e 2.000 caracteres.');
   }
   let expectedUpdatedAt: Date | undefined;
   if (requireVersion) {
@@ -30,7 +26,7 @@ export function parseFiscalRuleGovernance(input: unknown, requireVersion: boolea
       throw new FiscalRuleGovernanceError('A versão da regra é inválida. Recarregue a tela.', 409);
     }
   }
-  return { adminPassword, justification, expectedUpdatedAt };
+  return { justification, expectedUpdatedAt };
 }
 
 export function validateNormativeSource(value: unknown) {

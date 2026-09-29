@@ -26,7 +26,6 @@ export default function IdentidadesFiscaisTomadores() {
   const [form, setForm] = useState<Record<string, string>>({}); const [search, setSearch] = useState('');
   const [page, setPage] = useState(1); const [totalPages, setTotalPages] = useState(1); const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true); const [busy, setBusy] = useState(false); const [revision, setRevision] = useState(0);
-  const [password, setPassword] = useState(''); const [justification, setJustification] = useState('');
   const [preview, setPreview] = useState<PublicPreview | null>(null);
   const [error, setError] = useState(''); const [message, setMessage] = useState('');
 
@@ -48,11 +47,11 @@ export default function IdentidadesFiscaisTomadores() {
     const value = form[field] ?? ''; const original = selected[field] ?? '';
     return value === original ? [] : [[field, value || null]];
   })) : {}, [form, selected]);
-  const hasPendingChanges = Boolean(selected && (Object.keys(changed).length || preview || justification.trim() || password));
+  const hasPendingChanges = Boolean(selected && (Object.keys(changed).length || preview));
 
   function open(item: Item) {
     setSelected(item); setForm(Object.fromEntries(fieldDefinitions.map(([field]) => [field, item[field] ?? ''])));
-    setPassword(''); setJustification(''); setPreview(null); setError(''); setMessage('');
+    setPreview(null); setError(''); setMessage('');
   }
 
   function focusReview(id: string) {
@@ -76,26 +75,37 @@ export default function IdentidadesFiscaisTomadores() {
     if (hasPendingChanges && !await dialog.showConfirm({ type: 'warning', title: 'Descartar alterações não salvas?',
       description: 'Os campos editados, a prévia consultada e a confirmação ainda não aplicada serão descartados.',
       confirmText: 'Descartar e fechar', cancelText: 'Continuar ajustando' })) return;
-    setSelected(null); setPreview(null); setPassword(''); setJustification(''); setError('');
+    setSelected(null); setPreview(null); setError('');
   }
 
   async function mutate(action: 'CORRECT' | 'RESET' | 'REFRESH') {
     if (!selected || busy) return;
+    const confirmed = await dialog.showConfirm({
+      type: action === 'RESET' ? 'warning' : 'info',
+      title: action === 'REFRESH' ? 'Aplicar atualização consultada?'
+        : action === 'RESET' ? 'Remover todas as correções?'
+          : 'Salvar alterações cadastrais?',
+      description: action === 'REFRESH' ? `Os dados conferidos da fonte ${preview?.fonte || 'pública'} passarão a ser a atualização mais recente.`
+        : action === 'RESET' ? 'Os valores da fonte cadastral voltarão a prevalecer nos campos corrigidos.'
+          : `${Object.keys(changed).length} campo(s) alterado(s) serão salvos e registrados no histórico.`,
+      confirmText: action === 'REFRESH' ? 'Aplicar atualização' : action === 'RESET' ? 'Remover correções' : 'Salvar alterações',
+      cancelText: 'Voltar',
+    });
+    if (!confirmed) return;
     setBusy(true); setError(''); setMessage('');
     try {
       const response = await fetch('/api/admin/tomadores', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: selected.id, expectedVersion: selected.version, action,
           ...(action === 'CORRECT' ? { data: changed } : {}),
           ...(action === 'RESET' ? { fields: selected.camposCorrigidos } : {}),
-          ...(action === 'REFRESH' ? { sourceHash: preview?.sourceHash } : {}),
-          adminPassword: password, justification }) });
+          ...(action === 'REFRESH' ? { sourceHash: preview?.sourceHash } : {}) }) });
       const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Operação não concluída.');
-      setSelected(null); setPassword(''); setJustification(''); setRevision(value => value + 1);
+      setSelected(null); setRevision(value => value + 1);
       setMessage(action === 'REFRESH' ? 'Fonte pública consultada e identidade atualizada.' : action === 'RESET'
         ? 'Correções administrativas removidas; os valores da fonte cadastral voltaram a prevalecer.'
         : 'Correções globais salvas e registradas na auditoria.');
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Falha de conexão.'); }
-    finally { setPassword(''); setBusy(false); }
+    finally { setBusy(false); }
   }
 
   async function consultPublicSource() {
@@ -156,10 +166,6 @@ export default function IdentidadesFiscaisTomadores() {
               })}</tbody></table></div>
               <p className="mt-3 text-xs text-blue-800">{preview.atividades.length} atividade(s) econômica(s) retornada(s). A aplicação também atualizará essa base pública de atividades.</p>
             </section>}
-            <fieldset disabled={busy} className="grid gap-4 border-t pt-4 md:grid-cols-2"><legend className="px-1 text-sm font-bold">Confirmação para salvar ou aplicar</legend>
-              <div><label className="mb-1 block text-sm font-bold" htmlFor="entity-justification">Justificativa (mínimo 10 caracteres)</label><textarea id="entity-justification" className={inputClass} minLength={10} maxLength={2000} required value={justification} onChange={event => setJustification(event.target.value)} /></div>
-              <div><label className="mb-1 block text-sm font-bold" htmlFor="entity-password">Sua senha atual</label><input id="entity-password" type="password" autoComplete="current-password" required className={inputClass} value={password} onChange={event => setPassword(event.target.value)} /></div>
-            </fieldset>
             <div className="flex flex-wrap gap-3">
               <button className={buttonClass} type="submit" disabled={busy || !Object.keys(changed).length}><Save size={17} /> Salvar correções</button>
               <button className={buttonClass} type="button" disabled={busy} onClick={() => void consultPublicSource()}><RefreshCw size={17} /> Consultar fonte pública</button>

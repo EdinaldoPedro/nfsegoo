@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { parseAdminCompanyQuery, parseAdminCompanyMutation, adminCompanySelect, adminCustomerSelect,
   companyPublicRegistryData, companyPublicRegistryPatch } = require('../app/services/adminCompanyService.ts');
 const input = { id: 'company-id', origem: 'PRESTADOR', expectedUpdatedAt: '2026-09-03T00:00:00.000Z', action: 'UPDATE',
-  data: { razaoSocial: 'Empresa QA', email: 'COMERCIAL@EXAMPLE.INVALID' }, adminPassword: 'synthetic-password', justification: 'Correção solicitada em QA' };
+  data: { razaoSocial: 'Empresa QA', email: 'COMERCIAL@EXAMPLE.INVALID' } };
 
 test('admin empresas: pagina e limites estritos, busca limitada e categoria/situacao explicitas', () => {
   assert.deepEqual(parseAdminCompanyQuery(new URLSearchParams()), { page: 1, limit: 10, type: 'PRESTADOR', state: 'ATIVOS', empresaId: undefined, search: '' });
@@ -19,7 +19,6 @@ test('admin empresas: DTO minimo nunca consulta certificados, senhas ou carteira
 });
 test('admin empresas: whitelist bloqueia identidade, acesso, sequencia e mass assignment', () => {
   assert.equal(parseAdminCompanyMutation(input).data.email, 'comercial@example.invalid');
-  assert.equal(parseAdminCompanyMutation({ ...input, justification: 'Solicitação de QA.\nRevisão do endereço.' }).justification, 'Solicitação de QA.\nRevisão do endereço.');
   for (const key of ['documento', 'tipo', 'nif', 'pais', 'moeda', 'empresaId', 'ultimoDPS', 'serieDPS', 'ambiente', 'regimeTributario', 'cadastroCompleto', 'proprietarioUserId', 'certificadoA1', 'toString']) {
     assert.throws(() => parseAdminCompanyMutation({ ...input, data: { [key]: 'x' } }), { status: 400 });
   }
@@ -27,13 +26,16 @@ test('admin empresas: whitelist bloqueia identidade, acesso, sequencia e mass as
     assert.throws(() => parseAdminCompanyMutation({ ...input, data }), { status: 400 });
   }
 });
-test('admin empresas: senha/justificativa/versao e escopo do tomador sao obrigatorios', () => {
-  for (const extra of [{ adminPassword: '' }, { adminPassword: 'á'.repeat(37) }, { adminPassword: 1 }, { justification: 'curta' },
+test('admin empresas: atualizacao simples dispensa senha; arquivamento e restauracao permanecem protegidos', () => {
+  for (const extra of [{ adminPassword: '' }, { justification: 'não permitida' },
     { expectedUpdatedAt: undefined }, { expectedUpdatedAt: '2026-99-99T00:00:00.000Z' }, { origem: 'ANY' }, { action: 'DELETE' },
-    { origem: 'TOMADOR' }, { origem: ['PRESTADOR'] }, { action: ['UPDATE'] }, { empresaId: 'another-company' }, { role: 'MASTER' }, { action: 'ARCHIVE' }]) assert.throws(() => parseAdminCompanyMutation({ ...input, ...extra }), { status: 400 });
+    { origem: 'TOMADOR' }, { origem: ['PRESTADOR'] }, { action: ['UPDATE'] }, { empresaId: 'another-company' }, { role: 'MASTER' }]) assert.throws(() => parseAdminCompanyMutation({ ...input, ...extra }), { status: 400 });
   assert.equal(parseAdminCompanyMutation({ ...input, origem: 'TOMADOR', empresaId: 'tenant-1' }).empresaId, 'tenant-1');
-  assert.equal(parseAdminCompanyMutation({ ...input, action: 'ARCHIVE', data: undefined }).action, 'ARCHIVE');
-  assert.equal(parseAdminCompanyMutation({ ...input, action: 'RESTORE', data: undefined }).action, 'RESTORE');
+  for (const action of ['ARCHIVE', 'RESTORE']) {
+    assert.throws(() => parseAdminCompanyMutation({ ...input, action, data: undefined }), { status: 400 });
+    assert.equal(parseAdminCompanyMutation({ ...input, action, data: undefined,
+      adminPassword: 'synthetic-password', justification: 'Operação protegida de QA' }).action, action);
+  }
 });
 
 test('admin prestador: atualização pública exige prévia e não alcança campos privados ou fiscais', () => {
