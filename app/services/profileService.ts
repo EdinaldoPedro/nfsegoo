@@ -83,6 +83,7 @@ export function parseCompanyProfile(input: unknown) {
     throw new ProfileError('Versão do cadastro ausente. Atualize a tela antes de salvar.');
   }
   const data: Prisma.EmpresaUncheckedUpdateInput = {};
+  if (body.complemento === null) body.complemento = '';
   for (const [field, max] of Object.entries({ razaoSocial: 200, nomeFantasia: 200, inscricaoMunicipal: 30,
     logradouro: 200, numero: 20, complemento: 100, bairro: 100, cidade: 100 })) {
     if (body[field] !== undefined) (data as Record<string, unknown>)[field] = text(body[field], field, max, field === 'razaoSocial' ? 2 : 0);

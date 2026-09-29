@@ -10,6 +10,9 @@ test('formulario converte campos opcionais nulos em vazios sem usar email de log
   assert.equal(fields.email, ''); assert.equal(fields.complemento, ''); assert.equal(fields.nomeFantasia, '');
   const { email, ...input } = fields;
   assert.doesNotThrow(() => parseCompanyProfile({ ...company, ...input, emailComercial: email }));
+  const parsed = parseCompanyProfile({ ...company, complemento: null });
+  assert.equal(parsed.data.complemento, '');
+  assert.throws(() => parseCompanyProfile({ ...company, logradouro: null }), { status: 400 });
 });
 
 test('perfil pessoal nao aceita empresa, credencial, privilegio ou coercoes de preferencias', () => {

@@ -182,7 +182,7 @@ export default function ConfiguracoesEmpresa() {
           cep: dados.cep,
           logradouro: dados.logradouro,
           numero: dados.numero,
-          complemento: dados.complemento,
+          complemento: dados.complemento || '',
           bairro: dados.bairro,
           cidade: dados.cidade,
           uf: dados.uf,
