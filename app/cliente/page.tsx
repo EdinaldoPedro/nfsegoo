@@ -272,8 +272,8 @@ export default function MeusClientes() {
                   codigoIbge: manterIbgeSeConsultaVierVazia(dados.codigoIbge, prev.codigoIbge)
               }));
               dialog.showAlert({ type: 'success', description: 'Dados públicos do CNPJ carregados. Confira o e-mail particular desta relação antes de salvar.' });
-          } else { 
-              dialog.showAlert("CNPJ não encontrado na Receita."); 
+          } else {
+              dialog.showAlert({ type: 'warning', description: dados.error || 'Não foi possível consultar o CNPJ no momento.' });
           }
       } catch {
           dialog.showAlert('Nao foi possivel consultar o CNPJ. Tente novamente ou preencha os dados manualmente.');

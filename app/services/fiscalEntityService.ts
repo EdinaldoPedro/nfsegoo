@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/app/utils/prisma';
 import { normalizeCnpj, validarCNPJ } from '@/app/utils/cnpj';
+import { consultPublicCompanyRegistry } from './publicCompanyRegistryService';
 
 type Db = Prisma.TransactionClient | typeof prisma;
 
@@ -22,7 +23,7 @@ export type FiscalEntityPublicData = Omit<Record<FiscalEntityPublicField, string
 export type FiscalRegistryResult = {
   data: FiscalEntityPublicData;
   atividades: Array<{ codigo: string; descricao: string | null; principal: boolean }>;
-  fonte: 'BRASILAPI' | 'BRASILAPI_VIACEP';
+  fonte: 'BRASILAPI' | 'BRASILAPI_VIACEP' | 'RECEITAWS' | 'RECEITAWS_VIACEP';
   payloadHash: string;
   consultedAt: Date;
 };
@@ -69,19 +70,15 @@ function canonicalHash(value: unknown) {
 export async function consultarEntidadeFiscalPublica(documento: string): Promise<FiscalRegistryResult | null> {
   const cnpj = normalizeCnpj(documento);
   if (!cnpj || !validarCNPJ(cnpj) || /[A-Z]/.test(cnpj)) return null;
-  const raw = await fetchJson(`https://brasilapi.com.br/api/cnpj/v1/${encodeURIComponent(cnpj)}`);
-  if (!raw) return null;
-  const returnedDocument = normalizeCnpj(String(raw.cnpj || cnpj));
-  if (returnedDocument !== cnpj) return null;
-  const razaoSocial = clean(raw.razao_social, 200);
-  if (!razaoSocial) return null;
-  const cep = clean(raw.cep, 11)?.replace(/\D/g, '') || null;
-  let codigoIbge = clean(raw.codigo_municipio, 7)?.replace(/\D/g, '') || null;
-  let fonte: FiscalRegistryResult['fonte'] = 'BRASILAPI';
+  const registry = await consultPublicCompanyRegistry(cnpj);
+  if (registry.status !== 'FOUND') return null;
+  const publicData = registry.data;
+  const cep = publicData.cep;
+  let codigoIbge = publicData.codigoIbge;
+  let fonte: FiscalRegistryResult['fonte'] = registry.source;
   const brasilAddress = {
-    logradouro: clean(raw.logradouro, 200), complemento: clean(raw.complemento, 100),
-    bairro: clean(raw.bairro, 100), cidade: clean(raw.municipio, 100),
-    uf: clean(raw.uf, 2)?.toUpperCase() || null,
+    logradouro: publicData.logradouro, complemento: publicData.complemento,
+    bairro: publicData.bairro, cidade: publicData.cidade, uf: publicData.uf,
   };
   let viaCep: Record<string, any> | null = null;
   if (/^\d{8}$/.test(cep || '') && (!/^\d{7}$/.test(codigoIbge || '')
@@ -89,31 +86,24 @@ export async function consultarEntidadeFiscalPublica(documento: string): Promise
     viaCep = await fetchJson(`https://viacep.com.br/ws/${cep}/json/`, 5_000);
     const code = clean(viaCep?.ibge, 7)?.replace(/\D/g, '') || null;
     if (!/^\d{7}$/.test(codigoIbge || '') && /^\d{7}$/.test(code || '')) codigoIbge = code;
-    if (viaCep && !viaCep.erro) fonte = 'BRASILAPI_VIACEP';
+    if (viaCep && !viaCep.erro) fonte = registry.source === 'BRASILAPI' ? 'BRASILAPI_VIACEP' : 'RECEITAWS_VIACEP';
   }
   const data: FiscalEntityPublicData = {
     documento: cnpj,
-    razaoSocial,
-    nomeFantasia: clean(raw.nome_fantasia, 200),
-    situacaoCadastral: clean(raw.descricao_situacao_cadastral || raw.situacao_cadastral, 100),
-    emailPublico: clean(raw.email, 254)?.toLowerCase() || null,
-    telefonePublico: clean(raw.ddd_telefone_1 || raw.telefone, 30),
-    cep, logradouro: brasilAddress.logradouro || clean(viaCep?.logradouro, 200), numero: clean(raw.numero, 20),
+    razaoSocial: publicData.razaoSocial,
+    nomeFantasia: publicData.nomeFantasia,
+    situacaoCadastral: publicData.situacaoCadastral,
+    emailPublico: publicData.emailPublico,
+    telefonePublico: publicData.telefonePublico,
+    cep, logradouro: brasilAddress.logradouro || clean(viaCep?.logradouro, 200), numero: publicData.numero,
     complemento: brasilAddress.complemento || clean(viaCep?.complemento, 100),
     bairro: brasilAddress.bairro || clean(viaCep?.bairro, 100),
     cidade: brasilAddress.cidade || clean(viaCep?.localidade, 100),
     uf: brasilAddress.uf || clean(viaCep?.uf, 2)?.toUpperCase() || null,
     pais: 'Brasil', codigoIbge,
   };
-  const seen = new Set<string>();
-  const atividades = [{ codigo: raw.cnae_fiscal, descricao: raw.cnae_fiscal_descricao, principal: true },
-    ...(Array.isArray(raw.cnaes_secundarios) ? raw.cnaes_secundarios.slice(0, 200) : [])].flatMap((item: any) => {
-      const codigo = String(item?.codigo || '').replace(/\D/g, '');
-      if (!/^\d{7}$/.test(codigo) || seen.has(codigo)) return [];
-      seen.add(codigo);
-      return [{ codigo, descricao: clean(item?.descricao, 300), principal: item?.principal === true }];
-    });
-  return { data, atividades, fonte, payloadHash: canonicalHash({ data, atividades }), consultedAt: new Date() };
+  const atividades = publicData.atividades;
+  return { data, atividades, fonte, payloadHash: canonicalHash({ data, atividades }), consultedAt: registry.consultedAt };
 }
 
 export function effectiveFiscalEntity<T extends Record<string, any>>(entity: T) {

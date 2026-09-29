@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { getAuthenticatedUser, unauthorized } from '@/app/utils/api-middleware';
 import { normalizeCnpj, validarCNPJ } from '@/app/utils/cnpj';
 import { validateJsonContentLength } from '@/app/utils/request-guards';
+import { consultPublicCompanyRegistry } from '@/app/services/publicCompanyRegistryService';
 
 const MAX_EXTERNAL_JSON_BYTES = 2 * 1024 * 1024;
 
@@ -68,67 +69,21 @@ export const POST = withApiGuard(async function POST(request: Request) {
       }, { status: 422 });
     }
 
-    // 2. Tenta API Pública 1: BrasilAPI (Rápida e Grátis)
-    try {
-        const dataBrasil = await fetchSafe(`https://brasilapi.com.br/api/cnpj/v1/${cnpjLimpo}`);
-        if (dataBrasil) {
-            // CORREÇÃO: Tipagem explícita aqui também
-            const cnaes: any[] = [];
-            if (dataBrasil.cnae_fiscal) cnaes.push({ codigo: String(dataBrasil.cnae_fiscal), descricao: dataBrasil.cnae_fiscal_descricao, principal: true });
-            if (dataBrasil.cnaes_secundarios) {
-                dataBrasil.cnaes_secundarios.forEach((c: any) => cnaes.push({ codigo: String(c.codigo), descricao: c.descricao, principal: false }));
-            }
-            const codigoIbge = String(dataBrasil.codigo_municipio || '').replace(/\D/g, '') || await buscarIbgePorCep(dataBrasil.cep);
-
-            return NextResponse.json({
-                razaoSocial: dataBrasil.razao_social,
-                nomeFantasia: dataBrasil.nome_fantasia || dataBrasil.razao_social,
-                email: dataBrasil.email,
-                cep: dataBrasil.cep,
-                logradouro: dataBrasil.logradouro,
-                numero: dataBrasil.numero,
-                complemento: dataBrasil.complemento,
-                bairro: dataBrasil.bairro,
-                cidade: dataBrasil.municipio,
-                uf: dataBrasil.uf,
-                codigoIbge,
-                cnaePrincipal: String(dataBrasil.cnae_fiscal),
-                cnaes
-            });
-        }
-    } catch { /* fallback abaixo */ }
-
-    // 3. Fallback: ReceitaWS (Pública, lenta, rate limit)
-    try {
-       const dataReceita = await fetchSafe(`https://www.receitaws.com.br/v1/cnpj/${cnpjLimpo}`);
-       if (dataReceita && dataReceita.status !== 'ERROR') {
-         // CORREÇÃO: Adicionado tipo explícito aqui para resolver o erro
-         const listaCnaes: any[] = [];
-         
-         if (dataReceita.atividade_principal) dataReceita.atividade_principal.forEach((c: any) => listaCnaes.push({ codigo: c.code.replace(/\D/g, ''), descricao: c.text, principal: true }));
-         if (dataReceita.atividades_secundarias) dataReceita.atividades_secundarias.forEach((c: any) => listaCnaes.push({ codigo: c.code.replace(/\D/g, ''), descricao: c.text, principal: false }));
-
-         const codigoIbge = await buscarIbgePorCep(dataReceita.cep);
-
-         return NextResponse.json({
-             razaoSocial: dataReceita.nome,
-             nomeFantasia: dataReceita.fantasia || dataReceita.nome,
-             email: dataReceita.email,
-             cep: dataReceita.cep?.replace(/\D/g, ''),
-             logradouro: dataReceita.logradouro,
-             numero: dataReceita.numero,
-             complemento: dataReceita.complemento,
-             bairro: dataReceita.bairro,
-             cidade: dataReceita.municipio,
-             uf: dataReceita.uf,
-             codigoIbge,
-             cnaePrincipal: listaCnaes.find((c: any) => c.principal)?.codigo || '',
-             cnaes: listaCnaes
-         });
-       }
-    } catch { /* mensagem pública genérica abaixo */ }
-
-    return NextResponse.json({ error: 'Não foi possível consultar este CNPJ no momento.' }, { status: 502 });
+    const registry = await consultPublicCompanyRegistry(cnpjLimpo);
+    if (registry.status === 'FOUND') {
+      const data = registry.data;
+      const codigoIbge = data.codigoIbge || await buscarIbgePorCep(data.cep);
+      return NextResponse.json({
+        razaoSocial: data.razaoSocial, nomeFantasia: data.nomeFantasia || data.razaoSocial,
+        email: data.emailPublico, cep: data.cep, logradouro: data.logradouro, numero: data.numero,
+        complemento: data.complemento, bairro: data.bairro, cidade: data.cidade, uf: data.uf,
+        codigoIbge, cnaePrincipal: data.atividades.find(item => item.principal)?.codigo || '',
+        cnaes: data.atividades, fonte: registry.source,
+      });
+    }
+    if (registry.status === 'NOT_FOUND') return NextResponse.json({ error: 'CNPJ não encontrado nas fontes cadastrais públicas.' }, { status: 404 });
+    if (registry.status === 'INVALID_RESPONSE') return NextResponse.json({ error: 'A fonte cadastral devolveu dados inválidos ou incompletos.' }, { status: 502 });
+    return NextResponse.json({ error: 'As fontes cadastrais estão temporariamente indisponíveis. Tente novamente em alguns minutos.' }, { status: 503 });
 
   } catch (error) {
     return NextResponse.json({ error: 'Erro interno' }, { status: 500 });

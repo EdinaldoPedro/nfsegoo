@@ -4,33 +4,22 @@ import { CommercialError } from '@/app/utils/commercial-pricing';
 import { normalizeCnpj, validarCNPJ } from '@/app/utils/cnpj';
 import { commercialTransaction } from './commercialService';
 import { getEffectivePlanLimits } from './planService';
+import { consultPublicCompanyRegistry } from './publicCompanyRegistryService';
 
 const pendingStatuses = ['PENDENTE', 'PENDENTE_DONO', 'PENDENTE_CUSTODIANTE'];
-const cleanText = (value: unknown, max = 200) => typeof value === 'string' && value.trim() ? value.trim().slice(0, max) : null;
 
 async function lookupNewCompany(documento: string) {
-  let response: Response;
-  try {
-    response = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${encodeURIComponent(documento)}`, {
-      signal: AbortSignal.timeout(10_000), headers: { Accept: 'application/json' }, cache: 'no-store',
-    });
-  } catch { throw new CommercialError('Consulta cadastral indisponível. Tente novamente mais tarde.', 503); }
-  if (!response.ok) throw new CommercialError('A consulta cadastral não confirmou este CNPJ. Confira os dados ou procure o atendimento. Nenhuma empresa foi alterada.', 422);
-  const raw = await response.json();
-  const name = cleanText(raw?.razao_social);
-  if (!name) throw new CommercialError('Resposta cadastral incompleta. Tente novamente mais tarde.', 503);
-  const ibge = String(raw.codigo_municipio || '');
-  const data = { razaoSocial: name, nomeFantasia: cleanText(raw.nome_fantasia) || name, email: cleanText(raw.email, 254),
-    cep: cleanText(raw.cep, 9), logradouro: cleanText(raw.logradouro), numero: cleanText(String(raw.numero ?? ''), 20),
-    bairro: cleanText(raw.bairro, 100), cidade: cleanText(raw.municipio, 100), uf: cleanText(raw.uf, 2),
-    codigoIbge: /^\d{7}$/.test(ibge) ? ibge : null, cadastroCompleto: false };
-  const cnaes = new Map<string, { codigo: string; descricao: string; principal: boolean }>();
-  for (const item of [{ codigo: raw.cnae_fiscal, descricao: raw.cnae_fiscal_descricao, principal: true },
-    ...(Array.isArray(raw.cnaes_secundarios) ? raw.cnaes_secundarios.slice(0, 100) : [])]) {
-    const codigo = String(item.codigo || '').replace(/[./-]/g, '');
-    if (/^\d{7}$/.test(codigo) && !cnaes.has(codigo)) cnaes.set(codigo, { codigo, descricao: cleanText(item.descricao) || 'CNAE cadastral', principal: item.principal === true });
-  }
-  return { data, cnaes: [...cnaes.values()] };
+  const registry = await consultPublicCompanyRegistry(documento);
+  if (registry.status === 'NOT_FOUND') throw new CommercialError('CNPJ não encontrado nas fontes cadastrais públicas. Confira o número informado. Nenhuma empresa foi alterada.', 422);
+  if (registry.status === 'INVALID_RESPONSE') throw new CommercialError('A fonte cadastral devolveu dados inválidos ou incompletos. Nenhuma empresa foi alterada.', 502);
+  if (registry.status !== 'FOUND') throw new CommercialError('Consulta cadastral temporariamente indisponível. Tente novamente em alguns minutos. Nenhuma empresa foi alterada.', 503);
+  const publicData = registry.data;
+  const data = { razaoSocial: publicData.razaoSocial, nomeFantasia: publicData.nomeFantasia || publicData.razaoSocial,
+    email: publicData.emailPublico, cep: publicData.cep, logradouro: publicData.logradouro, numero: publicData.numero,
+    complemento: publicData.complemento, bairro: publicData.bairro, cidade: publicData.cidade, uf: publicData.uf,
+    codigoIbge: publicData.codigoIbge, cadastroCompleto: false };
+  return { data, cnaes: publicData.atividades.map(item => ({ ...item, descricao: item.descricao || 'CNAE cadastral' })),
+    source: registry.source, consultedAt: registry.consultedAt };
 }
 
 /** Requesting an accounting link must never update or expose another tenant.
@@ -70,7 +59,7 @@ export async function upsertEmpresaAndLinkUser(documento: string, userId: string
       if (!lookup) throw new CommercialError('Cadastro mudou durante a solicitação. Tente novamente.', 409);
       const company = await tx.empresa.create({ data: { documento: doc, ...lookup.data, ambiente: 'HOMOLOGACAO',
         donoFaturamentoId: userId, contadorCustodianteId: userId, statusPropriedade: 'CUSTODIADA',
-        modoCobranca: 'RESPONSAVEL_UNICO', lastApiCheck: new Date() }, select: { id: true } });
+        modoCobranca: 'RESPONSAVEL_UNICO', lastApiCheck: lookup.consultedAt }, select: { id: true } });
       companyId = company.id;
       if (lookup.cnaes.length) await tx.cnae.createMany({ data: lookup.cnaes.map((item) => ({ ...item, empresaId: companyId })) as Prisma.CnaeCreateManyInput[] });
     }
@@ -79,7 +68,7 @@ export async function upsertEmpresaAndLinkUser(documento: string, userId: string
       update: { status, arquivadoEm: null, arquivadoPor: null, motivoArquivamento: null, clientePodeAcessarPortal: false, nivelPortal: 'NENHUM' } });
     await tx.systemLog.create({ data: { level: 'INFO', action: existing ? 'ACCOUNTANT_LINK_REQUESTED' : 'ACCOUNTANT_COMPANY_CREATED',
       module: 'VINCULOS', userId, empresaId: companyId, message: 'Solicitação de vínculo contábil processada sem transferência de propriedade.',
-      details: JSON.stringify({ status, existing: !!existing }) } });
+      details: JSON.stringify({ status, existing: !!existing, registrySource: lookup?.source || null }) } });
     return { id: companyId, _statusVinculo: status, reused: false };
   });
 }
