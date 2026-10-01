@@ -44,6 +44,11 @@ export const GET = withApiGuard(async function GET(request: Request, { params }:
       valorMoedaEstrangeira: payload.valorMoedaEstrangeira ?? null,
       issRetido: payload.issRetido ?? null, inssRetido: payload.retencoes?.inss?.retido ?? null,
       aliquota: payload.aliquota ?? null, dataCompetencia: payload.dataCompetencia ?? null,
+      atividadeEvento: payload.atividadeEvento && typeof payload.atividadeEvento === 'object' ? {
+        dataInicial: payload.atividadeEvento.dataInicial ?? null,
+        dataFinal: payload.atividadeEvento.dataFinal ?? null,
+        descricao: payload.atividadeEvento.descricao ?? null,
+      } : null,
       // A correction/copy must reserve a fresh DPS; the original number is not a suggestion.
       numeroDPS: null, serieDPS: null, ambienteOrigem: job?.ambiente || venda.notas[0]?.ambiente || null,
       recuperacaoParcial: !Object.keys(payload).length,

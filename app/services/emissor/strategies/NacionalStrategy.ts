@@ -102,7 +102,12 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
                     email: prestador.email,
                     endereco: {
                         codigoIbge: prestador.codigoIbge,
-                        uf: prestador.uf
+                        uf: prestador.uf,
+                        cep: prestador.cep,
+                        logradouro: prestador.logradouro,
+                        numero: prestador.numero,
+                        complemento: prestador.complemento,
+                        bairro: prestador.bairro,
                     },
                     configuracoes: {
                         aliquotaPadrao: Number(prestador.aliquotaPadrao),

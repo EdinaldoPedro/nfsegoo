@@ -9,6 +9,11 @@ export interface ICanonicalRps {
         endereco: {
             codigoIbge: string;
             uf: string;
+            cep?: string;
+            logradouro?: string;
+            numero?: string;
+            complemento?: string;
+            bairro?: string;
         };
         configuracoes: {
             aliquotaPadrao?: number;
@@ -91,6 +96,18 @@ export interface ICanonicalRps {
             indDest?: string;
             cst?: string;
             cClassTrib?: string;
+        };
+        atividadeEvento?: {
+            descricao: string;
+            dataInicial: string;
+            dataFinal: string;
+            endereco: {
+                cep: string;
+                logradouro: string;
+                numero: string;
+                complemento?: string;
+                bairro: string;
+            };
         };
     };
     meta: {

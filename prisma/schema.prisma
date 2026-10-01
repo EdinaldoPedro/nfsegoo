@@ -867,6 +867,21 @@ model GlobalCnae {
   fonteNormativa              String?
   inicioVigencia              DateTime?
   fimVigencia                 DateTime?
+  complementares              String[]  @default([])
+}
+
+model EmpresaCnaeConfiguracaoFiscal {
+  id          String   @id @default(uuid())
+  empresaId   String
+  cnaeId      String   @unique
+  ativo       Boolean  @default(false)
+  configuracao Json
+  versao      Int      @default(1)
+  atualizadoPor String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([empresaId, ativo])
 }
 
 model TributacaoMunicipal {

@@ -7,7 +7,7 @@ import { prepararEmissaoJob } from './emissaoJobService';
 import { EmissorFactory } from './emissor/factories/EmissorFactory';
 import type { IEmissorStrategy, IResultadoEmissao } from './emissor/interfaces/IEmissorStrategy';
 import { preparedDpsId, validateAuthorizedNfse } from './emissor/validation/AuthorizedNfseValidator';
-import { LeasedEmission, LostEmissionLease, renewEmissionLease, reserveJobDps, withEmissionLease } from './emissionLeaseService';
+import { LeasedEmission, LostEmissionLease, preflightReservedDps, renewEmissionLease, reserveJobDps, withEmissionLease } from './emissionLeaseService';
 import { requestFiscalDocument } from './fiscalNoteService';
 import { lockCanonicalDpsSequence } from './dpsSequenceStore';
 import { normalizeDpsNumber } from '@/app/utils/dps-identity';
@@ -147,6 +147,7 @@ export async function processClaimedEmission(initial: LeasedEmission, strategyOv
       await withEmissionLease(job, (tx, current) => validateBeforeTransmission(tx, current));
       job = { ...await reserveJobDps(job), leaseToken: job.leaseToken };
       if (!job.signedXml) {
+        job = { ...(await preflightReservedDps(job)).job, leaseToken: job.leaseToken };
         const prepared = await prepararEmissaoJob(job);
         const dpsId = preparedDpsId(prepared.signedXml);
         job = { ...await withEmissionLease(job, async (tx, current) => {

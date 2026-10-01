@@ -3,6 +3,7 @@ import type { EmissaoJob, Prisma } from '@prisma/client';
 import { prisma } from '@/app/utils/prisma';
 import { nextDpsCandidate, normalizeDpsNumber, normalizeDpsSeries } from '@/app/utils/dps-identity';
 import { lockCanonicalDpsSequence } from './dpsSequenceStore';
+import { headDps } from './dpsSequenceService';
 
 export type LeasedEmission = EmissaoJob & { leaseToken: string };
 export class LostEmissionLease extends Error { constructor() { super('Posse da tarefa expirada.'); } }
@@ -77,4 +78,82 @@ export async function reserveJobDps(job: LeasedEmission) {
     await tx.dpsSequencia.update({ where: { id: sequence.id }, data: { ultimoReservado: numero } });
     return tx.emissaoJob.update({ where: { id: current.id }, data: { reservedDpsNumero: numero, serieDPS: serie } });
   });
+}
+
+export const MAX_AUTOMATIC_DPS_SKIPS = 20;
+
+type HeadDps = typeof headDps;
+
+/** Checks the reserved identity before freezing/signing the XML. Numbers already
+ * present in the Portal are advanced atomically, without holding a DB lock while
+ * the network request is running. A POST race is still handled by reconciliation. */
+export async function preflightReservedDps(
+  job: LeasedEmission,
+  options: { maxSkips?: number; inspectDps?: HeadDps } = {},
+) {
+  const maxSkips = options.maxSkips ?? MAX_AUTOMATIC_DPS_SKIPS;
+  const inspectDps = options.inspectDps ?? headDps;
+  const skipped: number[] = [];
+
+  for (;;) {
+    const snapshot = await withEmissionLease(job, async (tx, current) => {
+      if (current.transmissionStartedAt || current.signedXml) return { current, company: null, manualNumber: false };
+      if (!current.reservedDpsNumero || !current.serieDPS) throw new Error('DPS ainda não reservada para conferência.');
+      const company = await tx.empresa.findUniqueOrThrow({ where: { id: current.empresaId } });
+      const payload = JSON.parse(current.payloadJson);
+      const manualNumber = payload.numeroDPS !== undefined && payload.numeroDPS !== null && payload.numeroDPS !== '';
+      return { current, company, manualNumber };
+    });
+    if (!snapshot.company || snapshot.current.transmissionStartedAt || snapshot.current.signedXml) {
+      return { job: snapshot.current, skipped };
+    }
+
+    const checkedNumber = normalizeDpsNumber(snapshot.current.reservedDpsNumero);
+    const lookup = await inspectDps(snapshot.company, snapshot.current.ambiente as 'HOMOLOGACAO' | 'PRODUCAO', snapshot.current.serieDPS!, checkedNumber);
+    if (!lookup.exists) return { job: snapshot.current, skipped };
+    if (snapshot.manualNumber) {
+      throw Object.assign(new Error(`A DPS ${checkedNumber} já existe no Portal Nacional. Informe outro número ou use a numeração automática.`), { status: 400 });
+    }
+    if (skipped.length >= maxSkips) {
+      throw Object.assign(new Error(`Foram encontrados mais de ${maxSkips} números de DPS já utilizados. Sincronize a numeração da empresa antes de emitir.`), { status: 400 });
+    }
+
+    const advanced = await withEmissionLease(job, async (tx, current) => {
+      if (current.transmissionStartedAt || current.signedXml) return current;
+      if (current.reservedDpsNumero !== checkedNumber) return current;
+      const serie = normalizeDpsSeries(current.serieDPS || snapshot.current.serieDPS || '900');
+      const sequence = await lockCanonicalDpsSequence(tx, {
+        empresaId: current.empresaId,
+        ambiente: current.ambiente,
+        serie,
+      });
+      const next = nextDpsCandidate(Math.max(sequence.ultimoConfirmado, checkedNumber), sequence.ultimoReservado);
+      if (next === null) {
+        throw Object.assign(new Error('A numeração de DPS atingiu o limite suportado. Solicite análise; não reinicie a sequência.'), { status: 400 });
+      }
+      await tx.dpsSequencia.update({ where: { id: sequence.id }, data: {
+        ultimoConfirmado: Math.max(sequence.ultimoConfirmado, checkedNumber),
+        ultimoReservado: next,
+        origem: 'PORTAL_HEAD_AUTOMATICO',
+        statusSincronizacao: 'CONFIRMADO',
+        sincronizadoEm: new Date(),
+      } });
+      await tx.systemLog.create({ data: {
+        level: 'INFO',
+        action: 'DPS_NUMERACAO_AJUSTADA_AUTOMATICAMENTE',
+        message: `DPS ${checkedNumber} já utilizada; emissão avançada automaticamente para ${next}.`,
+        empresaId: current.empresaId,
+        vendaId: current.vendaId,
+        userId: current.actorUserId,
+        details: JSON.stringify({ jobId: current.id, serie, ambiente: current.ambiente, de: checkedNumber, para: next }),
+      } });
+      return tx.emissaoJob.update({ where: { id: current.id }, data: {
+        reservedDpsNumero: next,
+        serieDPS: serie,
+        statusMessage: `A DPS ${checkedNumber} já estava utilizada. Conferindo automaticamente a DPS ${next}.`,
+      } });
+    });
+    skipped.push(checkedNumber);
+    if (advanced.transmissionStartedAt || advanced.signedXml) return { job: advanced, skipped };
+  }
 }

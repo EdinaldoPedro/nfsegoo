@@ -14,8 +14,9 @@ export function classifyPortalRejection(status: number, errors: unknown): Emissi
 export function emissionFailureState(params: { transmitted: boolean; definitive: boolean; attempts: number; maxAttempts: number }) {
   if (params.definitive) return { status: 'ERRO_FINAL', releaseCredit: true, retry: false };
   if (params.attempts < params.maxAttempts) return { status: 'ERRO_TEMPORARIO', releaseCredit: false, retry: true };
-  // Exhaustion is NOT a confirmed rejection, including operational failures
-  // before transmission: an operator must diagnose instead of blind resubmission.
+  // Before the durable POST marker there is nothing fiscal to reconcile. Once
+  // transmission may have happened, exhaustion must never invite a new DPS.
+  if (!params.transmitted) return { status: 'ERRO_FINAL', releaseCredit: true, retry: false };
   return { status: 'RECONCILIACAO_MANUAL', releaseCredit: false, retry: false };
 }
 

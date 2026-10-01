@@ -78,6 +78,54 @@ function parseBoolean(value: any, fallback = false) {
   return fallback;
 }
 
+function parseDataEvento(value: unknown, campo: string) {
+  const data = optionalString(value);
+  if (!data || !/^\d{4}-\d{2}-\d{2}$/.test(data)) {
+    throw Object.assign(new Error(`${campo} do evento é obrigatória.`), { status: 400, code: 'EVENTO_INVALIDO' });
+  }
+  const parsed = new Date(`${data}T12:00:00.000Z`);
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== data) {
+    throw Object.assign(new Error(`${campo} do evento é inválida.`), { status: 400, code: 'EVENTO_INVALIDO' });
+  }
+  return data;
+}
+
+function resolveAtividadeEvento(payload: any, prestador: any, obrigatorio: boolean) {
+  if (!obrigatorio) return undefined;
+  const informado = payload.atividadeEvento;
+  if (!informado || typeof informado !== 'object' || Array.isArray(informado)) {
+    throw Object.assign(new Error('Informe os dados da atividade de evento para este serviço.'), {
+      status: 400, code: 'EVENTO_OBRIGATORIO', userAction: 'Informe as datas e a descrição do evento antes de emitir.',
+    });
+  }
+  const descricao = optionalString(informado.descricao);
+  if (!descricao || descricao.length > 255) {
+    throw Object.assign(new Error('A descrição do evento deve possuir entre 1 e 255 caracteres.'), { status: 400, code: 'EVENTO_INVALIDO' });
+  }
+  const dataInicial = parseDataEvento(informado.dataInicial, 'A data inicial');
+  const dataFinal = parseDataEvento(informado.dataFinal, 'A data final');
+  if (dataFinal < dataInicial) {
+    throw Object.assign(new Error('A data final do evento não pode ser anterior à data inicial.'), { status: 400, code: 'EVENTO_INVALIDO' });
+  }
+  const endereco = {
+    cep: optionalString(prestador.cep)?.replace(/\D/g, '') || '',
+    logradouro: optionalString(prestador.logradouro) || '',
+    numero: optionalString(prestador.numero) || '',
+    complemento: optionalString(prestador.complemento),
+    bairro: optionalString(prestador.bairro) || '',
+  };
+  const ausentes = Object.entries(endereco)
+    .filter(([campo, valor]) => campo !== 'complemento' && !valor)
+    .map(([campo]) => campo);
+  if (endereco.cep.length !== 8 || ausentes.length) {
+    throw Object.assign(new Error('O endereço da empresa prestadora está incompleto para a atividade de evento.'), {
+      status: 400, code: 'ENDERECO_EVENTO_INCOMPLETO',
+      userAction: 'Complete CEP, logradouro, número e bairro da empresa nas configurações antes de emitir.',
+    });
+  }
+  return { descricao, dataInicial, dataFinal, endereco };
+}
+
 type FiscalResolutionDb = Prisma.TransactionClient;
 
 export async function resolveEmissionFiscalContext(params: {
@@ -124,6 +172,20 @@ export async function resolveEmissionFiscalContext(params: {
     if ((regraGlobal as any).codigoNbs) nbsEncontrado = (regraGlobal as any).codigoNbs;
   }
 
+  const configuracoesProprias = typeof (db as any).$queryRaw === 'function' ? await db.$queryRaw<Array<{ id: string; configuracao: any; versao: number }>>`
+    SELECT cfg."id", cfg."configuracao", cfg."versao" FROM "EmpresaCnaeConfiguracaoFiscal" cfg
+    JOIN "Cnae" c ON c."id" = cfg."cnaeId"
+    WHERE cfg."empresaId" = ${prestador.id} AND cfg."ativo" = true
+      AND regexp_replace(c."codigo", '[^0-9]', '', 'g') = ${cnaeFinal}
+    LIMIT 1
+  ` : [];
+  const configuracaoPropria = configuracoesProprias[0]?.configuracao || null;
+  if (configuracaoPropria) {
+    codigoTribNacional = String(configuracaoPropria.codigoTributacaoNacional || '').replace(/\D/g, '');
+    itemLc = String(configuracaoPropria.itemLc || '');
+    nbsEncontrado = String(configuracaoPropria.nbsPadrao || '');
+  }
+
   const regraMunicipal = await db.tributacaoMunicipal.findFirst({
     where: {
       cnae: cnaeFinal,
@@ -137,6 +199,9 @@ export async function resolveEmissionFiscalContext(params: {
     orderBy: [{ prioridade: 'desc' }, { updatedAt: 'desc' }],
   });
 
+  const complementares = configuracaoPropria ? (configuracaoPropria.complementares || []) : (regraGlobal?.complementares || []);
+  const atividadeEvento = resolveAtividadeEvento(payload, prestador, complementares.includes('EVENTO'));
+
   if (regraMunicipal?.exigeNbs && nbsEncontrado) codigoNbs = nbsEncontrado;
 
   codigoTribNacional = optionalString(firstDefined(payload.codigoTributacaoNacional, payload.codigoTribNacional, codigoTribNacional))?.replace(/\D/g, '') || codigoTribNacional;
@@ -147,6 +212,7 @@ export async function resolveEmissionFiscalContext(params: {
   const tomadorTipo = cadastroPf ? 'PF' : optionalString(firstDefined(payload.tomadorTipo, tomador.tipo)) || tomador.tipo;
   const tomadorPais = optionalString(firstDefined(payload.tomadorPais, tomador.pais)) || tomador.pais;
   const fiscalDecision = await resolveFiscalDecision({
+    empresaId: prestador.id,
     cnae: cnaeFinal,
     itemLc,
     codigoIbge: optionalString(firstDefined(payload.localPrestacaoIbge, prestador.codigoIbge)) || '',
@@ -170,7 +236,7 @@ export async function resolveEmissionFiscalContext(params: {
     : fiscalDecision.codigoTributacaoMunicipal;
   const aliquotaMunicipio = regimePrestador === 'MEI'
     ? undefined
-    : firstDefined(payload.aliquotaMunicipio, fiscalDecision.aliquotaIssMunicipal, regraMunicipal?.aliquotaIss);
+    : firstDefined(payload.aliquotaMunicipio, fiscalDecision.aliquotaIssMunicipal, configuracaoPropria ? undefined : regraMunicipal?.aliquotaIss);
   const aliquotaIss = payload.aliquota ? parseNumero(payload.aliquota) : 0;
   const aliquotaIssEfetiva = aliquotaIss || parseNumero(prestador.aliquotaPadrao) || 0;
   const aliquotaMunicipioNumero = aliquotaMunicipio ? parseNumero(aliquotaMunicipio) : null;
@@ -202,7 +268,9 @@ export async function resolveEmissionFiscalContext(params: {
     fiscalDecision,
     aliquotaIss,
     aliquotaMunicipioNumero,
-    tipoTributacao: optionalString(firstDefined(payload.tipoTributacao, prestador.tipoTributacaoPadrao)),
+    tipoTributacao: optionalString(firstDefined(payload.tipoTributacao, configuracaoPropria?.tipoTributacao, prestador.tipoTributacaoPadrao)),
+    complementares,
+    atividadeEvento,
   };
 }
 
@@ -253,6 +321,7 @@ function normalizarPayload(body: any) {
     tomadorUf,
     tomadorCodigoIbge,
     idempotencyKey,
+    atividadeEvento,
   } = body;
 
   return {
@@ -301,6 +370,7 @@ function normalizarPayload(body: any) {
     tomadorUf,
     tomadorCodigoIbge,
     idempotencyKey,
+    atividadeEvento,
   };
 }
 
@@ -522,6 +592,7 @@ export async function prepararEmissaoJob(job: any) {
     aliquotaIss,
     aliquotaMunicipioNumero,
     tipoTributacao,
+    atividadeEvento,
   } = await resolveEmissionFiscalContext({ payload, prestador, tomador, valorFloat });
 
   const prestadorEmissao = {
@@ -595,6 +666,7 @@ export async function prepararEmissaoJob(job: any) {
       retencoes: fiscalDecision.retencoes,
       tributosFederaisDevidos: fiscalDecision.tributosFederaisDevidos,
       ibscbs: fiscalDecision.ibscbs,
+      atividadeEvento,
       dataCompetencia: payload.dataCompetencia,
     },
     ambiente: prestadorEmissao.ambiente as 'HOMOLOGACAO' | 'PRODUCAO',

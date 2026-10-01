@@ -147,6 +147,17 @@ function extractCodigoErro(text?: string | null) {
   return match?.[0]?.toUpperCase() || null;
 }
 
+function containsPortalErrorCode(value: any, expected: string, depth = 0): boolean {
+  if (depth > 8 || value === null || value === undefined) return false;
+  if (typeof value === 'string') {
+    try { return containsPortalErrorCode(JSON.parse(value), expected, depth + 1); } catch { return false; }
+  }
+  if (Array.isArray(value)) return value.some((item) => containsPortalErrorCode(item, expected, depth + 1));
+  if (typeof value !== 'object') return false;
+  const code = String(value.codigo ?? value.Codigo ?? value.code ?? value.Code ?? '').toUpperCase();
+  return code === expected || Object.values(value).some((item) => containsPortalErrorCode(item, expected, depth + 1));
+}
+
 function fieldValue(value: any) {
   return value || value === 0 ? String(value) : 'Não informado';
 }
@@ -500,7 +511,10 @@ export default function DetalheVendaCompleto() {
 
   useEffect(() => {
     let interval: ReturnType<typeof setInterval> | undefined;
-    if (venda && (venda.status === 'PROCESSANDO' || venda.notas?.some((nota: any) => isFiscalOperationPolling(nota.fiscalOperations?.[0]) || ['PENDENTE', 'PROCESSANDO'].includes(nota.documentTask?.status)))) {
+    const emissionStatus = venda?.emissionJobs?.[0]?.status;
+    const emissionIsActive = ['PENDENTE', 'PROCESSANDO', 'ERRO_TEMPORARIO'].includes(emissionStatus || '');
+    const documentIsActive = venda?.notas?.some((nota: any) => isFiscalOperationPolling(nota.fiscalOperations?.[0]) || ['PENDENTE', 'PROCESSANDO'].includes(nota.documentTask?.status));
+    if (venda && (emissionIsActive || documentIsActive)) {
       interval = setInterval(() => { if (document.visibilityState === 'visible') fetchVenda(true); }, 5000);
     }
     return () => {
@@ -648,6 +662,36 @@ export default function DetalheVendaCompleto() {
       });
     } catch (error: any) {
       await dialog.showAlert({ type: 'warning', title: 'Nenhuma retransmissão realizada', description: error.message });
+    } finally {
+      setSincronizandoRetorno(false);
+      fetchVenda(true);
+    }
+  };
+
+  const encerrarConflitoNumeracao = async (jobId: string, dpsNumber: number) => {
+    const credentials = await pedirReautenticacao(`Encerrar conflito da DPS ${dpsNumber}`);
+    if (!credentials) return;
+    const confirmationText = `ENCERRAR DPS ${dpsNumber}`;
+    const confirmation = await dialog.showPrompt({
+      type: 'danger',
+      title: 'Liberar uma nova emissão',
+      description: `Esta ação encerrará somente a tentativa vinculada à DPS ${dpsNumber}, preservará o XML e os logs, liberará o crédito e permitirá uma nova emissão para a mesma venda. Digite ${confirmationText} para confirmar.`,
+      validationText: confirmationText,
+      placeholder: confirmationText,
+    });
+    if (confirmation !== confirmationText) return;
+    setSincronizandoRetorno(true);
+    try {
+      const res = await fetch('/api/admin/emissoes/encerrar-conflito', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId, ...credentials }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'O conflito não pôde ser encerrado.');
+      await dialog.showAlert({ type: 'success', title: 'Venda liberada para reemissão', description: data.message });
+    } catch (error: any) {
+      await dialog.showAlert({ type: 'warning', title: 'Conflito não encerrado', description: error.message });
     } finally {
       setSincronizandoRetorno(false);
       fetchVenda(true);
@@ -890,6 +934,8 @@ export default function DetalheVendaCompleto() {
   const erroTemporarioPortal = retornoLogs.some(logIndicaErroTemporario);
   const noteOperation = notaAtual?.fiscalOperations?.[0];
   const emissionJob = venda.emissionJobs?.[0];
+  const hasE0014Conflict = containsPortalErrorCode(emissionJob?.lastError, 'E0014')
+    || retornoLogs.some((log: any) => containsPortalErrorCode(log?.details, 'E0014'));
   const canAdminister = typeof window !== 'undefined' && ['ADMIN', 'MASTER'].includes(localStorage.getItem('userRole') || '');
   const integridadePdf = {
     chaveOk: Boolean(notaAtual?.chaveAcesso),
@@ -923,8 +969,10 @@ export default function DetalheVendaCompleto() {
               <div>
                 <div className="flex flex-wrap items-center gap-3">
                   <h1 className="text-xl font-black text-slate-900">Bancada da venda #{venda.id.split('-')[0]}</h1>
-                  <span className={`text-[10px] px-2 py-1 rounded-full border uppercase font-black ${statusStyle(venda.status)}`}>
-                    {venda.status === 'PROCESSANDO' ? (
+                  <span className={`text-[10px] px-2 py-1 rounded-full border uppercase font-black ${emissionJob?.status === 'RECONCILIACAO_MANUAL' ? 'bg-amber-100 text-amber-800 border-amber-200' : statusStyle(venda.status)}`}>
+                    {emissionJob?.status === 'RECONCILIACAO_MANUAL' ? (
+                      <span className="flex items-center gap-1"><AlertTriangle size={10} /> Aguardando conciliação</span>
+                    ) : venda.status === 'PROCESSANDO' ? (
                       <span className="flex items-center gap-1"><Loader2 size={10} className="animate-spin" /> Processando</span>
                     ) : venda.status === 'HOMOLOGACAO_VALIDADA' ? 'Homologação validada' : venda.status.replaceAll('_', ' ')}
                   </span>
@@ -946,7 +994,9 @@ export default function DetalheVendaCompleto() {
               </button>
               <button
                 onClick={startCorrection}
-                className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700 shadow-sm"
+                disabled={emissionJob?.status === 'RECONCILIACAO_MANUAL'}
+                title={emissionJob?.status === 'RECONCILIACAO_MANUAL' ? 'Concilie a DPS original antes de alterar a venda.' : undefined}
+                className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700 shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Settings2 size={16} /> Corrigir
               </button>
@@ -1105,7 +1155,15 @@ export default function DetalheVendaCompleto() {
                                 {sincronizandoRetorno ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
                                 {sincronizandoRetorno ? 'Verificando...' : 'Retomar somente consultas'}
                               </button>
-                              {emissionJob.reservedDpsNumero && (
+                              {hasE0014Conflict && emissionJob.reservedDpsNumero ? (
+                                <button
+                                  disabled={sincronizandoRetorno}
+                                  onClick={() => encerrarConflitoNumeracao(emissionJob.id, emissionJob.reservedDpsNumero!)}
+                                  className="rounded-xl bg-amber-500 px-3 py-2 font-black text-amber-950 hover:bg-amber-400 disabled:opacity-60"
+                                >
+                                  Encerrar conflito e liberar reemissão
+                                </button>
+                              ) : emissionJob.reservedDpsNumero && (
                                 <button
                                   disabled={sincronizandoRetorno}
                                   onClick={() => retransmitirMesmaDps(emissionJob.id, emissionJob.reservedDpsNumero!)}

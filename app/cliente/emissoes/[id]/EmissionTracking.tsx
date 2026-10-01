@@ -39,9 +39,10 @@ export default function EmissionTracking({ jobId }: { jobId: string }) {
 
   useEffect(() => {
     void load();
+    if (job && !activeStatuses.has(job.status)) return;
     const timer = window.setInterval(() => void load(), 5000);
     return () => window.clearInterval(timer);
-  }, [load]);
+  }, [job?.status, load]);
 
   const presentation = statusPresentation(job?.status);
   const Icon = presentation.Icon;
@@ -100,6 +101,11 @@ export default function EmissionTracking({ jobId }: { jobId: string }) {
 
                 {active && <p className="text-center text-sm text-slate-500">Esta página é atualizada automaticamente. Não envie outra nota para a mesma venda.</p>}
                 {job.status === 'AUTORIZADA' && <Link href="/cliente/notas" className="block rounded-xl bg-blue-600 px-5 py-3 text-center font-black text-white hover:bg-blue-700">Ver nota no histórico</Link>}
+                {job.status === 'ERRO_FINAL' && job.draftEligible && job.vendaId && (
+                  <Link href={`/emitir?retry=${encodeURIComponent(job.vendaId)}`} className="block rounded-xl bg-blue-600 px-5 py-3 text-center font-black text-white hover:bg-blue-700">
+                    Corrigir e emitir novamente
+                  </Link>
+                )}
               </>
             )}
           </div>

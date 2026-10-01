@@ -1,0 +1,2 @@
+ALTER TABLE "GlobalCnae"
+ADD COLUMN "complementares" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];

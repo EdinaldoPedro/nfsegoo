@@ -15,13 +15,15 @@ test('emissao: duplicidade, timeout, erro generico e resposta vazia requerem con
     assert.equal(classifyPortalRejection(400, value), 'UNKNOWN');
   }
 });
-test('emissao: esgotamento incerto vai para conciliacao manual, nunca falha definitiva/devolucao', () => {
-  for (const transmitted of [true, false]) {
-    assert.deepEqual(emissionFailureState({ transmitted, definitive: false, attempts: 5, maxAttempts: 5 }),
-      { status: 'RECONCILIACAO_MANUAL', releaseCredit: false, retry: false });
-    assert.deepEqual(emissionFailureState({ transmitted, definitive: false, attempts: 2, maxAttempts: 5 }),
-      { status: 'ERRO_TEMPORARIO', releaseCredit: false, retry: true });
-  }
+test('emissao: somente esgotamento depois da fronteira fiscal exige conciliacao manual', () => {
+  assert.deepEqual(emissionFailureState({ transmitted: true, definitive: false, attempts: 5, maxAttempts: 5 }),
+    { status: 'RECONCILIACAO_MANUAL', releaseCredit: false, retry: false });
+  assert.deepEqual(emissionFailureState({ transmitted: false, definitive: false, attempts: 5, maxAttempts: 5 }),
+    { status: 'ERRO_FINAL', releaseCredit: true, retry: false });
+  for (const transmitted of [true, false]) assert.deepEqual(
+    emissionFailureState({ transmitted, definitive: false, attempts: 2, maxAttempts: 5 }),
+    { status: 'ERRO_TEMPORARIO', releaseCredit: false, retry: true },
+  );
   assert.equal(emissionFailureState({ transmitted: true, definitive: true, attempts: 1, maxAttempts: 5 }).releaseCredit, true);
 });
 test('emissao: backoff e limitado a quinze minutos e nao depende de temporizador HTTP', () => {
