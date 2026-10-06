@@ -262,3 +262,17 @@ test('nova emissao executa o preflight antes de credito, venda e job', () => {
   }
   assert.ok(source.slice(workerStart).includes('await resolveEmissionFiscalContext'), 'worker deixou de repetir a validacao fiscal');
 });
+
+test('preparacao de producao respeita beneficio administrativo sem reserva', () => {
+  const { assertJobCreditForPreparation } = require('../app/services/emissaoJobService.ts');
+  const adminJob = { ambiente: 'PRODUCAO', billingUnlimited: true, creditReservationId: null, billingUserId: 'admin' };
+  assert.doesNotThrow(() => assertJobCreditForPreparation(adminJob, null));
+  assert.throws(
+    () => assertJobCreditForPreparation({ ...adminJob, creditReservationId: 'credit-1' }, { id: 'credit-1', status: 'RESERVED', userId: 'admin' }),
+    /Benefício administrativo não pode usar reserva de crédito/,
+  );
+
+  const limitedJob = { ambiente: 'PRODUCAO', billingUnlimited: false, creditReservationId: 'credit-2', billingUserId: 'payer' };
+  assert.doesNotThrow(() => assertJobCreditForPreparation(limitedJob, { id: 'credit-2', status: 'RESERVED', userId: 'payer' }));
+  assert.throws(() => assertJobCreditForPreparation(limitedJob, null), /Reserva de crédito ausente ou encerrada/);
+});
