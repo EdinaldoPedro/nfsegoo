@@ -77,7 +77,10 @@ export const GET = withApiGuard(async function GET(request: Request) {
           SELECT (COALESCE(octet_length("certificadoA1"), 0) > 0) AS available FROM "Empresa" WHERE "id" = ${emp.id} AND "arquivadoEm" IS NULL
         `;
         temCertificado = flags[0]?.available ?? false;
-        dadosEmpresa = { ...emp, sequenciasDps: await listDpsSequences(emp.id) };
+        const imPreferences = await prisma.$queryRaw<Array<{ enviar: boolean }>>`
+          SELECT "enviarInscricaoMunicipalDps" AS enviar FROM "Empresa" WHERE "id" = ${emp.id} LIMIT 1
+        `;
+        dadosEmpresa = { ...emp, enviarInscricaoMunicipalDps: imPreferences[0]?.enviar !== false, sequenciasDps: await listDpsSequences(emp.id) };
       }
 
       let atividadesEnriquecidas = dadosEmpresa.atividades || [];

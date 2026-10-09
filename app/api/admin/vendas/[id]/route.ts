@@ -1,15 +1,15 @@
 import { withApiGuard } from '@/app/utils/api-route';
 import { NextResponse } from 'next/server';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
-import { archiveSale } from '@/app/services/saleArchiveService';
+import { archiveHomologationSale, archiveSale } from '@/app/services/saleArchiveService';
 import { fiscalOperationSelect } from '@/app/services/fiscalNoteService';
-import { requireAdminReauthentication } from '@/app/utils/admin-security';
 import { isAdminRole, isSupportRole } from '@/app/utils/access-control';
 import { prisma } from '@/app/utils/prisma';
 import { validateSelectableNbs } from '@/app/utils/nbs';
 import { createLog, sanitizeLogValue } from '@/app/services/logger';
 import { stripEmpresaSecrets } from '@/app/utils/safe-data';
 import { getTributacaoPorCnae } from '@/app/utils/tributacao';
+import { checkRateLimit } from '@/app/utils/rate-limit';
 
 async function ensureSupport(request: Request) {
   const user = await getAuthenticatedUser(request);
@@ -249,17 +249,25 @@ export const GET = withApiGuard(async function GET(request: Request, { params: r
             transmissionStartedAt: true,
             nextAttemptAt: true,
             resultNotaId: true,
+            signedXml: true,
+            payloadJson: true,
+            preparedMetadataJson: true,
             createdAt: true,
             updatedAt: true,
           },
         })
       : [];
+    const emissionJobsSeguros = emissionJobs.map((job: any) => ({
+      ...job,
+      payloadJson: sanitizeStoredDetails(job.payloadJson),
+      preparedMetadataJson: sanitizeStoredDetails(job.preparedMetadataJson),
+    }));
 
     return NextResponse.json({
       ...venda,
       empresa: stripEmpresaSecrets(venda.empresa),
       logs: logsSeguros,
-      emissionJobs,
+      emissionJobs: emissionJobsSeguros,
       payloadJson: logDps ? logDps.details : null,
       payloadRecuperado,
       xmlErro: logErro ? logErro.details : null,
@@ -301,10 +309,39 @@ export const DELETE = withApiGuard(async function DELETE(request: Request, { par
   if (!isAdminRole(user.role)) return forbidden();
   const { id } = await params;
   const body = await request.json();
-  const reauth = await requireAdminReauthentication({ actorId: user.id, password: body.adminPassword, justification: body.justification, action: 'ARCHIVE_SALE' });
-  if (reauth) return reauth;
+  const hideHomologation = body.action === 'HIDE_HOMOLOGATION';
+  if (hideHomologation) {
+    const justification = typeof body.justification === 'string' ? body.justification.trim() : '';
+    if (justification.length < 10 || justification.length > 2000) {
+      return NextResponse.json({ error: 'Informe uma justificativa entre 10 e 2000 caracteres.' }, { status: 400 });
+    }
+    if (body.confirmation !== 'OCULTAR TESTE') {
+      return NextResponse.json({ error: 'Confirmação textual inválida.' }, { status: 400 });
+    }
+    if (!await checkRateLimit(`admin_hide_homologation_${user.id}`, 10, 5 * 60 * 1000)) {
+      return NextResponse.json({ error: 'Muitas solicitações. Aguarde 5 minutos.' }, { status: 429 });
+    }
+    try {
+      await archiveHomologationSale(user.id, id, justification);
+      return NextResponse.json({ success: true, message: 'Teste de homologação ocultado. Documentos e auditoria foram preservados.' });
+    } catch (error) {
+      const failure = error as Error & { status?: number };
+      if (failure.status && failure.status < 500) return NextResponse.json({ error: failure.message }, { status: failure.status });
+      throw error;
+    }
+  }
+  const justification = typeof body.justification === 'string' ? body.justification.trim() : '';
+  if (justification.length < 10 || justification.length > 2000) {
+    return NextResponse.json({ error: 'Informe uma justificativa entre 10 e 2000 caracteres.' }, { status: 400 });
+  }
+  if (body.confirmation !== 'ARQUIVAR VENDA') {
+    return NextResponse.json({ error: 'Confirmação textual inválida.' }, { status: 400 });
+  }
+  if (!await checkRateLimit(`admin_archive_sale_${user.id}`, 10, 5 * 60 * 1000)) {
+    return NextResponse.json({ error: 'Muitas solicitações. Aguarde 5 minutos.' }, { status: 429 });
+  }
   try {
-    await archiveSale(user.id, id, true);
+    await archiveSale(user.id, id, true, justification);
     return NextResponse.json({ success: true, message: 'Venda arquivada; nenhum documento fiscal válido removido.' });
   } catch (error) {
     const failure = error as Error & { status?: number };

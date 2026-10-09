@@ -95,6 +95,23 @@ export async function resolveBillingUserId(params: { empresaId: string; actorUse
   return owner;
 }
 
+export async function resolveAdministrativeEmissionBillingUserId(params: { empresaId: string; vendaId: string }, db: Db = prisma) {
+  const company = await db.empresa.findFirst({ where: { id: params.empresaId, arquivadoEm: null }, select: {
+    donoFaturamentoId: true, proprietarioUserId: true, modoCobranca: true, contadorCustodianteId: true,
+    donoUser: { select: { id: true } },
+  } });
+  if (!company) throw Object.assign(new Error('Empresa indisponível para cobrança.'), { status: 409 });
+  if (company.modoCobranca === 'POR_OPERADOR') {
+    const previous = await db.emissaoJob.findFirst({ where: { vendaId: params.vendaId, empresaId: params.empresaId, billingUserId: { not: null } },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], select: { billingUserId: true } });
+    if (previous?.billingUserId) return previous.billingUserId;
+    throw Object.assign(new Error('A venda não possui responsável financeiro anterior para a correção administrativa.'), { status: 409 });
+  }
+  const owner = company.donoFaturamentoId || company.proprietarioUserId || company.donoUser?.id || company.contadorCustodianteId;
+  if (!owner) throw Object.assign(new Error('Defina o responsável pelo faturamento antes de emitir.'), { status: 409 });
+  return owner;
+}
+
 /** Must run in the same transaction as job creation. The request key belongs to
  * the company/idempotency key, never to a transient HTTP attempt. */
 export async function reserveEmissionCreditInTransaction(db: Db, userId: string, requestKey: string, now = new Date()) {

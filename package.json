@@ -33,6 +33,7 @@
     "fiscal:fingerprint": "node -r ./scripts/register-typescript-tests.cjs scripts/fiscal-homologation-readiness.cjs --fingerprint",
     "readiness:fiscal": "node --env-file=.env -r ./scripts/register-typescript-tests.cjs scripts/fiscal-homologation-readiness.cjs",
     "readiness:migrations": "node --env-file=.env scripts/migration-gate.cjs",
+    "db:restore:local": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/restore-local-database.ps1",
     "readiness:production": "node --env-file=.env -r ./scripts/register-typescript-tests.cjs scripts/production-readiness.cjs",
     "studio": "node node_modules/prisma/build/index.js studio",
     "lint": "eslint ."

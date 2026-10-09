@@ -69,6 +69,7 @@ export default function ConfiguracoesEmpresa() {
     nomeFantasia: '',
     cnaePrincipal: '',
     inscricaoMunicipal: '',
+    enviarInscricaoMunicipalDps: true,
     regimeTributario: '',
     cep: '',
     logradouro: '',
@@ -121,6 +122,31 @@ export default function ConfiguracoesEmpresa() {
       await dialog.showAlert({ type: 'success', title: fiscalForm.ativo ? 'Configuração própria ativada' : 'Rascunho fiscal salvo', description: fiscalForm.ativo ? 'As próximas emissões deste CNAE usarão a configuração da empresa.' : 'A emissão continua usando as regras do SaaS até que a configuração seja ativada.' });
     } catch (error) { await dialog.showAlert({ type: 'danger', description: error instanceof Error ? error.message : 'Falha ao salvar.' }); }
     finally { setSavingFiscal(false); }
+  };
+
+  const atualizarEnvioImPrestador = async (enviar: boolean) => {
+    const anterior = empresa.enviarInscricaoMunicipalDps;
+    setEmpresa((atual) => ({ ...atual, enviarInscricaoMunicipalDps: enviar }));
+    try {
+      const response = await fetch('/api/perfil/prestador-im', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': localStorage.getItem('userId') || '', 'x-empresa-id': localStorage.getItem('empresaContextId') || '' },
+        body: JSON.stringify({ enviar }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'Não foi possível atualizar o envio da IM.');
+      if (typeof result.empresaAtualizadaEm === 'string') {
+        setCompanyContext((current) => ({ ...current, updatedAt: result.empresaAtualizadaEm }));
+      }
+      await dialog.showAlert({
+        type: 'success',
+        title: enviar ? 'Envio da IM ativado' : 'IM preservada e omitida da DPS',
+        description: enviar ? 'As próximas DPS voltarão a informar a Inscrição Municipal.' : 'A Inscrição Municipal continua cadastrada, mas não será enviada nas próximas DPS.',
+      });
+    } catch (error) {
+      setEmpresa((atual) => ({ ...atual, enviarInscricaoMunicipalDps: anterior }));
+      await dialog.showAlert({ type: 'danger', description: error instanceof Error ? error.message : 'Falha ao atualizar.' });
+    }
   };
 
   const manterIbgeSeConsultaVierVazia = (codigoNovo: string | null | undefined, codigoAtual: string | null | undefined) => {
@@ -588,6 +614,12 @@ export default function ConfiguracoesEmpresa() {
                   <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Inscrição Municipal <span className="text-blue-600 text-xs">(Editável)</span></label>
                       <input type="text" className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white font-bold text-gray-800" placeholder="Ex: 12345" value={empresa.inscricaoMunicipal || ''} onChange={e => setEmpresa({...empresa, inscricaoMunicipal: e.target.value})}/>
+                      {empresa.inscricaoMunicipal && companyContext.id && (
+                        <label className="mt-3 flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                          <input type="checkbox" className="mt-0.5 h-4 w-4" checked={empresa.enviarInscricaoMunicipalDps} onChange={(event) => void atualizarEnvioImPrestador(event.target.checked)} />
+                          <span><strong className="block text-slate-900">Enviar a IM na DPS</strong>A IM permanece cadastrada mesmo quando esta opção estiver desmarcada.</span>
+                        </label>
+                      )}
                   </div>
                   <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Regime Tributário <span className="text-red-500 text-xs">* Obrigatório</span></label>

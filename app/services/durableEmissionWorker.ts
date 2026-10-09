@@ -2,7 +2,7 @@ import type { EmissaoJob, Prisma } from '@prisma/client';
 import { prisma } from '@/app/utils/prisma';
 import { hasCustomerCompanyAccess, isAdminRole } from '@/app/utils/access-control';
 import { emissionFailureState, retryDelayMs } from '@/app/utils/emission-outcome';
-import { consumeEmissionCredit, releaseEmissionCredit, resolveBillingUserId } from './planService';
+import { consumeEmissionCredit, releaseEmissionCredit, resolveAdministrativeEmissionBillingUserId, resolveBillingUserId } from './planService';
 import { prepararEmissaoJob } from './emissaoJobService';
 import { EmissorFactory } from './emissor/factories/EmissorFactory';
 import type { IEmissorStrategy, IResultadoEmissao } from './emissor/interfaces/IEmissorStrategy';
@@ -11,17 +11,30 @@ import { LeasedEmission, LostEmissionLease, preflightReservedDps, renewEmissionL
 import { requestFiscalDocument } from './fiscalNoteService';
 import { lockCanonicalDpsSequence } from './dpsSequenceStore';
 import { normalizeDpsNumber } from '@/app/utils/dps-identity';
+import { getMensagemErroFiscalCliente } from '@/app/utils/fiscal-error-messages';
 
 async function validateBeforeTransmission(tx: Prisma.TransactionClient, job: EmissaoJob) {
   await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${job.actorUserId} FOR UPDATE`;
   await tx.$queryRaw`SELECT "id" FROM "Empresa" WHERE "id" = ${job.empresaId} FOR UPDATE`;
   const actor = await tx.user.findUnique({ where: { id: job.actorUserId } });
   const company = await tx.empresa.findUnique({ where: { id: job.empresaId } });
+  const correction: any = (() => {
+    try { return JSON.parse(job.payloadJson || '{}')._administrativeCorrection; } catch { return null; }
+  })();
+  const isAdministrativeCorrection = job.source === 'ADMIN_CORRECTION'
+    && correction?.sourceSaleId === job.vendaId
+    && correction?.actorId === job.actorUserId
+    && typeof correction?.justification === 'string' && correction.justification.trim().length >= 10;
+  if (job.source === 'ADMIN_CORRECTION' && !isAdministrativeCorrection) {
+    throw Object.assign(new Error('Correção administrativa sem rastreabilidade válida.'), { status: 403 });
+  }
   if (!actor || !company || company.arquivadoEm ||
-      !await hasCustomerCompanyAccess(actor, job.empresaId, tx) || company.ambiente !== job.ambiente) {
+      (isAdministrativeCorrection ? !isAdminRole(actor.role) : !await hasCustomerCompanyAccess(actor, job.empresaId, tx)) || company.ambiente !== job.ambiente) {
     throw Object.assign(new Error('Permissão, empresa ou ambiente alterado antes da transmissão. Revise a solicitação.'), { status: 403 });
   }
-  const billing = await resolveBillingUserId({ empresaId: job.empresaId, actorUserId: actor.id, acao: 'EMITIR' }, tx);
+  const billing = isAdministrativeCorrection
+    ? await resolveAdministrativeEmissionBillingUserId({ empresaId: job.empresaId, vendaId: job.vendaId! }, tx)
+    : await resolveBillingUserId({ empresaId: job.empresaId, actorUserId: actor.id, acao: 'EMITIR' }, tx);
   const payer = await tx.user.findUnique({ where: { id: billing }, select: { planoStatus: true, role: true } });
   if (billing !== job.billingUserId || !payer || payer.planoStatus === 'suspended') {
     throw Object.assign(new Error('Responsável financeiro alterado ou suspenso. Revise a emissão.'), { status: 403 });
@@ -59,14 +72,16 @@ async function notifyInTransaction(tx: Prisma.TransactionClient, job: EmissaoJob
 export async function finishEmissionFailure(job: LeasedEmission, definitive: boolean, message: string, errors?: unknown) {
   return withEmissionLease(job, async (tx, current) => {
     const next = emissionFailureState({ transmitted: !!current.transmissionStartedAt, definitive, attempts: current.attempts, maxAttempts: current.maxAttempts });
+    const fiscalGuidance = getMensagemErroFiscalCliente({ message, details: errors });
     const statusMessage = next.status === 'ERRO_FINAL' ? message : current.transmissionStartedAt
       ? (next.retry ? 'Consultando a DPS original para confirmar o resultado. Não reenvie.' : 'Resultado fiscal não confirmado. A empresa aguarda conciliação; não crie outra nota para esta venda.')
       : (next.retry ? 'Preparação temporariamente indisponível. A tarefa permanece na fila.' : 'Preparação interrompida. Solicite análise ao suporte.');
     await tx.emissaoJob.update({ where: { id: job.id }, data: {
       status: next.status, statusMessage, nextAttemptAt: next.retry ? new Date(Date.now() + retryDelayMs(current.attempts)) : null,
       finishedAt: next.status === 'ERRO_FINAL' ? new Date() : null, leaseToken: null, leaseUntil: null,
-      lastError: JSON.stringify({ userAction: statusMessage, motivo: message, details: errors, temporario: next.retry,
-        draftEligible: next.status === 'ERRO_FINAL', requiresReconciliation: next.status === 'RECONCILIACAO_MANUAL' }),
+      lastError: JSON.stringify({ userAction: fiscalGuidance?.message || statusMessage, motivo: message, details: errors, temporario: next.retry,
+        draftEligible: next.status === 'ERRO_FINAL', draftReasonType: fiscalGuidance?.reasonType || null,
+        requiresReconciliation: next.status === 'RECONCILIACAO_MANUAL' }),
     } });
     if (next.releaseCredit) await releaseEmissionCredit(current.creditReservationId, tx);
     if (current.vendaId && next.status === 'ERRO_FINAL') await tx.venda.update({ where: { id: current.vendaId }, data: { status: 'ERRO_EMISSAO' } });

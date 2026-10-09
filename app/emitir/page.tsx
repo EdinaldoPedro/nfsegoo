@@ -232,9 +232,18 @@ function EmitirNotaContent() {
 
           if (rascunhoSalvo) {
               if (respostaErro.draftReasonType === 'INSCRICAO_MUNICIPAL_NAO_INFORMAR') {
-                  const irConfig = await dialog.showConfirm({ type: 'warning', title: 'Não enviar Inscrição Municipal', description: `${actionText}${hintRascunho}`, confirmText: 'Abrir Configurações', cancelText: 'Ficar na revisão' });
-                  if (irConfig) router.push('/configuracoes');
-                  else setStep(2);
+                  const confirmarOmissao = await dialog.showConfirm({ type: 'warning', title: 'Não enviar Inscrição Municipal', description: `${actionText}${hintRascunho}\n\nDeseja não enviar a IM nas próximas DPS desta empresa?`, confirmText: 'Não enviar a IM', cancelText: 'Ficar na revisão' });
+                  if (confirmarOmissao) {
+                      try {
+                          const response = await fetch('/api/perfil/prestador-im', { method: 'PUT', headers: getAuthHeaders(), body: JSON.stringify({ enviar: false }) });
+                          const result = await response.json().catch(() => ({}));
+                          if (!response.ok) throw new Error(result.error || 'Não foi possível atualizar a configuração.');
+                          await dialog.showAlert({ type: 'success', title: 'Configuração atualizada', description: 'A IM continua salva no cadastro, mas não será enviada na DPS. Revise o rascunho e tente emitir novamente.' });
+                      } catch (error) {
+                          await dialog.showAlert({ type: 'danger', title: 'Configuração não atualizada', description: error instanceof Error ? error.message : 'Não foi possível atualizar a configuração.' });
+                      }
+                  }
+                  setStep(2);
                   return;
               }
               if (respostaErro.draftReasonType === 'INSCRICAO_MUNICIPAL') {
@@ -677,19 +686,20 @@ function EmitirNotaContent() {
     }
   };
 
-  const resumeIntent = async () => {
-    if (submittingRef.current) return;
+  const resumeIntent = async (options: { continueWhenCleared?: boolean } = {}): Promise<'CLEARED' | 'HANDLED' | 'FAILED'> => {
+    if (submittingRef.current) return 'HANDLED';
     submittingRef.current = true;
     setLoading(true);
     try {
       const { slot, headers } = getIntentContext();
       const intent = readEmissionIntent(sessionStorage, slot);
-      if (!intent) { setHasPendingIntent(false); return; }
+      if (!intent) { setHasPendingIntent(false); return 'CLEARED'; }
       const url = '/api/notas/solicitacao?key=' + encodeURIComponent(intent.key);
       const response = await fetch(url, { headers });
       const data = await response.json();
       if (response.ok && data.job) {
         await followIntent(data.job.id, slot, intent.key, headers, true);
+        return 'HANDLED';
       } else if (response.status === 404) {
         // The browser may still hold an older local key while the server has a
         // newer unresolved job (for example after an administrative recovery).
@@ -700,7 +710,7 @@ function EmitirNotaContent() {
           sessionStorage.setItem(slot, JSON.stringify({ key: outstanding.job.idempotencyKey, fingerprint: '0'.repeat(64) }));
           setPendingJobStatus(outstanding.job.status);
           await followIntent(outstanding.job.id, slot, outstanding.job.idempotencyKey, headers, true);
-          return;
+          return 'HANDLED';
         }
         // No server-side job is outstanding. Tombstoning the stale key makes a
         // delayed duplicate impossible and safely releases the form in one step.
@@ -711,11 +721,19 @@ function EmitirNotaContent() {
           clearEmissionIntent(sessionStorage, slot, intent.key);
           setHasPendingIntent(false);
           setPendingJobStatus(null);
-          await dialog.showAlert({ type: 'success', title: 'Nova emissão liberada', description: 'Não existe outra solicitação fiscal pendente. Você já pode emitir uma nova nota.' });
-        } else if (result.job) await followIntent(result.job.id, slot, intent.key, headers, true);
+          if (!options.continueWhenCleared) {
+            await dialog.showAlert({ type: 'success', title: 'Nova emissão liberada', description: 'Não existe outra solicitação fiscal pendente. Você já pode emitir uma nova nota.' });
+          }
+          return 'CLEARED';
+        } else if (result.job) {
+          await followIntent(result.job.id, slot, intent.key, headers, true);
+          return 'HANDLED';
+        }
       } else throw new Error(data.error || 'Não foi possível verificar a solicitação.');
+      return 'HANDLED';
     } catch (error: any) {
       await dialog.showAlert({ type: 'warning', title: 'Solicitação preservada', description: error.message || 'Verifique sua conexão antes de continuar.' });
+      return 'FAILED';
     } finally { submittingRef.current = false; setLoading(false); }
   };
 
@@ -749,7 +767,10 @@ function EmitirNotaContent() {
           setHasPendingIntent(true);
         }
       }
-      if (previous) { await resumeIntent(); return; }
+      if (previous) {
+        const previousResult = await resumeIntent({ continueWhenCleared: true });
+        if (previousResult !== 'CLEARED') return;
+      }
     } catch (error) {
       await dialog.showAlert({ type: 'warning', title: 'Verifique sua solicitação', description: error instanceof Error ? error.message : 'Não foi possível confirmar o estado da emissão anterior.' });
       return;
@@ -873,7 +894,7 @@ function EmitirNotaContent() {
             : pendingJobStatus === 'ERRO_FINAL'
               ? 'A tentativa anterior foi encerrada pelo suporte. Confira o resultado para liberar uma nova emissão.'
             : 'Existe uma solicitação anterior. Confira o resultado antes de enviar outra nota.'}</p>
-          <button type="button" onClick={resumeIntent} className="mt-2 rounded-lg border border-amber-800 px-4 py-2 font-semibold">
+          <button type="button" onClick={() => void resumeIntent()} className="mt-2 rounded-lg border border-amber-800 px-4 py-2 font-semibold">
             {pendingJobStatus === 'AUTORIZADA' ? 'Conferir resultado e continuar'
               : pendingJobStatus === 'ERRO_FINAL' ? 'Liberar nova emissão' : 'Verificar solicitação anterior'}
           </button>

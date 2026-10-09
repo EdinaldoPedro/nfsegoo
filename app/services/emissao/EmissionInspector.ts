@@ -13,6 +13,7 @@ import { normalizeDpsNumber, normalizeDpsSeries } from '@/app/utils/dps-identity
 import { assertRegimeTributarioSuportado } from '@/app/utils/regime-tributario';
 import { fiscalCnpj } from '@/app/utils/fiscal-identifiers';
 import { validarCPF } from '@/app/utils/cpf';
+import { shouldSendPrestadorMunicipalRegistration } from '@/app/services/prestadorImPreferenceService';
 
 type CheckStatus = 'ok' | 'warn' | 'error' | 'info';
 
@@ -159,7 +160,10 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
   });
   const numeroInformado = firstDefined(overrides.numeroDPS);
   const numeroDPSFinal = normalizeDpsNumber(numeroInformado !== undefined ? numeroInformado : ultimoDpsConhecido + 1);
-  const prestadorInscricaoMunicipal = optionalText(firstDefined(overrides.inscricaoMunicipalPrestador, prestador.inscricaoMunicipal));
+  const enviarPrestadorIm = await shouldSendPrestadorMunicipalRegistration(prestador.id);
+  const prestadorInscricaoMunicipal = enviarPrestadorIm
+    ? optionalText(firstDefined(overrides.inscricaoMunicipalPrestador, prestador.inscricaoMunicipal))
+    : undefined;
   const prestadorRegimeEspecial = optionalText(firstDefined(overrides.regimeEspecialTributacao, prestador.regimeEspecialTributacao));
   const tipoTributacaoFinal = asText(firstDefined(overrides.tipoTributacao, prestador.tipoTributacaoPadrao, '1'), '1');
 
@@ -212,8 +216,10 @@ export async function inspecionarEmissaoVenda(vendaId: string, overrides: Inspec
     id: 'prestador-im',
     group: 'Prestador',
     label: 'Inscricao Municipal',
-    status: prestadorInscricaoMunicipal ? 'ok' : 'warn',
-    message: prestadorInscricaoMunicipal ? 'Inscricao Municipal informada.' : 'Sem Inscricao Municipal. Alguns municipios rejeitam a DPS.',
+    status: enviarPrestadorIm ? (prestadorInscricaoMunicipal ? 'ok' : 'warn') : 'ok',
+    message: enviarPrestadorIm
+      ? (prestadorInscricaoMunicipal ? 'Inscricao Municipal informada.' : 'Sem Inscricao Municipal. Alguns municipios rejeitam a DPS.')
+      : 'Inscricao Municipal preservada no cadastro e omitida da DPS por configuracao da empresa.',
     tag: 'prest/IM',
     field: 'empresa.inscricaoMunicipal',
   });

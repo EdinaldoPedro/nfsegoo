@@ -9,7 +9,7 @@ test('operacoes de nota PostgreSQL: cancelamento duravel, consulta, documentos e
   const { enqueueFiscalNoteOperation, requestFiscalDocument, resumeFiscalNoteReconciliation } = require('../../app/services/fiscalNoteService.ts');
   const { claimFiscalNoteOperation, processFiscalNoteOperation, finishFiscalNoteOperation, failFiscalNoteOperation, LostNoteLease } = require('../../app/services/fiscalNoteWorker.ts');
   const { processNextEmissionDocument } = require('../../app/services/emissionDocumentWorker.ts');
-  const { archiveSale } = require('../../app/services/saleArchiveService.ts');
+  const { archiveHomologationSale, archiveSale } = require('../../app/services/saleArchiveService.ts');
   const { prepareCancellationRequest } = require('../../app/services/emissor/validation/CancellationEvent.ts');
   const { makeDps, makeNfse, signingCredentials, makeCancellationEvent } = require('../fixtures/fiscal.cjs');
   const prefix = 'qa-note-' + randomUUID(); const users = []; const companies = []; const notes = [];
@@ -191,6 +191,21 @@ test('operacoes de nota PostgreSQL: cancelamento duravel, consulta, documentos e
       await archiveSale(owner.id, draft.id); await archiveSale(owner.id, draft.id);
       assert.equal((await prisma.venda.findUniqueOrThrow({ where: { id: draft.id } })).status, 'DESCARTADA');
       assert.equal(await prisma.systemLog.count({ where: { vendaId: draft.id, action: 'VENDA_ARQUIVADA' } }), 1);
+    });
+    await t.test('somente admin oculta homologacao concluida e preserva documentos e auditoria', async () => {
+      const homologation = await createNote('HOMOLOGACAO');
+      await assert.rejects(archiveHomologationSale(owner.id, homologation.vendaId, 'Solicitação de teste do titular'), { status: 403 });
+      await assert.rejects(archiveHomologationSale(support.id, homologation.vendaId, 'Solicitação de teste do suporte'), { status: 403 });
+      await archiveHomologationSale(admin.id, homologation.vendaId, 'Teste concluído não deve permanecer nas listagens');
+      const [archivedNote, archivedSale, audit] = await Promise.all([
+        prisma.notaFiscal.findUniqueOrThrow({ where: { id: homologation.id } }),
+        prisma.venda.findUniqueOrThrow({ where: { id: homologation.vendaId } }),
+        prisma.systemLog.findFirst({ where: { vendaId: homologation.vendaId, action: 'HOMOLOGACAO_OCULTADA' } }),
+      ]);
+      assert.ok(archivedNote.arquivadoEm); assert.ok(archivedSale.arquivadoEm); assert.equal(archivedSale.status, 'DESCARTADA'); assert.ok(audit);
+      assert.ok(archivedNote.xmlAutorizadoBase64); assert.ok(archivedNote.pdfBase64); assert.ok(archivedNote.chaveAcesso);
+      const production = await createNote('PRODUCAO');
+      await assert.rejects(archiveHomologationSale(admin.id, production.vendaId, 'Tentativa indevida em produção'), { status: 409 });
     });
     assert.equal(await prisma.emissionCreditReservation.count({ where: { userId: owner.id } }), initialCredits);
   } finally {

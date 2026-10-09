@@ -35,7 +35,7 @@ export function getMensagemErroFiscalCliente(value: unknown) {
 
   if (text.includes('e0120') || (text.includes('im do prestador') && text.includes('não deve ser informad'))) {
     return {
-      message: 'O Portal Nacional informou que a inscrição municipal do prestador não deve ser enviada para este município. Remova a IM das configurações da empresa e reenvie a DPS.',
+      message: 'O Portal Nacional informou que a inscrição municipal do prestador não deve ser enviada para este município. Você pode preservar a IM no cadastro e desativar somente o envio dela na DPS.',
       needsSupport: false,
       reasonType: 'INSCRICAO_MUNICIPAL_NAO_INFORMAR',
     };

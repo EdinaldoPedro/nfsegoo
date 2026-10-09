@@ -5,6 +5,7 @@ import { normalizeCnpj, validarCNPJ } from '@/app/utils/cnpj';
 import { commercialTransaction } from './commercialService';
 import { getEffectivePlanLimits } from './planService';
 import { consultPublicCompanyRegistry } from './publicCompanyRegistryService';
+import { syncCnaesGlobalmente } from './syncService';
 
 const pendingStatuses = ['PENDENTE', 'PENDENTE_DONO', 'PENDENTE_CUSTODIANTE'];
 
@@ -62,6 +63,7 @@ export async function upsertEmpresaAndLinkUser(documento: string, userId: string
         modoCobranca: 'RESPONSAVEL_UNICO', lastApiCheck: lookup.consultedAt }, select: { id: true } });
       companyId = company.id;
       if (lookup.cnaes.length) await tx.cnae.createMany({ data: lookup.cnaes.map((item) => ({ ...item, empresaId: companyId })) as Prisma.CnaeCreateManyInput[] });
+      await syncCnaesGlobalmente(lookup.cnaes, lookup.data.codigoIbge, tx);
     }
     await tx.contadorVinculo.upsert({ where: { contadorId_empresaId: { contadorId: userId, empresaId: companyId } },
       create: { contadorId: userId, empresaId: companyId, status, clientePodeAcessarPortal: false, nivelPortal: 'NENHUM' },

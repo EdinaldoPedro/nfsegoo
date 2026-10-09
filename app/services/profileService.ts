@@ -11,6 +11,7 @@ import { encrypt } from '@/app/utils/crypto';
 import { commercialTransaction } from './commercialService';
 import { getEffectivePlanLimits } from './planService';
 import { setUserDpsSequenceInTransaction } from './dpsSequenceStore';
+import { syncCnaesGlobalmente } from './syncService';
 
 export class ProfileError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -241,6 +242,11 @@ export async function updateProfile(actorId: string, contextId: string | null, i
       }
       await tx.cnae.deleteMany({ where: { empresaId: saved.id, id: { notIn: retainedIds } } });
     }
+    await syncCnaesGlobalmente(
+      activities.map((item) => ({ codigo: item.codigo, descricao: item.descricao, principal: item.principal })),
+      saved.codigoIbge,
+      tx,
+    );
     if (inputCompany.data.serieDPS !== undefined || inputCompany.ultimoDPS !== undefined) {
       const sequence = await setUserDpsSequenceInTransaction(tx, { empresaId: saved.id, ambiente: saved.ambiente, serie: saved.serieDPS,
         ultimoConfirmado: inputCompany.ultimoDPS ?? 0, userId: actorId });

@@ -320,6 +320,7 @@ model Empresa {
   tipoTributacaoPadrao         String?                   @default("1")
   regimeEspecialTributacao     String?                   @default("0")
   inscricaoMunicipal           String?
+  enviarInscricaoMunicipalDps  Boolean                   @default(true)
   regimeTributario             String?
   certificadoA1                String?
   senhaCertificado             String?
