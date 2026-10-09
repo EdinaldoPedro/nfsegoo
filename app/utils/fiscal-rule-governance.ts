@@ -37,6 +37,18 @@ export function validateNormativeSource(value: unknown) {
   return source;
 }
 
+export function parseFiscalRuleDate(value: unknown, label: string, endOfDay = false) {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value !== 'string') throw new FiscalRuleGovernanceError(`${label} inválido.`);
+  const day = value.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new FiscalRuleGovernanceError(`${label} inválido.`);
+  const parsed = new Date(`${day}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}Z`);
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== day) {
+    throw new FiscalRuleGovernanceError(`${label} inválido.`);
+  }
+  return parsed;
+}
+
 export function fiscalRuleSnapshot(value: Record<string, unknown> | null | undefined) {
   if (!value) return null;
   return JSON.parse(JSON.stringify(value));

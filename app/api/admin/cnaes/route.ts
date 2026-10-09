@@ -6,7 +6,7 @@ import { validateSelectableNbs } from '@/app/utils/nbs';
 import { canReadFiscalCatalog, canWriteFiscalCatalog } from '@/app/utils/fiscal-admin-access';
 import {
   assertFiscalRuleVersion, changedFiscalRuleFields, FiscalRuleGovernanceError, fiscalRuleSnapshot,
-  parseFiscalRuleGovernance, validateNormativeSource,
+  parseFiscalRuleDate, parseFiscalRuleGovernance, validateNormativeSource,
 } from '@/app/utils/fiscal-rule-governance';
 
 
@@ -128,7 +128,10 @@ export const PUT = withApiGuard(async function PUT(request: Request) {
     if (modoRetencoes && !['SUGERIR', 'AUTOMATICO'].includes(modoRetencoes)) {
       return NextResponse.json({ error: 'Modo de retenção inválido.' }, { status: 400 });
     }
-    if (inicioVigencia && fimVigencia && inicioVigencia > fimVigencia) {
+    const inicioObrigatoriedadeDate = parseFiscalRuleDate(inicioObrigatoriedadeIbsCbs, 'Início da obrigatoriedade do IBS/CBS');
+    const inicioVigenciaDate = parseFiscalRuleDate(inicioVigencia, 'Início da vigência');
+    const fimVigenciaDate = parseFiscalRuleDate(fimVigencia, 'Fim da vigência', true);
+    if (inicioVigenciaDate && fimVigenciaDate && inicioVigenciaDate > fimVigenciaDate) {
       return NextResponse.json({ error: 'O fim da vigência deve ser posterior ao início.' }, { status: 400 });
     }
     if (cstPisCofins && !/^\d{2}$/.test(String(cstPisCofins).replace(/\D/g, ''))) {
@@ -182,13 +185,13 @@ export const PUT = withApiGuard(async function PUT(request: Request) {
         aliquotaTotTribSN: aliquotaTotTribSN !== '' && aliquotaTotTribSN !== null ? parseFloat(aliquotaTotTribSN) : null,
         aliquotaTotTribFederal: decimalOrNull(aliquotaTotTribFederal),
         habilitaIbsCbs: habilitaIbsCbs === null || habilitaIbsCbs === undefined || habilitaIbsCbs === '' ? null : habilitaIbsCbs === true || habilitaIbsCbs === 'true',
-        inicioObrigatoriedadeIbsCbs: inicioObrigatoriedadeIbsCbs ? new Date(`${inicioObrigatoriedadeIbsCbs}T00:00:00.000Z`) : null,
+        inicioObrigatoriedadeIbsCbs: inicioObrigatoriedadeDate,
         codigoIndicadorOperacao: codigoIndicadorOperacao || null,
         cstIbsCbs: cstIbsCbs || null,
         classeTribIbsCbs: classeTribIbsCbs || null,
         fonteNormativa: fonteNormativaValidada,
-        inicioVigencia: inicioVigencia ? new Date(`${inicioVigencia}T00:00:00.000Z`) : null,
-        fimVigencia: fimVigencia ? new Date(`${fimVigencia}T23:59:59.999Z`) : null,
+        inicioVigencia: inicioVigenciaDate,
+        fimVigencia: fimVigenciaDate,
         ...(complementaresNormalizados ? { complementares: complementaresNormalizados } : {}),
         },
       });
@@ -206,6 +209,10 @@ export const PUT = withApiGuard(async function PUT(request: Request) {
     return NextResponse.json(atualizado);
   } catch (error) {
     if (error instanceof FiscalRuleGovernanceError) return NextResponse.json({ error: error.message }, { status: error.status });
-    return NextResponse.json({ error: 'Erro ao atualizar' }, { status: 500 });
+    console.error('[GLOBAL_CNAE_UPDATE_FAILED]', {
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+      prismaCode: typeof error === 'object' && error && 'code' in error ? String(error.code) : undefined,
+    });
+    throw error;
   }
 });

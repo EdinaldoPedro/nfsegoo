@@ -6,6 +6,7 @@ const {
   assertFiscalRuleVersion,
   changedFiscalRuleFields,
   fiscalRuleSnapshot,
+  parseFiscalRuleDate,
   parseFiscalRuleGovernance,
   validateNormativeSource,
 } = require('../app/utils/fiscal-rule-governance.ts');
@@ -23,6 +24,14 @@ test('fonte normativa e obrigatoria para liberar uma regra fiscal', () => {
   assert.throws(() => validateNormativeSource(''), /fonte normativa/i);
   assert.throws(() => validateNormativeSource('x'), /fonte normativa/i);
   assert.equal(validateNormativeSource('Lei municipal 123/2026'), 'Lei municipal 123/2026');
+});
+
+test('datas fiscais aceitam dia ou timestamp do banco sem concatenar outro horario', () => {
+  assert.equal(parseFiscalRuleDate('2026-10-09', 'Início').toISOString(), '2026-10-09T00:00:00.000Z');
+  assert.equal(parseFiscalRuleDate('2026-10-09T00:00:00.000Z', 'Início').toISOString(), '2026-10-09T00:00:00.000Z');
+  assert.equal(parseFiscalRuleDate('2026-10-09T23:59:59.999Z', 'Fim', true).toISOString(), '2026-10-09T23:59:59.999Z');
+  assert.equal(parseFiscalRuleDate('', 'Início'), null);
+  assert.throws(() => parseFiscalRuleDate('2026-02-30', 'Início'), /inválido/i);
 });
 
 test('snapshot fiscal preserva valores anteriores e lista somente campos alterados', () => {
