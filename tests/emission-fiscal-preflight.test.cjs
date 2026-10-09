@@ -64,6 +64,23 @@ test('preflight fiscal recusa CTM obrigatorio ausente usando a mesma decisao do 
   );
 });
 
+test('configuracao fiscal ativa da empresa substitui as regras do SaaS para o CNAE', async () => {
+  const { resolveEmissionFiscalContext } = require('../app/services/emissaoJobService.ts');
+  const fixture = context('1111');
+  const configuracao = {
+    codigoTributacaoNacional: '080201', itemLc: '8.02', codigoTributacaoMunicipal: '880201',
+    exigeCodigoTributacaoMunicipal: true, exigeNbs: false, tipoTributacao: '4', aliquotaIss: 3.5,
+    modoRetencoes: 'SUGERIR', complementares: [],
+  };
+  fixture.db.$queryRaw = async () => [{ id: 'regra-cliente', configuracao, versao: 1 }];
+  const result = await resolveEmissionFiscalContext(fixture.params, fixture.db);
+  assert.equal(result.codigoTribNacional, '080201');
+  assert.equal(result.itemLc, '8.02');
+  assert.equal(result.codigoTributacaoMunicipal, '880201');
+  assert.equal(result.tipoTributacao, '4');
+  assert.ok(result.fiscalDecision.source.includes('AUTORIDADE_FISCAL:CLIENTE'));
+});
+
 test('payload nao preenche CTM ausente de uma regra municipal obrigatoria', async () => {
   const { resolveEmissionFiscalContext } = require('../app/services/emissaoJobService.ts');
   const fixture = context(null);

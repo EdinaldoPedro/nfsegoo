@@ -9,8 +9,9 @@ test('ledger PostgreSQL: limite concorrente, ciclos, CAS e criacao atomica do jo
   const { reserveEmissionCredit, reserveEmissionCreditInTransaction, releaseEmissionCredit, consumeEmissionCredit, getEffectivePlanLimits } = require('../../app/services/planService.ts');
   const { commercialTransaction } = require('../../app/services/commercialService.ts');
   const { criarEmissaoJob } = require('../../app/services/emissaoJobService.ts');
+  const { resolveAdministrativeEmissionBillingUserId } = require('../../app/services/planService.ts');
   const prefix = `qa-credit-${randomUUID()}`;
-  let user; let plan; let company; let customer;
+  let user; let plan; let company; let customer; let heartbeatId;
   const start = new Date(Date.now() - 60_000);
   try {
     user = await prisma.user.create({ data: { email: `${prefix}@example.invalid`, nome: 'Fixture de cota', senha: 'not-used', role: 'COMUM' } });
@@ -49,6 +50,8 @@ test('ledger PostgreSQL: limite concorrente, ciclos, CAS e criacao atomica do jo
       assert.equal((await getEffectivePlanLimits(user.id, prisma, start)).notasUsadas, 4);
     });
     await t.test('reenvio concorrente da mesma emissao cria uma venda, um job e uma reserva', async () => {
+      heartbeatId = `emission-qa-credit-${randomUUID()}`;
+      await prisma.workerHeartbeat.create({ data: { id: heartbeatId, productionEnabled: true } });
       company = await prisma.empresa.create({ data: { documento: prefix, razaoSocial: 'Fixture sem transmissao', proprietarioUserId: user.id,
         donoFaturamentoId: user.id, ambiente: 'PRODUCAO', regimeTributario: 'MEI', certificadoA1: 'fixture-never-transmitted' } });
       customer = await prisma.cliente.create({ data: { empresaId: company.id, documento: 'fixture-customer', tipo: 'PJ', nome: 'Tomador fixture', vinculos: { create: {} } } });
@@ -64,7 +67,14 @@ test('ledger PostgreSQL: limite concorrente, ciclos, CAS e criacao atomica do jo
       await assert.rejects(criarEmissaoJob({ ...args, body: { ...args.body, valor: '20.00' } }), (error) => error.status === 409);
       await assert.rejects(criarEmissaoJob({ ...args, idempotencyKey: randomUUID() }), (error) => error.status === 409 && /anterior/.test(error.message));
     });
+    await t.test('correcao administrativa nao cobra operador cujo vinculo foi encerrado', async () => {
+      const job = await prisma.emissaoJob.findFirstOrThrow({ where: { empresaId: company.id }, select: { vendaId: true } });
+      await prisma.empresa.update({ where: { id: company.id }, data: { modoCobranca: 'POR_OPERADOR', proprietarioUserId: null, donoFaturamentoId: null } });
+      await assert.rejects(resolveAdministrativeEmissionBillingUserId({ empresaId: company.id, vendaId: job.vendaId }),
+        error => error.status === 409 && /vínculo ativo/.test(error.message));
+    });
   } finally {
+    if (heartbeatId) await prisma.workerHeartbeat.deleteMany({ where: { id: heartbeatId } });
     if (company) {
       await prisma.emissaoJob.deleteMany({ where: { empresaId: company.id } });
       await prisma.systemLog.deleteMany({ where: { empresaId: company.id } });

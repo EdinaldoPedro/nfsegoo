@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState, useEffect, useRef, Suspense } from "react";
-import { CheckCircle, ArrowRight, ArrowLeft, Calculator, FileCheck, Briefcase, Loader2, Home, UserPlus, AlertTriangle, Send, FileSearch, FileCode2, BadgeCheck, ServerCog, FileClock, Trash2, ChevronDown } from "lucide-react";
+import { CheckCircle, ArrowRight, ArrowLeft, Calculator, FileCheck, Briefcase, Loader2, Home, UserPlus, AlertTriangle, Send, FileSearch, FileCode2, BadgeCheck, ServerCog, FileClock, Trash2, ChevronDown, CalendarDays } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { emissionIntentSlot, readEmissionIntent, getEmissionIntent, clearEmissionIntent } from "@/app/utils/emission-intent";
 import { useDialog } from "@/app/contexts/DialogContext";
@@ -31,6 +31,7 @@ interface CnaeDB {
   modoRetencoes?: 'SUGERIR' | 'AUTOMATICO';
   fiscalRuleConfigured?: boolean;
   ibscbsConfigured?: boolean;
+  complementares?: string[];
 }
 
 interface ClienteDB {
@@ -139,6 +140,9 @@ function EmitirNotaContent() {
     dataCompetencia: new Date().toLocaleDateString('en-CA'),
     numeroDPS: "",
     serieDPS: "",
+    eventoDataInicial: "",
+    eventoDataFinal: "",
+    eventoDescricao: "",
   });
   const nfValueRef = useRef(nfData.valor);
   nfValueRef.current = nfData.valor;
@@ -228,9 +232,18 @@ function EmitirNotaContent() {
 
           if (rascunhoSalvo) {
               if (respostaErro.draftReasonType === 'INSCRICAO_MUNICIPAL_NAO_INFORMAR') {
-                  const irConfig = await dialog.showConfirm({ type: 'warning', title: 'Não enviar Inscrição Municipal', description: `${actionText}${hintRascunho}`, confirmText: 'Abrir Configurações', cancelText: 'Ficar na revisão' });
-                  if (irConfig) router.push('/configuracoes');
-                  else setStep(2);
+                  const confirmarOmissao = await dialog.showConfirm({ type: 'warning', title: 'Não enviar Inscrição Municipal', description: `${actionText}${hintRascunho}\n\nDeseja não enviar a IM nas próximas DPS desta empresa?`, confirmText: 'Não enviar a IM', cancelText: 'Ficar na revisão' });
+                  if (confirmarOmissao) {
+                      try {
+                          const response = await fetch('/api/perfil/prestador-im', { method: 'PUT', headers: getAuthHeaders(), body: JSON.stringify({ enviar: false }) });
+                          const result = await response.json().catch(() => ({}));
+                          if (!response.ok) throw new Error(result.error || 'Não foi possível atualizar a configuração.');
+                          await dialog.showAlert({ type: 'success', title: 'Configuração atualizada', description: 'A IM continua salva no cadastro, mas não será enviada na DPS. Revise o rascunho e tente emitir novamente.' });
+                      } catch (error) {
+                          await dialog.showAlert({ type: 'danger', title: 'Configuração não atualizada', description: error instanceof Error ? error.message : 'Não foi possível atualizar a configuração.' });
+                      }
+                  }
+                  setStep(2);
                   return;
               }
               if (respostaErro.draftReasonType === 'INSCRICAO_MUNICIPAL') {
@@ -524,6 +537,9 @@ function EmitirNotaContent() {
             valorMoedaEstrangeira: String(sale.valorMoedaEstrangeira ?? ''),
             // The user reviews competence and current tax rules for the new request.
             dataCompetencia: sale.dataCompetencia ? String(sale.dataCompetencia).slice(0, 10) : prev.dataCompetencia,
+            eventoDataInicial: sale.atividadeEvento?.dataInicial || '',
+            eventoDataFinal: sale.atividadeEvento?.dataFinal || '',
+            eventoDescricao: sale.atividadeEvento?.descricao || '',
             numeroDPS: '', serieDPS: '',
           } : {}),
         }));
@@ -570,6 +586,13 @@ function EmitirNotaContent() {
         if (!nfData.codigoCnae) return dialog.showAlert("Selecione a atividade econômica para continuar.");
         if ((parseFloat(nfData.valor) || 0) <= 0) return dialog.showAlert("Informe um valor de serviço maior que zero.");
         if (!nfData.servicoDescricao.trim()) return dialog.showAlert("Informe a discriminação do serviço.");
+        const cnae = meusCnaes.find((item) => item.codigo === nfData.codigoCnae);
+        if (cnae?.complementares?.includes('EVENTO')) {
+            if (!nfData.eventoDataInicial || !nfData.eventoDataFinal) return dialog.showAlert("Informe as datas inicial e final do evento.");
+            if (nfData.eventoDataFinal < nfData.eventoDataInicial) return dialog.showAlert("A data final do evento não pode ser anterior à data inicial.");
+            const descricaoEvento = nfData.eventoDescricao.trim();
+            if (!descricaoEvento || descricaoEvento.length > 255) return dialog.showAlert("Informe a descrição do evento com até 255 caracteres.");
+        }
         if (cliente?.tipo === 'EXT' && (parseFloat(nfData.valorMoedaEstrangeira) || 0) <= 0) {
             return dialog.showAlert("Informe o valor faturado na moeda do contrato.");
         }
@@ -663,34 +686,54 @@ function EmitirNotaContent() {
     }
   };
 
-  const resumeIntent = async () => {
-    if (submittingRef.current) return;
+  const resumeIntent = async (options: { continueWhenCleared?: boolean } = {}): Promise<'CLEARED' | 'HANDLED' | 'FAILED'> => {
+    if (submittingRef.current) return 'HANDLED';
     submittingRef.current = true;
     setLoading(true);
     try {
       const { slot, headers } = getIntentContext();
       const intent = readEmissionIntent(sessionStorage, slot);
-      if (!intent) { setHasPendingIntent(false); return; }
+      if (!intent) { setHasPendingIntent(false); return 'CLEARED'; }
       const url = '/api/notas/solicitacao?key=' + encodeURIComponent(intent.key);
       const response = await fetch(url, { headers });
       const data = await response.json();
       if (response.ok && data.job) {
         await followIntent(data.job.id, slot, intent.key, headers, true);
+        return 'HANDLED';
       } else if (response.status === 404) {
-        const discard = await dialog.showConfirm({ type: 'warning', title: 'Solicitação não localizada',
-          description: 'Você pode tentar novamente mantendo os mesmos dados, ou descartar esta solicitação ainda não registrada. O descarte não cancela notas já enviadas.',
-          confirmText: 'Descartar solicitação não registrada', cancelText: 'Manter para tentar novamente' });
-        if (!discard) return;
+        // The browser may still hold an older local key while the server has a
+        // newer unresolved job (for example after an administrative recovery).
+        // Prefer the authoritative outstanding job before offering to discard.
+        const outstandingResponse = await fetch('/api/notas/solicitacao', { headers });
+        const outstanding = await outstandingResponse.json().catch(() => ({}));
+        if (outstandingResponse.ok && outstanding.job) {
+          sessionStorage.setItem(slot, JSON.stringify({ key: outstanding.job.idempotencyKey, fingerprint: '0'.repeat(64) }));
+          setPendingJobStatus(outstanding.job.status);
+          await followIntent(outstanding.job.id, slot, outstanding.job.idempotencyKey, headers, true);
+          return 'HANDLED';
+        }
+        // No server-side job is outstanding. Tombstoning the stale key makes a
+        // delayed duplicate impossible and safely releases the form in one step.
         const discarded = await fetch(url, { method: 'DELETE', headers });
         const result = await discarded.json();
         if (!discarded.ok) throw new Error(result.error || 'Não foi possível verificar o descarte.');
         if (result.discarded) {
           clearEmissionIntent(sessionStorage, slot, intent.key);
           setHasPendingIntent(false);
-        } else if (result.job) await followIntent(result.job.id, slot, intent.key, headers, true);
+          setPendingJobStatus(null);
+          if (!options.continueWhenCleared) {
+            await dialog.showAlert({ type: 'success', title: 'Nova emissão liberada', description: 'Não existe outra solicitação fiscal pendente. Você já pode emitir uma nova nota.' });
+          }
+          return 'CLEARED';
+        } else if (result.job) {
+          await followIntent(result.job.id, slot, intent.key, headers, true);
+          return 'HANDLED';
+        }
       } else throw new Error(data.error || 'Não foi possível verificar a solicitação.');
+      return 'HANDLED';
     } catch (error: any) {
       await dialog.showAlert({ type: 'warning', title: 'Solicitação preservada', description: error.message || 'Verifique sua conexão antes de continuar.' });
+      return 'FAILED';
     } finally { submittingRef.current = false; setLoading(false); }
   };
 
@@ -724,7 +767,10 @@ function EmitirNotaContent() {
           setHasPendingIntent(true);
         }
       }
-      if (previous) { await resumeIntent(); return; }
+      if (previous) {
+        const previousResult = await resumeIntent({ continueWhenCleared: true });
+        if (previousResult !== 'CLEARED') return;
+      }
     } catch (error) {
       await dialog.showAlert({ type: 'warning', title: 'Verifique sua solicitação', description: error instanceof Error ? error.message : 'Não foi possível confirmar o estado da emissão anterior.' });
       return;
@@ -757,7 +803,12 @@ function EmitirNotaContent() {
           dataCompetencia: nfData.dataCompetencia,
           numeroDPS: nfData.numeroDPS || undefined,
           serieDPS: nfData.serieDPS || undefined,
-          retencoes: payloadRetencoes
+          retencoes: payloadRetencoes,
+          atividadeEvento: cnaeSelecionadoObj?.complementares?.includes('EVENTO') ? {
+            dataInicial: nfData.eventoDataInicial,
+            dataFinal: nfData.eventoDataFinal,
+            descricao: nfData.eventoDescricao.trim(),
+          } : undefined,
         });
       const { slot, headers } = getIntentContext();
       const intent = await getEmissionIntent(sessionStorage, slot, body);
@@ -788,6 +839,7 @@ function EmitirNotaContent() {
   const isPJ = clienteSel?.tipo === 'PJ';
   const clientePfEnderecoPendente = !!clienteSel && isPF && !hasCompleteNationalAddress(clienteSel);
   const cnaeSelecionadoObj = meusCnaes.find(c => c.codigo === nfData.codigoCnae);
+  const exigeDadosEvento = !!cnaeSelecionadoObj?.complementares?.includes('EVENTO');
   const regimePermiteCrsfIr = perfilEmpresa?.regimeTributario === 'LUCRO_PRESUMIDO';
   const tomadorPermiteRetencoes = isPJ && !isPF && !isExterior;
   const mostraRetencoesFederais = regimePermiteCrsfIr && Boolean(cnaeSelecionadoObj?.retemCrsf || cnaeSelecionadoObj?.retemIr);
@@ -801,7 +853,8 @@ function EmitirNotaContent() {
   const cnaeRecuperadoForaDaLista = !!nfData.codigoCnae && !cnaeSelecionadoObj;
 
   const valorEstrangeiroNum = parseFloat(nfData.valorMoedaEstrangeira) || 0;
-  const isDadosNotaInvalid = !nfData.clienteId || clientePfEnderecoPendente || !nfData.codigoCnae || valorNumerico <= 0 || !nfData.servicoDescricao.trim() || (isExterior && valorEstrangeiroNum <= 0);
+  const eventoInvalido = exigeDadosEvento && (!nfData.eventoDataInicial || !nfData.eventoDataFinal || nfData.eventoDataFinal < nfData.eventoDataInicial || !nfData.eventoDescricao.trim() || nfData.eventoDescricao.trim().length > 255);
+  const isDadosNotaInvalid = !nfData.clienteId || clientePfEnderecoPendente || !nfData.codigoCnae || valorNumerico <= 0 || !nfData.servicoDescricao.trim() || eventoInvalido || (isExterior && valorEstrangeiroNum <= 0);
 
   const cnaeDescricaoCurta = cnaeSelecionadoObj?.descricao ? (cnaeSelecionadoObj.descricao.length > 20 ? cnaeSelecionadoObj.descricao.substring(0, 20) + '...' : cnaeSelecionadoObj.descricao) : '';
 
@@ -838,9 +891,12 @@ function EmitirNotaContent() {
         <div role="status" className="mb-5 rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-950">
           <p>{pendingJobStatus === 'AUTORIZADA'
             ? 'Sua emissão anterior foi concluída. Confira o resultado para liberar uma nova nota.'
+            : pendingJobStatus === 'ERRO_FINAL'
+              ? 'A tentativa anterior foi encerrada pelo suporte. Confira o resultado para liberar uma nova emissão.'
             : 'Existe uma solicitação anterior. Confira o resultado antes de enviar outra nota.'}</p>
-          <button type="button" onClick={resumeIntent} className="mt-2 rounded-lg border border-amber-800 px-4 py-2 font-semibold">
-            {pendingJobStatus === 'AUTORIZADA' ? 'Conferir resultado e continuar' : 'Verificar solicitação anterior'}
+          <button type="button" onClick={() => void resumeIntent()} className="mt-2 rounded-lg border border-amber-800 px-4 py-2 font-semibold">
+            {pendingJobStatus === 'AUTORIZADA' ? 'Conferir resultado e continuar'
+              : pendingJobStatus === 'ERRO_FINAL' ? 'Liberar nova emissão' : 'Verificar solicitação anterior'}
           </button>
         </div>
       )}
@@ -1106,6 +1162,33 @@ function EmitirNotaContent() {
               <label className="block text-sm font-medium text-slate-700 mb-2">Discriminação do Serviço</label>
               <textarea rows={4} placeholder="Descreva claramente o serviço prestado..." className="w-full resize-none rounded-xl border border-slate-200 p-3 text-slate-700 outline-blue-500" value={nfData.servicoDescricao} onChange={(e) => setNfData({...nfData, servicoDescricao: e.target.value})}></textarea>
             </div>
+
+            {exigeDadosEvento && (
+              <div className="rounded-2xl border border-indigo-200 bg-indigo-50 p-5">
+                <div className="mb-4 flex items-start gap-3">
+                  <CalendarDays className="mt-0.5 text-indigo-600" size={22} />
+                  <div>
+                    <h4 className="font-black text-indigo-950">Informações do evento</h4>
+                    <p className="mt-1 text-sm text-indigo-700">O endereço do evento será preenchido automaticamente com o endereço cadastrado da empresa prestadora.</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <div>
+                    <label className="mb-2 block text-sm font-bold text-indigo-950">Data inicial</label>
+                    <input type="date" required className="w-full rounded-xl border border-indigo-200 bg-white p-3 text-slate-700 outline-indigo-500" value={nfData.eventoDataInicial} onChange={(e) => setNfData({ ...nfData, eventoDataInicial: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-sm font-bold text-indigo-950">Data final</label>
+                    <input type="date" required min={nfData.eventoDataInicial || undefined} className="w-full rounded-xl border border-indigo-200 bg-white p-3 text-slate-700 outline-indigo-500" value={nfData.eventoDataFinal} onChange={(e) => setNfData({ ...nfData, eventoDataFinal: e.target.value })} />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="mb-2 block text-sm font-bold text-indigo-950">Descrição do evento</label>
+                    <textarea rows={3} required maxLength={255} placeholder="Descreva a atividade ou o evento..." className="w-full resize-none rounded-xl border border-indigo-200 bg-white p-3 text-slate-700 outline-indigo-500" value={nfData.eventoDescricao} onChange={(e) => setNfData({ ...nfData, eventoDescricao: e.target.value })} />
+                    <p className="mt-1 text-right text-xs text-indigo-600">{nfData.eventoDescricao.length}/255</p>
+                  </div>
+                </div>
+              </div>
+            )}
             
             {perfilEmpresa?.regimeTributario !== 'MEI' && (tomadorPermiteRetencoes || cnaeSelecionadoObj?.temRetencaoInss || mostraRetencoesFederais) && (
                 <div className="mt-6 border-t pt-4">
@@ -1255,6 +1338,17 @@ function EmitirNotaContent() {
                       {nfData.servicoDescricao || "Sem descrição informada."}
                   </span>
               </div>              
+
+              {exigeDadosEvento && (
+                <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4">
+                  <p className="mb-3 text-xs font-black uppercase tracking-wider text-indigo-700">Atividade de evento</p>
+                  <div className="grid gap-2 text-sm sm:grid-cols-2">
+                    <p><span className="text-indigo-600">Início:</span> <strong>{nfData.eventoDataInicial}</strong></p>
+                    <p><span className="text-indigo-600">Fim:</span> <strong>{nfData.eventoDataFinal}</strong></p>
+                    <p className="sm:col-span-2"><span className="text-indigo-600">Descrição:</span> <strong>{nfData.eventoDescricao}</strong></p>
+                  </div>
+                </div>
+              )}
 
               <div className="flex justify-between pt-2 items-center">
                   <span className="text-slate-500 text-sm">Valor Bruto:</span>

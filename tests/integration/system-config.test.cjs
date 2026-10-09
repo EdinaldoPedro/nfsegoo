@@ -24,6 +24,7 @@ test('PostgreSQL: configuração global é versionada, compartilhada entre ADMIN
 
     await t.test('duas telas com a mesma versão geram uma alteração e um conflito', async () => {
       const before = await prisma.configuracaoSistema.findUniqueOrThrow({ where: { id: 'config' } });
+      const logsBefore = await prisma.systemLog.count({ where: { userId: actor.id, action: 'SYSTEM_CONFIGURATION_CHANGED' } });
       const make = suffix => parseSystemConfigMutation({ expectedVersion: before.version,
         manutencaoTitulo: `${prefix}-${suffix}`, adminPassword: 'não usado no serviço', justification: 'Teste de versão concorrente' });
       const results = await Promise.allSettled([
@@ -32,9 +33,9 @@ test('PostgreSQL: configuração global é versionada, compartilhada entre ADMIN
       ]);
       assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
       assert.equal(results.filter(result => result.status === 'rejected' && result.reason?.status === 409).length, 1);
-      const logs = await prisma.systemLog.findMany({ where: { userId: actor.id, action: 'SYSTEM_CONFIGURATION_CHANGED' } });
-      assert.equal(logs.length, 1);
-      assert.doesNotMatch(logs[0].details || '', /password|Config@Senha1/i);
+      const logs = await prisma.systemLog.findMany({ where: { userId: actor.id, action: 'SYSTEM_CONFIGURATION_CHANGED' }, orderBy: { createdAt: 'asc' } });
+      assert.equal(logs.length, logsBefore + 1);
+      assert.doesNotMatch(logs.at(-1)?.details || '', /password|Config@Senha1/i);
       const view = publicSystemConfig(await prisma.configuracaoSistema.findUniqueOrThrow({ where: { id: 'config' } }));
       assert.equal(view.version, before.version + 1);
     });

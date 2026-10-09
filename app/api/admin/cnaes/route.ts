@@ -102,8 +102,15 @@ export const PUT = withApiGuard(async function PUT(request: Request) {
         classeTribIbsCbs,
         fonteNormativa,
         inicioVigencia,
-        fimVigencia
+        fimVigencia,
+        complementares,
     } = body;
+
+    const complementaresValidos = ['EVENTO'];
+    if (complementares !== undefined && (!Array.isArray(complementares) || complementares.some((item) => !complementaresValidos.includes(item)))) {
+      return NextResponse.json({ error: 'Configuração de informações complementares inválida.' }, { status: 400 });
+    }
+    const complementaresNormalizados = Array.isArray(complementares) ? [...new Set<string>(complementares)] : null;
 
     const percentuais = [
       aliquotaCrsf, aliquotaIr, aliquotaPisRetencao, aliquotaCofinsRetencao, aliquotaCsllRetencao,
@@ -181,7 +188,8 @@ export const PUT = withApiGuard(async function PUT(request: Request) {
         classeTribIbsCbs: classeTribIbsCbs || null,
         fonteNormativa: fonteNormativaValidada,
         inicioVigencia: inicioVigencia ? new Date(`${inicioVigencia}T00:00:00.000Z`) : null,
-        fimVigencia: fimVigencia ? new Date(`${fimVigencia}T23:59:59.999Z`) : null
+        fimVigencia: fimVigencia ? new Date(`${fimVigencia}T23:59:59.999Z`) : null,
+        ...(complementaresNormalizados ? { complementares: complementaresNormalizados } : {}),
         },
       });
       const before = fiscalRuleSnapshot(anterior);

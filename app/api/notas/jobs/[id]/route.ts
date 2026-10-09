@@ -4,6 +4,7 @@ import { prisma } from '@/app/utils/prisma';
 import { validateRequest } from '@/app/utils/api-security';
 import { unauthorized, forbidden } from '@/app/utils/api-middleware';
 import { hasCustomerCompanyAccess } from '@/app/utils/access-control';
+import { getMensagemErroFiscalCliente } from '@/app/utils/fiscal-error-messages';
 
 function parseLastError(lastError?: string | null) {
   if (!lastError) return null;
@@ -35,6 +36,7 @@ export const GET = withApiGuard(async function GET(request: Request, { params: r
   if (!allowed) return forbidden();
 
   const erro = parseLastError(job.lastError);
+  const fiscalGuidance = getMensagemErroFiscalCliente({ message: erro?.motivo || erro?.error, details: erro?.details });
   const portalDiagnostic = Array.isArray(erro?.details)
     ? erro.details.find((item: any) => item?.portalDiagnostic)?.portalDiagnostic || null
     : null;
@@ -57,9 +59,9 @@ export const GET = withApiGuard(async function GET(request: Request, { params: r
     nextAttemptAt: job.nextAttemptAt,
     startedAt: job.startedAt,
     finishedAt: job.finishedAt,
-    userAction: erro?.userAction || null,
+    userAction: fiscalGuidance?.message || erro?.userAction || null,
     draftEligible: erro?.draftEligible || false,
-    draftReasonType: erro?.draftReasonType || null,
+    draftReasonType: fiscalGuidance?.reasonType || erro?.draftReasonType || null,
     details: erro?.details || null,
     portalDiagnostic,
     error: erro?.motivo || erro?.error || null,

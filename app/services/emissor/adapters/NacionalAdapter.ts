@@ -247,6 +247,22 @@ export class NacionalAdapter {
                        `<mdic>0</mdic>` +
                        `</comExt>`;
         }
+        if (s.atividadeEvento) {
+            const evento = s.atividadeEvento;
+            const enderecoEvento = evento.endereco;
+            servXml += `<atvEvento>` +
+                       `<xNome>${this.escapeXml(evento.descricao)}</xNome>` +
+                       `<dtIni>${evento.dataInicial}</dtIni>` +
+                       `<dtFim>${evento.dataFinal}</dtFim>` +
+                       `<end>` +
+                       `<CEP>${this.clean(enderecoEvento.cep)}</CEP>` +
+                       `<xLgr>${this.escapeXml(enderecoEvento.logradouro)}</xLgr>` +
+                       `<nro>${this.escapeXml(enderecoEvento.numero)}</nro>` +
+                       (enderecoEvento.complemento ? `<xCpl>${this.escapeXml(enderecoEvento.complemento)}</xCpl>` : '') +
+                       `<xBairro>${this.escapeXml(enderecoEvento.bairro)}</xBairro>` +
+                       `</end>` +
+                       `</atvEvento>`;
+        }
         servXml += `</serv>`;
 
         // --- TRIBUTOS (A MÁGICA DO LUCRO PRESUMIDO) ---

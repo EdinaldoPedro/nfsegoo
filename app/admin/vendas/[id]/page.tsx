@@ -29,6 +29,7 @@ import {
   Terminal,
   Trash2,
   User,
+  X,
 } from 'lucide-react';
 import { useDialog } from '@/app/contexts/DialogContext';
 import { fiscalOperationLabel, isFiscalOperationActive, isFiscalOperationPolling } from '@/app/utils/fiscal-operation-state';
@@ -145,6 +146,17 @@ function extractCodigoErro(text?: string | null) {
   if (!text) return null;
   const match = text.match(/\bE\d{4}\b|\binv\d{4}\b|\b\d{3}\b/i);
   return match?.[0]?.toUpperCase() || null;
+}
+
+function containsPortalErrorCode(value: any, expected: string, depth = 0): boolean {
+  if (depth > 8 || value === null || value === undefined) return false;
+  if (typeof value === 'string') {
+    try { return containsPortalErrorCode(JSON.parse(value), expected, depth + 1); } catch { return false; }
+  }
+  if (Array.isArray(value)) return value.some((item) => containsPortalErrorCode(item, expected, depth + 1));
+  if (typeof value !== 'object') return false;
+  const code = String(value.codigo ?? value.Codigo ?? value.code ?? value.Code ?? '').toUpperCase();
+  return code === expected || Object.values(value).some((item) => containsPortalErrorCode(item, expected, depth + 1));
 }
 
 function fieldValue(value: any) {
@@ -390,6 +402,14 @@ export default function DetalheVendaCompleto() {
   const [reprocessandoPdf, setReprocessandoPdf] = useState(false);
   const [sincronizandoRetorno, setSincronizandoRetorno] = useState(false);
   const [baixandoArquivo, setBaixandoArquivo] = useState<'xml' | 'pdf' | null>(null);
+  const [hideHomologationOpen, setHideHomologationOpen] = useState(false);
+  const [hideHomologationConfirmation, setHideHomologationConfirmation] = useState('');
+  const [hideHomologationJustification, setHideHomologationJustification] = useState('');
+  const [hideHomologationError, setHideHomologationError] = useState('');
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [archiveConfirmation, setArchiveConfirmation] = useState('');
+  const [archiveJustification, setArchiveJustification] = useState('');
+  const [archiveError, setArchiveError] = useState('');
   const [inspecao, setInspecao] = useState<any>(null);
   const [isEditing, setIsEditing] = useState(false);
   const editingRef = useRef(false);
@@ -500,7 +520,10 @@ export default function DetalheVendaCompleto() {
 
   useEffect(() => {
     let interval: ReturnType<typeof setInterval> | undefined;
-    if (venda && (venda.status === 'PROCESSANDO' || venda.notas?.some((nota: any) => isFiscalOperationPolling(nota.fiscalOperations?.[0]) || ['PENDENTE', 'PROCESSANDO'].includes(nota.documentTask?.status)))) {
+    const emissionStatus = venda?.emissionJobs?.[0]?.status;
+    const emissionIsActive = ['PENDENTE', 'PROCESSANDO', 'ERRO_TEMPORARIO'].includes(emissionStatus || '');
+    const documentIsActive = venda?.notas?.some((nota: any) => isFiscalOperationPolling(nota.fiscalOperations?.[0]) || ['PENDENTE', 'PROCESSANDO'].includes(nota.documentTask?.status));
+    if (venda && (emissionIsActive || documentIsActive)) {
       interval = setInterval(() => { if (document.visibilityState === 'visible') fetchVenda(true); }, 5000);
     }
     return () => {
@@ -542,8 +565,10 @@ export default function DetalheVendaCompleto() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Erro na validação.');
       setInspecao(data);
+      return data;
     } catch (error: any) {
-      dialog.showAlert({ type: 'danger', title: 'Erro na validação', description: error.message });
+      await dialog.showAlert({ type: 'danger', title: 'Erro na validação', description: error.message });
+      return null;
     } finally {
       setInspecionando(false);
     }
@@ -654,31 +679,195 @@ export default function DetalheVendaCompleto() {
     }
   };
 
-  const handleDelete = async () => {
-    const confirmacao = await dialog.showPrompt({
-      type: 'danger',
-      title: 'Zona de perigo',
-      description: 'Esta ação arquiva a venda e suas notas quando permitido. Digite DELETAR para confirmar.',
-      validationText: 'DELETAR',
-      placeholder: "Digite 'DELETAR'",
-    });
+  const emitirCorrecaoAdministrativa = async () => {
+    const inspection = await executarInspecao();
+    if (!inspection || inspection.resumo?.status === 'BLOQUEADO') {
+      if (inspection?.resumo?.status === 'BLOQUEADO') {
+        setActiveTab('validacao');
+        await dialog.showAlert({
+          type: 'warning',
+          title: 'Existem bloqueios na correção',
+          description: 'Confira a aba Validação, corrija os campos indicados e tente novamente.',
+        });
+      }
+      return;
+    }
 
-    if (confirmacao !== 'DELETAR') return;
-    const credentials = await pedirReautenticacao('Arquivar venda sem obrigação fiscal');
-    if (!credentials) return;
+    const ambiente = venda?.empresa?.ambiente;
+    const confirmationText = ambiente === 'PRODUCAO' ? 'EMITIR NFSE' : 'EMITIR TESTE';
+    const justification = await dialog.showPrompt({
+      title: ambiente === 'PRODUCAO' ? 'Emitir NFS-e corrigida' : 'Emitir novo teste corrigido',
+      description: 'Informe uma justificativa administrativa com pelo menos 10 caracteres.',
+    });
+    if (!justification) return;
+    if (justification.trim().length < 10) {
+      await dialog.showAlert('Descreva a justificativa com pelo menos 10 caracteres.');
+      return;
+    }
+    const confirmation = await dialog.showPrompt({
+      title: 'Confirmar nova tentativa',
+      description: `Digite ${confirmationText} para validar e enviar a correção pelo worker fiscal.`,
+    });
+    if (confirmation !== confirmationText) {
+      if (confirmation) await dialog.showAlert(`Digite ${confirmationText} exatamente como exibido.`);
+      return;
+    }
+    let adminPassword: string | undefined;
+    if (ambiente === 'PRODUCAO') {
+      const password = await dialog.showPrompt({
+        title: 'Confirmar identidade',
+        description: 'Por segurança, informe sua senha administrativa para emitir em produção.',
+        inputType: 'password',
+      });
+      if (!password) return;
+      adminPassword = password;
+    }
 
     setProcessing(true);
     try {
-      const res = await fetch(`/api/admin/vendas/${vendaId}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(credentials) });
+      const response = await fetch(`/api/admin/vendas/${vendaId}/emitir-correcao`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ overrides: payloadEnvio(), justification: justification.trim(), confirmation, adminPassword }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        if (data.inspection) {
+          setInspecao(data.inspection);
+          setActiveTab('validacao');
+        }
+        throw new Error(data.error || 'Não foi possível criar a nova tentativa fiscal.');
+      }
+      setEditing(false);
+      setActiveTab('resumo');
+      await dialog.showAlert({ type: 'success', title: 'Correção enviada', description: data.message || 'A nova tentativa foi enviada para processamento.' });
+      await fetchVenda(true);
+    } catch (error: any) {
+      await dialog.showAlert({ type: 'danger', title: 'Correção não enviada', description: error.message });
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const encerrarConflitoNumeracao = async (jobId: string, dpsNumber: number) => {
+    const credentials = await pedirReautenticacao(`Encerrar conflito da DPS ${dpsNumber}`);
+    if (!credentials) return;
+    const confirmationText = `ENCERRAR DPS ${dpsNumber}`;
+    const confirmation = await dialog.showPrompt({
+      type: 'danger',
+      title: 'Liberar uma nova emissão',
+      description: `Esta ação encerrará somente a tentativa vinculada à DPS ${dpsNumber}, preservará o XML e os logs, liberará o crédito e permitirá uma nova emissão para a mesma venda. Digite ${confirmationText} para confirmar.`,
+      validationText: confirmationText,
+      placeholder: confirmationText,
+    });
+    if (confirmation !== confirmationText) return;
+    setSincronizandoRetorno(true);
+    try {
+      const res = await fetch('/api/admin/emissoes/encerrar-conflito', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId, ...credentials }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'O conflito não pôde ser encerrado.');
+      await dialog.showAlert({ type: 'success', title: 'Venda liberada para reemissão', description: data.message });
+    } catch (error: any) {
+      await dialog.showAlert({ type: 'warning', title: 'Conflito não encerrado', description: error.message });
+    } finally {
+      setSincronizandoRetorno(false);
+      fetchVenda(true);
+    }
+  };
+
+  const handleDelete = async () => {
+    setArchiveConfirmation('');
+    setArchiveJustification('');
+    setArchiveError('');
+    setArchiveOpen(true);
+  };
+
+  const closeArchive = () => {
+    if (processing) return;
+    setArchiveOpen(false);
+    setArchiveError('');
+  };
+
+  const submitArchive = async () => {
+    const justification = archiveJustification.trim();
+    if (justification.length < 10) {
+      setArchiveError('Informe uma justificativa com pelo menos 10 caracteres.');
+      return;
+    }
+    if (archiveConfirmation !== 'ARQUIVAR VENDA') {
+      setArchiveError('Digite ARQUIVAR VENDA exatamente como exibido.');
+      return;
+    }
+
+    setArchiveError('');
+    setProcessing(true);
+    try {
+      const res = await fetch(`/api/admin/vendas/${vendaId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'ARCHIVE_SALE', confirmation: archiveConfirmation, justification }),
+      });
       if (res.ok) {
-        await dialog.showAlert({ type: 'success', description: 'Venda arquivada.' });
+        setArchiveOpen(false);
+        await dialog.showAlert({ type: 'success', title: 'Venda arquivada', description: 'Venda arquivada.' });
         router.push('/admin/emissoes');
       } else {
         const data = await res.json().catch(() => ({}));
-        dialog.showAlert({ type: 'danger', description: data.error || 'Erro ao excluir.' });
+        setArchiveError(data.error || 'Erro ao arquivar a venda.');
       }
     } catch {
-      dialog.showAlert('Erro de conexão.');
+      setArchiveError('Erro de conexão.');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const openHideHomologation = () => {
+    setHideHomologationConfirmation('');
+    setHideHomologationJustification('');
+    setHideHomologationError('');
+    setHideHomologationOpen(true);
+  };
+
+  const closeHideHomologation = () => {
+    if (processing) return;
+    setHideHomologationOpen(false);
+    setHideHomologationError('');
+  };
+
+  const submitHideHomologation = async () => {
+    const justification = hideHomologationJustification.trim();
+    if (justification.length < 10) {
+      setHideHomologationError('Informe uma justificativa com pelo menos 10 caracteres.');
+      return;
+    }
+    if (hideHomologationConfirmation !== 'OCULTAR TESTE') {
+      setHideHomologationError('Digite OCULTAR TESTE exatamente como exibido.');
+      return;
+    }
+    setHideHomologationError('');
+    setProcessing(true);
+    try {
+      const res = await fetch(`/api/admin/vendas/${vendaId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'HIDE_HOMOLOGATION', confirmation: hideHomologationConfirmation, justification }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'O teste não pôde ser ocultado.');
+      setHideHomologationOpen(false);
+      await dialog.showAlert({
+        type: 'success',
+        title: 'Teste ocultado',
+        description: 'O teste foi removido das listagens. Os documentos e a auditoria permanecem preservados.',
+      });
+      router.push('/admin/emissoes');
+    } catch (error: any) {
+      setHideHomologationError(error.message || 'O teste não pôde ser ocultado.');
     } finally {
       setProcessing(false);
     }
@@ -828,6 +1017,18 @@ export default function DetalheVendaCompleto() {
     let xmlDownload = '';
 
     try {
+      const jobs = Array.isArray(venda.emissionJobs) ? venda.emissionJobs : [];
+      const jobComXml = jobs.find((job: any) => typeof job.signedXml === 'string' && job.signedXml.trim());
+      const jobComPayload = jobs.find((job: any) => typeof job.payloadJson === 'string' && job.payloadJson.trim());
+      if (jobComXml) {
+        xmlDownload = jobComXml.signedXml;
+        xmlExibicao = formatXml(jobComXml.signedXml);
+      }
+      if (jobComPayload) {
+        const payload = JSON.parse(jobComPayload.payloadJson);
+        prettyPayload = JSON.stringify(payload, null, 2);
+      }
+
       const logComPayload = venda.logs.find(
         (l: any) => (l.action === 'EMISSAO_INICIADA' || l.action === 'NOTA_AUTORIZADA' || l.action === 'FALHA_EMISSAO' || l.action === 'DPS_GERADA') && l.details,
       );
@@ -835,14 +1036,16 @@ export default function DetalheVendaCompleto() {
       if (logComPayload) {
         let raw = typeof logComPayload.details === 'string' ? JSON.parse(logComPayload.details) : logComPayload.details;
 
-        if (raw.xmlGerado) {
+        if (!xmlExibicao && raw.xmlGerado) {
           xmlDownload = raw.xmlGerado;
           xmlExibicao = formatXml(raw.xmlGerado);
         }
 
-        if (raw.payloadOriginal) raw = raw.payloadOriginal;
-        prettyPayload = JSON.stringify(raw, null, 2);
-      } else if (venda.payloadJson) {
+        if (prettyPayload === '// Payload indisponível') {
+          if (raw.payloadOriginal) raw = raw.payloadOriginal;
+          prettyPayload = JSON.stringify(raw, null, 2);
+        }
+      } else if (prettyPayload === '// Payload indisponível' && venda.payloadJson) {
         const raw = JSON.parse(venda.payloadJson);
         prettyPayload = JSON.stringify(raw, null, 2);
       }
@@ -890,6 +1093,14 @@ export default function DetalheVendaCompleto() {
   const erroTemporarioPortal = retornoLogs.some(logIndicaErroTemporario);
   const noteOperation = notaAtual?.fiscalOperations?.[0];
   const emissionJob = venda.emissionJobs?.[0];
+  const notasDaVenda = Array.isArray(venda.notas) ? venda.notas : [];
+  const jobsDaVenda = Array.isArray(venda.emissionJobs) ? venda.emissionJobs : [];
+  const homologacaoConfirmada = (notasDaVenda.length > 0 || jobsDaVenda.length > 0)
+    && notasDaVenda.every((nota: any) => nota.ambiente === 'HOMOLOGACAO')
+    && jobsDaVenda.every((job: any) => job.ambiente === 'HOMOLOGACAO');
+  const temDocumentoFiscalValido = notasDaVenda.some((nota: any) => ['AUTORIZADA', 'CANCELADA'].includes(nota.status) || nota.chaveAcesso);
+  const hasE0014Conflict = containsPortalErrorCode(emissionJob?.lastError, 'E0014')
+    || retornoLogs.some((log: any) => containsPortalErrorCode(log?.details, 'E0014'));
   const canAdminister = typeof window !== 'undefined' && ['ADMIN', 'MASTER'].includes(localStorage.getItem('userRole') || '');
   const integridadePdf = {
     chaveOk: Boolean(notaAtual?.chaveAcesso),
@@ -913,6 +1124,91 @@ export default function DetalheVendaCompleto() {
 
   return (
     <div className="min-h-screen bg-slate-100">
+      {archiveOpen && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm" role="presentation">
+          <div role="alertdialog" aria-modal="true" aria-labelledby="archive-sale-title" className="relative w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
+            <button onClick={closeArchive} disabled={processing} aria-label="Fechar" className="absolute right-4 top-4 text-slate-400 hover:text-slate-700 disabled:opacity-40"><X size={20} /></button>
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-red-100 text-red-700"><Trash2 size={28} /></div>
+            <h2 id="archive-sale-title" className="text-center text-xl font-black text-slate-900">Arquivar venda</h2>
+            <p className="mt-2 text-center text-sm leading-relaxed text-slate-600">A venda e suas notas serão retiradas das listagens quando não houver obrigação fiscal ou emissão pendente. Os registros de auditoria serão preservados.</p>
+            <div className="mt-6 space-y-4">
+              <div>
+                <label htmlFor="archive-sale-justification" className="mb-1.5 block text-sm font-bold text-slate-700">Justificativa</label>
+                <textarea id="archive-sale-justification" autoFocus value={archiveJustification} onChange={(event) => setArchiveJustification(event.target.value)} maxLength={2000} rows={3} placeholder="Explique por que esta venda deve ser arquivada" className="w-full resize-none rounded-xl border border-slate-300 p-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+                <p className="mt-1 text-xs text-slate-500">Mínimo de 10 caracteres.</p>
+              </div>
+              <div>
+                <label htmlFor="archive-sale-confirmation" className="mb-1.5 block text-sm font-bold text-slate-700">Para confirmar, digite <span className="select-all rounded bg-slate-100 px-1 font-black">ARQUIVAR VENDA</span></label>
+                <input id="archive-sale-confirmation" value={archiveConfirmation} onChange={(event) => setArchiveConfirmation(event.target.value)} autoComplete="off" placeholder="ARQUIVAR VENDA" className="w-full rounded-xl border border-slate-300 p-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+              </div>
+              {archiveError && <p className="rounded-lg bg-red-50 p-3 text-sm font-semibold text-red-700" role="alert">{archiveError}</p>}
+            </div>
+            <div className="mt-6 grid grid-cols-2 gap-3">
+              <button onClick={closeArchive} disabled={processing} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50">Cancelar</button>
+              <button onClick={submitArchive} disabled={processing || archiveJustification.trim().length < 10 || archiveConfirmation !== 'ARQUIVAR VENDA'} className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50">
+                {processing ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}{processing ? 'Arquivando...' : 'Arquivar venda'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {hideHomologationOpen && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm" role="presentation">
+          <div role="alertdialog" aria-modal="true" aria-labelledby="hide-homologation-title" className="relative w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
+            <button onClick={closeHideHomologation} disabled={processing} aria-label="Fechar" className="absolute right-4 top-4 text-slate-400 hover:text-slate-700 disabled:opacity-40">
+              <X size={20} />
+            </button>
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+              <AlertTriangle size={28} />
+            </div>
+            <h2 id="hide-homologation-title" className="text-center text-xl font-black text-slate-900">Ocultar teste de homologação</h2>
+            <p className="mt-2 text-center text-sm leading-relaxed text-slate-600">
+              O teste sairá das listagens, mas XML, PDF, logs e rastreabilidade continuarão preservados. Esta ação não apaga nem cancela documentos.
+            </p>
+            <div className="mt-6 space-y-4">
+              <div>
+                <label htmlFor="hide-homologation-justification" className="mb-1.5 block text-sm font-bold text-slate-700">Justificativa</label>
+                <textarea
+                  id="hide-homologation-justification"
+                  autoFocus
+                  value={hideHomologationJustification}
+                  onChange={(event) => setHideHomologationJustification(event.target.value)}
+                  maxLength={2000}
+                  rows={3}
+                  placeholder="Explique por que este teste deve ser ocultado"
+                  className="w-full resize-none rounded-xl border border-slate-300 p-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                />
+                <p className="mt-1 text-xs text-slate-500">Mínimo de 10 caracteres.</p>
+              </div>
+              <div>
+                <label htmlFor="hide-homologation-confirmation" className="mb-1.5 block text-sm font-bold text-slate-700">
+                  Para confirmar, digite <span className="select-all rounded bg-slate-100 px-1 font-black">OCULTAR TESTE</span>
+                </label>
+                <input
+                  id="hide-homologation-confirmation"
+                  value={hideHomologationConfirmation}
+                  onChange={(event) => setHideHomologationConfirmation(event.target.value)}
+                  autoComplete="off"
+                  placeholder="OCULTAR TESTE"
+                  className="w-full rounded-xl border border-slate-300 p-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                />
+              </div>
+              {hideHomologationError && <p className="rounded-lg bg-red-50 p-3 text-sm font-semibold text-red-700" role="alert">{hideHomologationError}</p>}
+            </div>
+            <div className="mt-6 grid grid-cols-2 gap-3">
+              <button onClick={closeHideHomologation} disabled={processing} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50">Cancelar</button>
+              <button
+                onClick={submitHideHomologation}
+                disabled={processing || hideHomologationJustification.trim().length < 10 || hideHomologationConfirmation !== 'OCULTAR TESTE'}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {processing ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                {processing ? 'Ocultando...' : 'Ocultar teste'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur shadow-sm">
         <div className="saas-content px-[var(--saas-gutter)] py-4">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -923,8 +1219,10 @@ export default function DetalheVendaCompleto() {
               <div>
                 <div className="flex flex-wrap items-center gap-3">
                   <h1 className="text-xl font-black text-slate-900">Bancada da venda #{venda.id.split('-')[0]}</h1>
-                  <span className={`text-[10px] px-2 py-1 rounded-full border uppercase font-black ${statusStyle(venda.status)}`}>
-                    {venda.status === 'PROCESSANDO' ? (
+                  <span className={`text-[10px] px-2 py-1 rounded-full border uppercase font-black ${emissionJob?.status === 'RECONCILIACAO_MANUAL' ? 'bg-amber-100 text-amber-800 border-amber-200' : statusStyle(venda.status)}`}>
+                    {emissionJob?.status === 'RECONCILIACAO_MANUAL' ? (
+                      <span className="flex items-center gap-1"><AlertTriangle size={10} /> Aguardando conciliação</span>
+                    ) : venda.status === 'PROCESSANDO' ? (
                       <span className="flex items-center gap-1"><Loader2 size={10} className="animate-spin" /> Processando</span>
                     ) : venda.status === 'HOMOLOGACAO_VALIDADA' ? 'Homologação validada' : venda.status.replaceAll('_', ' ')}
                   </span>
@@ -946,17 +1244,21 @@ export default function DetalheVendaCompleto() {
               </button>
               <button
                 onClick={startCorrection}
-                className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700 shadow-sm"
+                disabled={emissionJob?.status === 'RECONCILIACAO_MANUAL'}
+                title={emissionJob?.status === 'RECONCILIACAO_MANUAL' ? 'Concilie a DPS original antes de alterar a venda.' : undefined}
+                className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700 shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Settings2 size={16} /> Corrigir
               </button>
-              <button
-                disabled={!canAdminister || processing}
-                onClick={handleDelete}
-                className="inline-flex items-center gap-2 rounded-xl border border-red-100 px-4 py-2.5 text-sm font-bold text-red-600 hover:bg-red-50"
-              >
-                <Trash2 size={16} /> Arquivar
-              </button>
+              {canAdminister && (homologacaoConfirmada || !temDocumentoFiscalValido) && (
+                <button
+                  disabled={processing}
+                  onClick={homologacaoConfirmada ? openHideHomologation : handleDelete}
+                  className="inline-flex items-center gap-2 rounded-xl border border-red-100 px-4 py-2.5 text-sm font-bold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Trash2 size={16} /> {homologacaoConfirmada ? 'Ocultar teste de homologação' : 'Arquivar'}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -1105,7 +1407,15 @@ export default function DetalheVendaCompleto() {
                                 {sincronizandoRetorno ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
                                 {sincronizandoRetorno ? 'Verificando...' : 'Retomar somente consultas'}
                               </button>
-                              {emissionJob.reservedDpsNumero && (
+                              {hasE0014Conflict && emissionJob.reservedDpsNumero ? (
+                                <button
+                                  disabled={sincronizandoRetorno}
+                                  onClick={() => encerrarConflitoNumeracao(emissionJob.id, emissionJob.reservedDpsNumero!)}
+                                  className="rounded-xl bg-amber-500 px-3 py-2 font-black text-amber-950 hover:bg-amber-400 disabled:opacity-60"
+                                >
+                                  Encerrar conflito e liberar reemissão
+                                </button>
+                              ) : emissionJob.reservedDpsNumero && (
                                 <button
                                   disabled={sincronizandoRetorno}
                                   onClick={() => retransmitirMesmaDps(emissionJob.id, emissionJob.reservedDpsNumero!)}
@@ -1175,7 +1485,7 @@ export default function DetalheVendaCompleto() {
               <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                 <div>
                   <p className="text-sm font-black text-blue-950">Modo de correção técnica</p>
-                  <p className="text-sm text-blue-700">Registre uma sugestão técnica. A revisão e o envio fiscal cabem ao cliente ou contador autorizado; esta bancada não emite notas.</p>
+                  <p className="text-sm text-blue-700">Edite os campos, valide a correção e crie uma nova tentativa fiscal. A tentativa anterior permanece preservada na auditoria.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {!isEditing && (
@@ -1189,7 +1499,11 @@ export default function DetalheVendaCompleto() {
                         Cancelar
                       </button>
                       <button onClick={() => handleSave()} disabled={processing} className="rounded-xl border border-blue-200 bg-white px-4 py-2 text-sm font-bold text-blue-700 hover:bg-blue-50 disabled:opacity-60">
-                        Salvar rascunho
+                        Salvar sugestão
+                      </button>
+                      <button onClick={emitirCorrecaoAdministrativa} disabled={processing || inspecionando} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-60">
+                        {(processing || inspecionando) && <Loader2 size={15} className="animate-spin" />}
+                        {venda?.empresa?.ambiente === 'PRODUCAO' ? 'Validar e emitir NFS-e' : 'Validar e emitir teste'}
                       </button>
                     </>
                   )}

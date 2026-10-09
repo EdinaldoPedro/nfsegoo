@@ -68,6 +68,7 @@ export interface FiscalDecision {
 }
 
 interface ResolveInput {
+  empresaId?: string;
   cnae: string;
   itemLc?: string;
   codigoIbge: string;
@@ -139,12 +140,20 @@ export async function resolveFiscalDecision(
     db.configuracaoSistema.findUnique({ where: { id: 'config' } }),
   ]);
 
-  const globalRule = isRuleInForce(globalCandidate, competence) ? globalCandidate : null;
-  const municipalRule = municipalCandidates.find((rule: any) => onlyDigits(rule.cnae) === cnae && isRuleInForce(rule, competence));
+  const companyRows = input.empresaId && typeof (db as any).$queryRaw === 'function' ? await db.$queryRaw<Array<{ id: string; configuracao: any; versao: number }>>`
+    SELECT cfg."id", cfg."configuracao", cfg."versao" FROM "EmpresaCnaeConfiguracaoFiscal" cfg
+    JOIN "Cnae" c ON c."id" = cfg."cnaeId"
+    WHERE cfg."empresaId" = ${input.empresaId} AND cfg."ativo" = true AND regexp_replace(c."codigo", '[^0-9]', '', 'g') = ${cnae}
+    LIMIT 1
+  ` : [];
+  const companyRule = companyRows[0] ? { ...companyRows[0].configuracao, id: companyRows[0].id, ativo: true } : null;
+
+  const globalRule: any = companyRule || (isRuleInForce(globalCandidate, competence) ? globalCandidate : null);
+  const municipalRule: any = companyRule || municipalCandidates.find((rule: any) => onlyDigits(rule.cnae) === cnae && isRuleInForce(rule, competence));
   const issues: FiscalIssue[] = [];
   const source = [
-    globalRule ? `CNAE:${globalRule.id}` : 'CNAE:SEM_REGRA',
-    municipalRule ? `MUNICIPIO:${municipalRule.id}` : 'MUNICIPIO:SEM_REGRA',
+    companyRule ? `EMPRESA_CNAE:${companyRule.id}` : (globalRule ? `CNAE:${globalRule.id}` : 'CNAE:SEM_REGRA'),
+    companyRule ? 'AUTORIDADE_FISCAL:CLIENTE' : (municipalRule ? `MUNICIPIO:${municipalRule.id}` : 'MUNICIPIO:SEM_REGRA'),
   ];
 
   const exigeNbs = municipalRule?.exigeNbs === true;

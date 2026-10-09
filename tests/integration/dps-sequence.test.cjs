@@ -7,7 +7,7 @@ test('DPS PostgreSQL: aliases, historico, concorrencia e limite sem reutilizacao
   const { prisma } = require('../../app/utils/prisma.ts');
   const { lockCanonicalDpsSequence } = require('../../app/services/dpsSequenceStore.ts');
   const { findDpsSequence, listDpsSequences, setUserDpsSequence, confirmDpsNumber, syncDpsSequence } = require('../../app/services/dpsSequenceService.ts');
-  const { claimEmission, reserveJobDps } = require('../../app/services/emissionLeaseService.ts');
+  const { claimEmission, preflightReservedDps, reserveJobDps } = require('../../app/services/emissionLeaseService.ts');
   const { nextDpsCandidate, MAX_STORED_DPS_NUMBER } = require('../../app/utils/dps-identity.ts');
   const prefix = `qa-dps-${randomUUID()}`;
   let company; let user;
@@ -82,6 +82,34 @@ test('DPS PostgreSQL: aliases, historico, concorrencia e limite sem reutilizacao
       await assert.rejects(confirmDpsNumber({ ...base, serie: '900', numero: 1.9, origem: 'QA' }), { status: 400 });
       assert.equal((await findDpsSequence(company.id, 'PRODUCAO', '900')).ultimoReservado, 82);
       await prisma.emissaoJob.update({ where: { id: manual.id }, data: { status: 'ERRO_FINAL', leaseToken: null, leaseUntil: null } });
+    });
+    await t.test('preflight pula DPS emitidas fora do SaaS antes de congelar o XML', async () => {
+      const record = await job();
+      const claim = await claimEmission(prefix, [company.id], true);
+      const reserved = { ...await reserveJobDps(claim), leaseToken: claim.leaseToken };
+      assert.equal(reserved.reservedDpsNumero, 83);
+      const consulted = [];
+      const result = await preflightReservedDps(reserved, { inspectDps: async (_company, _environment, _series, number) => {
+        consulted.push(number);
+        return { exists: number < 85, idDps: `fixture-${number}`, status: number < 85 ? 200 : 404 };
+      } });
+      assert.deepEqual(consulted, [83, 84, 85]);
+      assert.deepEqual(result.skipped, [83, 84]);
+      assert.equal(result.job.reservedDpsNumero, 85);
+      assert.equal(result.job.signedXml, null);
+      const state = await findDpsSequence(company.id, 'PRODUCAO', '900');
+      assert.equal(state.ultimoConfirmado, 84);
+      assert.equal(state.ultimoReservado, 85);
+      assert.equal(await prisma.systemLog.count({ where: { empresaId: company.id, action: 'DPS_NUMERACAO_AJUSTADA_AUTOMATICAMENTE' } }), 2);
+      await prisma.emissaoJob.update({ where: { id: record.id }, data: { status: 'ERRO_FINAL', leaseToken: null, leaseUntil: null } });
+    });
+    await t.test('numero informado manualmente nao e alterado silenciosamente', async () => {
+      const record = await job({ payloadJson: JSON.stringify({ numeroDPS: 86 }) });
+      const claim = await claimEmission(prefix, [company.id], true);
+      const reserved = { ...await reserveJobDps(claim), leaseToken: claim.leaseToken };
+      await assert.rejects(preflightReservedDps(reserved, { inspectDps: async () => ({ exists: true, idDps: 'fixture-86', status: 200 }) }), { status: 400 });
+      assert.equal((await prisma.emissaoJob.findUnique({ where: { id: record.id } })).reservedDpsNumero, 86);
+      await prisma.emissaoJob.update({ where: { id: record.id }, data: { status: 'ERRO_FINAL', leaseToken: null, leaseUntil: null } });
     });
     await t.test('sincronizacao reconhece posse legada equivalente sem abrir certificado/rede', async () => {
       await prisma.empresa.update({ where: { id: company.id }, data: { certificadoA1: 'synthetic-not-a-certificate', senhaCertificado: 'unused' } });

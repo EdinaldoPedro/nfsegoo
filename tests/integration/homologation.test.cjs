@@ -16,10 +16,12 @@ test('homologacao PostgreSQL: documentos persistidos, credito preservado e copia
   const { makeDps, makeNfse, makeCancellationEvent, signingCredentials } = require('../fixtures/fiscal.cjs');
   const prefix = 'qa-homol-' + randomUUID(); const users = []; const companies = [];
   const issuerDocument = '90123456000131'; const key = '1'.repeat(50);
-  let owner, stranger, company, customer, source, note, productionCopy;
+  let owner, stranger, company, customer, source, note, productionCopy, heartbeatId;
   try {
     for (const [i, role] of ['ADMIN', 'COMUM'].entries()) users.push(await prisma.user.create({ data: { email: `${prefix}-${i}@example.invalid`, nome: 'QA homologacao', senha: 'unused', role } }));
     [owner, stranger] = users;
+    heartbeatId = `emission-qa-homol-${randomUUID()}`;
+    await prisma.workerHeartbeat.create({ data: { id: heartbeatId, productionEnabled: true } });
     company = await prisma.empresa.create({ data: { documento: issuerDocument, razaoSocial: 'Empresa QA homologacao', proprietarioUserId: owner.id, donoFaturamentoId: owner.id,
       ambiente: 'HOMOLOGACAO', regimeTributario: 'MEI', codigoIbge: '3550308', certificadoA1: 'QA-NOT-A-CERTIFICATE', serieDPS: '900', ultimoDPS: 42 } }); companies.push(company.id);
     await prisma.user.update({ where: { id: owner.id }, data: { empresaId: company.id } });
@@ -120,6 +122,7 @@ test('homologacao PostgreSQL: documentos persistidos, credito preservado e copia
       assert.equal(await prisma.emissionCreditReservation.count({ where: { userId: owner.id } }), creditsBefore);
     });
   } finally {
+    if (heartbeatId) await prisma.workerHeartbeat.deleteMany({ where: { id: heartbeatId } });
     if (companies.length) {
       await prisma.fiscalNoteOperation.deleteMany({ where: { empresaId: { in: companies } } });
       await prisma.emissionDocumentTask.deleteMany({ where: { nota: { empresaId: { in: companies } } } });

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Search, Edit, Save, X, ChevronLeft, ChevronRight, CheckCircle, XCircle, Briefcase, FileCode2, ShieldCheck, Percent } from 'lucide-react';
+import { Search, Edit, Save, X, ChevronLeft, ChevronRight, CheckCircle, XCircle, Briefcase, FileCode2, ShieldCheck, Percent, CalendarDays } from 'lucide-react';
 import { useDialog } from '@/app/contexts/DialogContext';
 import NbsSelector from '@/components/NbsSelector';
 
@@ -44,6 +44,7 @@ export default function AdminCnaes() {
     const csll = editing.aliquotaCsllRetencao === '' || editing.aliquotaCsllRetencao == null ? 1 : Number(editing.aliquotaCsllRetencao);
     const payloadToSave = {
       ...editing,
+      complementares: Array.isArray(editing.complementares) ? editing.complementares : [],
       modoRetencoes: editing.modoRetencoes || 'SUGERIR',
       aliquotaPisRetencao: editing.retemCrsf ? pis : editing.aliquotaPisRetencao,
       aliquotaCofinsRetencao: editing.retemCrsf ? cofins : editing.aliquotaCofinsRetencao,
@@ -116,6 +117,25 @@ export default function AdminCnaes() {
                 <label className="mb-1 block text-xs font-black uppercase text-slate-400">CNAE bloqueado</label>
                 <input className={`${inputBase} bg-white font-mono font-black text-slate-700`} value={editing.codigo} disabled />
                 <p className="mt-2 text-sm leading-relaxed text-slate-500">{editing.descricao}</p>
+              </div>
+
+              <div>
+                <h4 className="mb-3 text-sm font-black uppercase text-slate-500">Complementares</h4>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const atuais = Array.isArray(editing.complementares) ? editing.complementares : [];
+                    const ativos = atuais.includes('EVENTO') ? atuais.filter((item: string) => item !== 'EVENTO') : [...atuais, 'EVENTO'];
+                    setEditing({ ...editing, complementares: ativos });
+                  }}
+                  className={`flex w-full items-start gap-3 rounded-2xl border p-4 text-left transition ${editing.complementares?.includes('EVENTO') ? 'border-indigo-200 bg-indigo-50 text-indigo-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}
+                >
+                  <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border ${editing.complementares?.includes('EVENTO') ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300 bg-white'}`}>
+                    {editing.complementares?.includes('EVENTO') && <CheckCircle size={14} />}
+                  </span>
+                  <CalendarDays size={20} className="mt-0.5 shrink-0 text-indigo-600" />
+                  <span><strong className="block">Atividade de evento</strong><span className="mt-1 block text-sm opacity-75">Solicita data inicial, data final e descrição na emissão. O endereço será obtido da empresa prestadora.</span></span>
+                </button>
               </div>
 
               <div>

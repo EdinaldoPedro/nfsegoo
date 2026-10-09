@@ -11,6 +11,7 @@ import { encrypt } from '@/app/utils/crypto';
 import { commercialTransaction } from './commercialService';
 import { getEffectivePlanLimits } from './planService';
 import { setUserDpsSequenceInTransaction } from './dpsSequenceStore';
+import { syncCnaesGlobalmente } from './syncService';
 
 export class ProfileError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -217,11 +218,35 @@ export async function updateProfile(actorId: string, contextId: string | null, i
     if (inputCompany.cnaes) {
       // Preserve local legacy metadata for unchanged codes; tenant input cannot
       // invent shared fiscal rules or overwrite retention/NBS configuration.
-      const old = new Map((current?.atividades ?? []).map(item => [item.codigo.replace(/[./-]/g, ''), item]));
-      await tx.cnae.deleteMany({ where: { empresaId: saved.id } });
-      await tx.cnae.createMany({ data: inputCompany.cnaes.map(item => ({ ...item, empresaId: saved.id,
-        codigoNbs: old.get(item.codigo)?.codigoNbs ?? null, temRetencaoInss: old.get(item.codigo)?.temRetencaoInss ?? false })) });
+      // Keeping the same row id is also essential: company fiscal autonomy is
+      // attached to Cnae.id and must survive an ordinary profile save.
+      const configuredRows = current ? await tx.$queryRaw<Array<{ cnaeId: string }>>`
+        SELECT "cnaeId" FROM "EmpresaCnaeConfiguracaoFiscal" WHERE "empresaId" = ${saved.id}
+      ` : [];
+      const configuredIds = new Set(configuredRows.map(row => row.cnaeId));
+      const existingByCode = new Map<string, NonNullable<typeof current>['atividades'][number]>();
+      for (const item of [...(current?.atividades ?? [])].sort((left, right) => Number(configuredIds.has(right.id)) - Number(configuredIds.has(left.id)))) {
+        const code = item.codigo.replace(/\D/g, '');
+        if (!existingByCode.has(code)) existingByCode.set(code, item);
+      }
+      const retainedIds: string[] = [];
+      for (const item of inputCompany.cnaes) {
+        const existing = existingByCode.get(item.codigo);
+        if (existing) {
+          await tx.cnae.update({ where: { id: existing.id }, data: { codigo: item.codigo, descricao: item.descricao, principal: item.principal } });
+          retainedIds.push(existing.id);
+        } else {
+          const created = await tx.cnae.create({ data: { ...item, empresaId: saved.id } });
+          retainedIds.push(created.id);
+        }
+      }
+      await tx.cnae.deleteMany({ where: { empresaId: saved.id, id: { notIn: retainedIds } } });
     }
+    await syncCnaesGlobalmente(
+      activities.map((item) => ({ codigo: item.codigo, descricao: item.descricao, principal: item.principal })),
+      saved.codigoIbge,
+      tx,
+    );
     if (inputCompany.data.serieDPS !== undefined || inputCompany.ultimoDPS !== undefined) {
       const sequence = await setUserDpsSequenceInTransaction(tx, { empresaId: saved.id, ambiente: saved.ambiente, serie: saved.serieDPS,
         ultimoConfirmado: inputCompany.ultimoDPS ?? 0, userId: actorId });

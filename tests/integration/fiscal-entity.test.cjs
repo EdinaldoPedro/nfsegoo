@@ -11,10 +11,12 @@ test('identidade fiscal PostgreSQL: CNPJ global, relações privadas e históric
   const { mutateAdminFiscalEntity, listAdminFiscalEntities } = require('../../app/services/adminFiscalEntityService.ts');
   const { criarEmissaoJob } = require('../../app/services/emissaoJobService.ts');
   const prefix = 'qa-fiscal-entity-' + randomUUID(); const password = 'synthetic-' + randomUUID();
-  let admin; const companies = []; const customers = []; let entity; let note; let job; let sale;
+  let admin; const companies = []; const customers = []; let entity; let note; let job; let sale; let heartbeatId;
   const cnpj = '11222333000181';
   try {
     admin = await prisma.user.create({ data: { email: `${prefix}@example.invalid`, nome: 'Admin QA', senha: await bcrypt.hash(password, 4), role: 'ADMIN' } });
+    heartbeatId = `emission-qa-fiscal-entity-${randomUUID()}`;
+    await prisma.workerHeartbeat.create({ data: { id: heartbeatId, productionEnabled: true } });
     for (let index = 0; index < 2; index++) companies.push(await prisma.empresa.create({ data: { documento: `${prefix}-${index}`, razaoSocial: `Prestador ${index}`,
       ambiente: 'HOMOLOGACAO', proprietarioUserId: admin.id, donoFaturamentoId: admin.id, regimeTributario: 'MEI',
       certificadoA1: 'QA-CERTIFICATE-NOT-REAL', senhaCertificado: 'QA-ENCRYPTED-PASSWORD' } }));
@@ -56,7 +58,7 @@ test('identidade fiscal PostgreSQL: CNPJ global, relações privadas e históric
     } });
     job = queued.job; sale = queued.venda;
     const queuedPayload = JSON.parse(job.payloadJson);
-    assert.equal(queuedPayload._tomadorSnapshot.nome, 'Tomador Canônico QA');
+    assert.equal(queuedPayload._tomadorSnapshot.nome, 'Tomador atualizado pela fonte');
     assert.equal(queuedPayload._tomadorSnapshot.email, 'privado-0@example.invalid');
 
     note = await prisma.notaFiscal.create({ data: { empresaId: companies[0].id, clienteId: customers[0].id, valor: 10, descricao: 'Snapshot QA',
@@ -65,12 +67,13 @@ test('identidade fiscal PostgreSQL: CNPJ global, relações privadas e históric
     await mutateAdminFiscalEntity(admin.id, { ...correction, expectedVersion: refreshed.version, data: { razaoSocial: 'Novo nome global QA' } });
     const frozen = await prisma.notaFiscal.findUniqueOrThrow({ where: { id: note.id } });
     assert.equal(frozen.tomadorNome, 'Tomador atualizado pela fonte'); assert.equal(frozen.xmlAutorizadoBase64, note.xmlAutorizadoBase64);
-    assert.equal(JSON.parse((await prisma.emissaoJob.findUniqueOrThrow({ where: { id: job.id } })).payloadJson)._tomadorSnapshot.nome, 'Tomador Canônico QA');
+    assert.equal(JSON.parse((await prisma.emissaoJob.findUniqueOrThrow({ where: { id: job.id } })).payloadJson)._tomadorSnapshot.nome, 'Tomador atualizado pela fonte');
 
     const list = await listAdminFiscalEntities(new URLSearchParams({ search: cnpj })); const serialized = JSON.stringify(list);
     assert.equal(list.meta.total, 1); assert.equal(list.data[0].relacionamentos, 2);
     for (const secret of ['privado-0@example.invalid', 'privado-1@example.invalid', 'IM-0', 'IM-1']) assert.equal(serialized.includes(secret), false);
   } finally {
+    if (heartbeatId) await prisma.workerHeartbeat.deleteMany({ where: { id: heartbeatId } });
     if (note) await prisma.notaFiscal.deleteMany({ where: { id: note.id } });
     if (job) await prisma.emissaoJob.deleteMany({ where: { id: job.id } });
     if (sale) await prisma.venda.deleteMany({ where: { id: sale.id } });

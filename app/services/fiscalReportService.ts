@@ -45,7 +45,9 @@ export async function getFiscalReport(userId: string, contextId: string | null, 
     const scope: Prisma.NotaFiscalWhereInput = { AND: [common, noteEnvironmentWhere(filters.ambiente)] };
     const where: Prisma.NotaFiscalWhereInput = { ...scope, status: filters.incluirCanceladas ? { in: ['AUTORIZADA', 'CANCELADA'] } : 'AUTORIZADA' };
     const [rows, total, authorized, cancelled, unknown, estimatedDates, unverifiedMetadata, company] = await Promise.all([
-      tx.notaFiscal.findMany({ where, select: fiscalReportNoteSelect, orderBy: [{ dataEmissao: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
+      tx.notaFiscal.findMany({ where, select: fiscalReportNoteSelect, orderBy: [
+        { dataEmissao: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }, { id: 'desc' },
+      ],
         skip: (filters.page - 1) * filters.limit, take: filters.limit }),
       tx.notaFiscal.count({ where }),
       tx.notaFiscal.aggregate({ where: { ...scope, status: 'AUTORIZADA' }, _sum: { valor: true }, _count: { id: true } }),

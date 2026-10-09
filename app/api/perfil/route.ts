@@ -77,11 +77,17 @@ export const GET = withApiGuard(async function GET(request: Request) {
           SELECT (COALESCE(octet_length("certificadoA1"), 0) > 0) AS available FROM "Empresa" WHERE "id" = ${emp.id} AND "arquivadoEm" IS NULL
         `;
         temCertificado = flags[0]?.available ?? false;
-        dadosEmpresa = { ...emp, sequenciasDps: await listDpsSequences(emp.id) };
+        const imPreferences = await prisma.$queryRaw<Array<{ enviar: boolean }>>`
+          SELECT "enviarInscricaoMunicipalDps" AS enviar FROM "Empresa" WHERE "id" = ${emp.id} LIMIT 1
+        `;
+        dadosEmpresa = { ...emp, enviarInscricaoMunicipalDps: imPreferences[0]?.enviar !== false, sequenciasDps: await listDpsSequences(emp.id) };
       }
 
       let atividadesEnriquecidas = dadosEmpresa.atividades || [];
       if (atividadesEnriquecidas.length > 0) {
+          const configuracoesProprias = await prisma.$queryRaw<Array<{ cnaeId: string; ativo: boolean; configuracao: any; versao: number; updatedAt: Date }>>`
+            SELECT "cnaeId", "ativo", "configuracao", "versao", "updatedAt" FROM "EmpresaCnaeConfiguracaoFiscal" WHERE "empresaId" = ${empresaAlvoId!}
+          `;
           const codes = atividadesEnriquecidas.map((item: any) => String(item.codigo).replace(/[./-]/g, ''));
           const variants = [...new Set<string>(codes.flatMap((code: string) => [code, code.replace(/^(\d{4})(\d)(\d{2})$/, '$1-$2/$3')]))];
           const globais = await prisma.globalCnae.findMany({ where: { codigo: { in: variants } } });
@@ -107,8 +113,60 @@ export const GET = withApiGuard(async function GET(request: Request) {
               const global = globais.find((g: any) => String(g.codigo).replace(/\D/g, '') === localClean);
               const regraMun = regrasMunicipais.find((r: any) => String(r.cnae).replace(/\D/g, '') === localClean);
 
+              const sugestaoNacional = global ? {
+                origem: 'PADRAO_NACIONAL',
+                titulo: 'Padrão nacional do SaaS',
+                fonteNormativa: global.fonteNormativa || null,
+                inicioVigencia: global.inicioVigencia?.toISOString() || null,
+                fimVigencia: global.fimVigencia?.toISOString() || null,
+                configuracao: {
+                  codigoTributacaoNacional: global.codigoTributacaoNacional || '', itemLc: global.itemLc || '',
+                  codigoTributacaoMunicipal: '', descricaoServicoMunicipal: '', tipoTributacao: '1',
+                  aliquotaIss: global.aliquotaPadrao != null ? String(global.aliquotaPadrao) : '',
+                  exigeCodigoTributacaoMunicipal: false, exigeNbs: Boolean(global.codigoNbs), nbsPadrao: global.codigoNbs || '',
+                  modoRetencoes: global.modoRetencoes || 'SUGERIR', retemCrsf: global.retemCrsf,
+                  aliquotaPisRetencao: global.aliquotaPisRetencao != null ? String(global.aliquotaPisRetencao) : '',
+                  aliquotaCofinsRetencao: global.aliquotaCofinsRetencao != null ? String(global.aliquotaCofinsRetencao) : '',
+                  aliquotaCsllRetencao: global.aliquotaCsllRetencao != null ? String(global.aliquotaCsllRetencao) : '',
+                  retemIr: global.retemIr, aliquotaIr: global.aliquotaIr != null ? String(global.aliquotaIr) : '',
+                  retemInss: global.temRetencaoInss, aliquotaInss: global.aliquotaInss != null ? String(global.aliquotaInss) : '',
+                  habilitaIbsCbs: global.habilitaIbsCbs === true, codigoIndicadorOperacao: global.codigoIndicadorOperacao || '',
+                  cstIbsCbs: global.cstIbsCbs || '', classeTribIbsCbs: global.classeTribIbsCbs || '',
+                  finNfsePadrao: '0', indFinalPadrao: '0', indDestPadrao: '0', complementares: global.complementares || [],
+                },
+              } : null;
+              const sugestaoMunicipal = regraMun ? {
+                origem: 'REGRA_MUNICIPAL', titulo: `Regra municipal (${dadosEmpresa.codigoIbge})`, codigoIbge: dadosEmpresa.codigoIbge,
+                fonteNormativa: regraMun.fonteNormativa || null, inicioVigencia: regraMun.inicioVigencia?.toISOString() || null,
+                fimVigencia: regraMun.fimVigencia?.toISOString() || null,
+                configuracao: {
+                  ...(sugestaoNacional?.configuracao || {}), codigoTributacaoMunicipal: regraMun.codigoTributacaoMunicipal,
+                  descricaoServicoMunicipal: regraMun.descricaoServicoMunicipal || '',
+                  aliquotaIss: regraMun.aliquotaIss != null ? String(regraMun.aliquotaIss) : (sugestaoNacional?.configuracao.aliquotaIss || ''),
+                  exigeCodigoTributacaoMunicipal: regraMun.exigeCodigoTributacaoMunicipal, exigeNbs: regraMun.exigeNbs,
+                  nbsPadrao: regraMun.nbsPadrao || sugestaoNacional?.configuracao.nbsPadrao || '',
+                  modoRetencoes: regraMun.modoRetencoes !== 'HERDAR' ? regraMun.modoRetencoes : (sugestaoNacional?.configuracao.modoRetencoes || 'SUGERIR'),
+                  retemCrsf: regraMun.retemCrsf ?? sugestaoNacional?.configuracao.retemCrsf ?? false,
+                  aliquotaPisRetencao: regraMun.aliquotaPisRetencao != null ? String(regraMun.aliquotaPisRetencao) : sugestaoNacional?.configuracao.aliquotaPisRetencao || '',
+                  aliquotaCofinsRetencao: regraMun.aliquotaCofinsRetencao != null ? String(regraMun.aliquotaCofinsRetencao) : sugestaoNacional?.configuracao.aliquotaCofinsRetencao || '',
+                  aliquotaCsllRetencao: regraMun.aliquotaCsllRetencao != null ? String(regraMun.aliquotaCsllRetencao) : sugestaoNacional?.configuracao.aliquotaCsllRetencao || '',
+                  retemIr: regraMun.retemIr ?? sugestaoNacional?.configuracao.retemIr ?? false,
+                  aliquotaIr: regraMun.aliquotaIr != null ? String(regraMun.aliquotaIr) : sugestaoNacional?.configuracao.aliquotaIr || '',
+                  retemInss: regraMun.retemInss ?? sugestaoNacional?.configuracao.retemInss ?? false,
+                  aliquotaInss: regraMun.aliquotaInss != null ? String(regraMun.aliquotaInss) : sugestaoNacional?.configuracao.aliquotaInss || '',
+                  habilitaIbsCbs: regraMun.habilitaIbsCbs ?? sugestaoNacional?.configuracao.habilitaIbsCbs ?? false,
+                  codigoIndicadorOperacao: regraMun.codigoIndicadorOperacao || sugestaoNacional?.configuracao.codigoIndicadorOperacao || '',
+                  cstIbsCbs: regraMun.cstIbsCbs || sugestaoNacional?.configuracao.cstIbsCbs || '',
+                  classeTribIbsCbs: regraMun.classeTribIbsCbs || sugestaoNacional?.configuracao.classeTribIbsCbs || '',
+                  finNfsePadrao: regraMun.finNfsePadrao || '0', indFinalPadrao: regraMun.indFinalPadrao || '0', indDestPadrao: regraMun.indDestPadrao || '0',
+                },
+              } : null;
+
               return {
                   ...local,
+                  configuracaoFiscalPropria: configuracoesProprias.find((config) => config.cnaeId === local.id) || null,
+                  sugestaoFiscalNacional: sugestaoNacional,
+                  sugestaoFiscalMunicipal: sugestaoMunicipal,
                   temRetencaoInss: regraMun?.retemInss ?? global?.temRetencaoInss ?? local.temRetencaoInss,
                   retemCrsf: regraMun?.retemCrsf ?? global?.retemCrsf ?? false,
                   aliquotaCrsf: global?.aliquotaCrsf ? Number(global.aliquotaCrsf) : 4.65,
@@ -128,6 +186,7 @@ export const GET = withApiGuard(async function GET(request: Request) {
                     : global?.modoRetencoes || 'SUGERIR',
                   fiscalRuleConfigured: !!regraMun,
                   ibscbsConfigured: !!(regraMun?.habilitaIbsCbs || global?.habilitaIbsCbs),
+                  complementares: global?.complementares || [],
               };
           });
       }

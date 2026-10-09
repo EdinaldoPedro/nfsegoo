@@ -5,6 +5,7 @@ import { hasCustomerCompanyAccess } from '@/app/utils/access-control';
 import { prisma } from '@/app/utils/prisma';
 import { criarEmissaoJob } from '@/app/services/emissaoJobService';
 import { validateSelectableNbs } from '@/app/utils/nbs';
+import { hasE0014Evidence } from '@/app/services/emissionConflictResolutionService';
 
 export const POST = withApiGuard(async function POST(request: Request) {
   const { user, targetId, errorResponse } = await validateRequest(request);
@@ -16,11 +17,12 @@ export const POST = withApiGuard(async function POST(request: Request) {
   }
   const venda = await prisma.venda.findUnique({ where: { id: vendaId } });
   if (!venda || !await hasCustomerCompanyAccess(user, venda.empresaId)) return NextResponse.json({ error: 'Venda indisponível.' }, { status: 404 });
-  const previous = await prisma.emissaoJob.findFirst({ where: { vendaId }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], select: { payloadJson: true } });
+  const previous = await prisma.emissaoJob.findFirst({ where: { vendaId }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], select: { payloadJson: true, lastError: true } });
   const original = previous ? JSON.parse(previous.payloadJson) : {};
+  const numberingConflict = hasE0014Evidence(previous?.lastError);
   const payload = { ...original, ...dadosAtualizados, vendaId, clienteId: venda.clienteId,
     valor: dadosAtualizados.valor ?? original.valor ?? String(venda.valor), descricao: dadosAtualizados.descricao ?? original.descricao ?? venda.descricao,
-    numeroDPS: dadosAtualizados.numeroDPS, copiaDeVendaId: undefined, idempotencyKey: undefined,
+    numeroDPS: numberingConflict ? undefined : dadosAtualizados.numeroDPS, copiaDeVendaId: undefined, idempotencyKey: undefined,
     // A previous attempt's confirmation does not authorize this new attempt.
     empresaConfirmadaId: dadosAtualizados.empresaConfirmadaId, ambienteConfirmado: dadosAtualizados.ambienteConfirmado };
   if (payload.codigoNbs !== undefined) {

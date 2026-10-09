@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { 
   Building2, Save, ArrowLeft, Search, MapPin, Briefcase, 
   Lock, CheckCircle, Trash2, Info, Upload, FileKey, Settings, Loader2, AlertCircle
-  , RefreshCw, ShieldCheck
+  , RefreshCw, ShieldCheck, Pencil, X
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import AppHeader from '@/components/AppHeader';
@@ -13,6 +13,16 @@ import { normalizarRegimeTributario } from '@/app/utils/regime-tributario';
 import { companyProfileFormFields } from '@/app/utils/company-profile-form';
 import { MAX_STORED_DPS_NUMBER, nextDpsCandidate, normalizeDpsEnvironment, normalizeDpsNumber, normalizeDpsSeries } from '@/app/utils/dps-identity';
 import { formatCnpjInput, normalizeCnpj, validarCNPJ } from '@/app/utils/cnpj';
+import NbsSelector from '@/components/NbsSelector';
+import TributacaoNacionalSelector from '@/components/TributacaoNacionalSelector';
+
+const emptyFiscalConfig = {
+  codigoTributacaoNacional: '', itemLc: '', codigoTributacaoMunicipal: '', descricaoServicoMunicipal: '', tipoTributacao: '1', aliquotaIss: '',
+  exigeCodigoTributacaoMunicipal: false, exigeNbs: false, nbsPadrao: '', modoRetencoes: 'SUGERIR', retemCrsf: false,
+  aliquotaPisRetencao: '', aliquotaCofinsRetencao: '', aliquotaCsllRetencao: '', retemIr: false, aliquotaIr: '', retemInss: false,
+  aliquotaInss: '', habilitaIbsCbs: false, codigoIndicadorOperacao: '', cstIbsCbs: '', classeTribIbsCbs: '', finNfsePadrao: '0', indFinalPadrao: '0', indDestPadrao: '0', ativo: false,
+  complementares: [] as string[],
+};
 
 export default function ConfiguracoesEmpresa() {
   const router = useRouter();
@@ -27,6 +37,9 @@ export default function ConfiguracoesEmpresa() {
   const [isContador, setIsContador] = useState(false);
   
   const [atividades, setAtividades] = useState<any[]>([]); 
+  const [editingFiscalCnae, setEditingFiscalCnae] = useState<any>(null);
+  const [fiscalForm, setFiscalForm] = useState<any>({ ...emptyFiscalConfig });
+  const [savingFiscal, setSavingFiscal] = useState(false);
 
   const [certFile, setCertFile] = useState<string | null>(null);
   const [certSenha, setCertSenha] = useState('');
@@ -56,6 +69,7 @@ export default function ConfiguracoesEmpresa() {
     nomeFantasia: '',
     cnaePrincipal: '',
     inscricaoMunicipal: '',
+    enviarInscricaoMunicipalDps: true,
     regimeTributario: '',
     cep: '',
     logradouro: '',
@@ -70,10 +84,69 @@ export default function ConfiguracoesEmpresa() {
     serieDPS: '900',
     ultimoDPS: 0 as number | string
   });
+  const regimeFiscal = normalizarRegimeTributario(empresa.regimeTributario);
+  const permiteTributacaoMunicipal = regimeFiscal !== 'MEI';
+  const permiteRetencaoInss = regimeFiscal !== 'MEI';
+  const permiteRetencoesFederais = regimeFiscal === 'LUCRO_PRESUMIDO';
 
   const showMessage = (texto: string, tipo: 'sucesso' | 'erro') => {
       setMsg({ texto, tipo });
       if (tipo === 'sucesso') setTimeout(() => setMsg(current => current?.texto === texto ? null : current), 5000);
+  };
+
+  const abrirConfiguracaoFiscal = (cnae: any) => {
+    setEditingFiscalCnae(cnae);
+    setFiscalForm({ ...emptyFiscalConfig, ...(cnae.configuracaoFiscalPropria?.configuracao || {}), ativo: cnae.configuracaoFiscalPropria?.ativo === true });
+  };
+
+  const carregarSugestaoFiscal = (tipo: 'nacional' | 'municipal') => {
+    if (!editingFiscalCnae) return;
+    const sugestao = tipo === 'nacional' ? editingFiscalCnae.sugestaoFiscalNacional : editingFiscalCnae.sugestaoFiscalMunicipal;
+    if (!sugestao?.configuracao) return;
+    setFiscalForm({ ...emptyFiscalConfig, ...sugestao.configuracao, ativo: false });
+  };
+
+  const salvarConfiguracaoFiscal = async () => {
+    if (!editingFiscalCnae) return;
+    if (fiscalForm.ativo) {
+      const confirmed = await dialog.showConfirm({ type: 'warning', title: 'Ativar configuração fiscal própria?', description: 'Novas emissões deste CNAE deixarão de usar as regras fiscais do SaaS e usarão os dados informados pela empresa. A alteração ficará registrada para auditoria.', confirmText: 'Ativar configuração própria' });
+      if (!confirmed) return;
+    }
+    setSavingFiscal(true);
+    try {
+      const response = await fetch('/api/perfil/cnae-fiscal', { method: 'PUT', headers: { 'Content-Type': 'application/json', 'x-user-id': localStorage.getItem('userId') || '', 'x-empresa-id': localStorage.getItem('empresaContextId') || '' }, body: JSON.stringify({ ...fiscalForm, cnaeId: editingFiscalCnae.id }) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Não foi possível salvar a configuração fiscal.');
+      setAtividades((items) => items.map((item) => item.id === editingFiscalCnae.id ? { ...item, configuracaoFiscalPropria: result } : item));
+      setEditingFiscalCnae(null);
+      await dialog.showAlert({ type: 'success', title: fiscalForm.ativo ? 'Configuração própria ativada' : 'Rascunho fiscal salvo', description: fiscalForm.ativo ? 'As próximas emissões deste CNAE usarão a configuração da empresa.' : 'A emissão continua usando as regras do SaaS até que a configuração seja ativada.' });
+    } catch (error) { await dialog.showAlert({ type: 'danger', description: error instanceof Error ? error.message : 'Falha ao salvar.' }); }
+    finally { setSavingFiscal(false); }
+  };
+
+  const atualizarEnvioImPrestador = async (enviar: boolean) => {
+    const anterior = empresa.enviarInscricaoMunicipalDps;
+    setEmpresa((atual) => ({ ...atual, enviarInscricaoMunicipalDps: enviar }));
+    try {
+      const response = await fetch('/api/perfil/prestador-im', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': localStorage.getItem('userId') || '', 'x-empresa-id': localStorage.getItem('empresaContextId') || '' },
+        body: JSON.stringify({ enviar }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'Não foi possível atualizar o envio da IM.');
+      if (typeof result.empresaAtualizadaEm === 'string') {
+        setCompanyContext((current) => ({ ...current, updatedAt: result.empresaAtualizadaEm }));
+      }
+      await dialog.showAlert({
+        type: 'success',
+        title: enviar ? 'Envio da IM ativado' : 'IM preservada e omitida da DPS',
+        description: enviar ? 'As próximas DPS voltarão a informar a Inscrição Municipal.' : 'A Inscrição Municipal continua cadastrada, mas não será enviada nas próximas DPS.',
+      });
+    } catch (error) {
+      setEmpresa((atual) => ({ ...atual, enviarInscricaoMunicipalDps: anterior }));
+      await dialog.showAlert({ type: 'danger', description: error instanceof Error ? error.message : 'Falha ao atualizar.' });
+    }
   };
 
   const manterIbgeSeConsultaVierVazia = (codigoNovo: string | null | undefined, codigoAtual: string | null | undefined) => {
@@ -452,7 +525,7 @@ export default function ConfiguracoesEmpresa() {
         eyebrow="Configurações"
         backHref="/cliente/dashboard"
       />
-      <div className="saas-container max-w-4xl">
+      <div className="saas-container max-w-7xl">
         
         <div className="hidden">
         <div className="flex justify-between items-center mb-8">
@@ -511,9 +584,9 @@ export default function ConfiguracoesEmpresa() {
             </button>
           </div>
         ) : (
-        <form onSubmit={(e) => handleSalvar(e)} className="saas-card overflow-hidden">
+        <form onSubmit={(e) => handleSalvar(e)} className="grid grid-cols-1 items-start gap-6 xl:grid-cols-12">
           
-          <div className="p-8 border-b border-gray-100">
+          <div className="saas-card overflow-hidden p-6 sm:p-8 xl:col-span-7">
             <h3 className="text-lg font-semibold text-blue-600 mb-6 flex items-center gap-2">
               <Briefcase size={20} /> Dados Cadastrais
             </h3>
@@ -541,6 +614,12 @@ export default function ConfiguracoesEmpresa() {
                   <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Inscrição Municipal <span className="text-blue-600 text-xs">(Editável)</span></label>
                       <input type="text" className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white font-bold text-gray-800" placeholder="Ex: 12345" value={empresa.inscricaoMunicipal || ''} onChange={e => setEmpresa({...empresa, inscricaoMunicipal: e.target.value})}/>
+                      {empresa.inscricaoMunicipal && companyContext.id && (
+                        <label className="mt-3 flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                          <input type="checkbox" className="mt-0.5 h-4 w-4" checked={empresa.enviarInscricaoMunicipalDps} onChange={(event) => void atualizarEnvioImPrestador(event.target.checked)} />
+                          <span><strong className="block text-slate-900">Enviar a IM na DPS</strong>A IM permanece cadastrada mesmo quando esta opção estiver desmarcada.</span>
+                        </label>
+                      )}
                   </div>
                   <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Regime Tributário <span className="text-red-500 text-xs">* Obrigatório</span></label>
@@ -572,26 +651,68 @@ export default function ConfiguracoesEmpresa() {
                                 <span className={`font-bold px-2 py-1 rounded text-[10px] uppercase tracking-wide ${cnae.principal ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
                                     {cnae.principal ? 'Principal' : 'Secundário'}
                                 </span>
-                                <div>
+                                <div className="min-w-0 flex-1">
                                     <span className="font-mono font-bold text-gray-800 text-sm block">{cnae.codigo}</span>
                                     <span className="text-gray-600 leading-tight">{cnae.descricao}</span>
+                                    <span className={`mt-1 inline-block rounded-full px-2 py-0.5 text-[10px] font-bold ${cnae.configuracaoFiscalPropria?.ativo ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'}`}>
+                                      {cnae.configuracaoFiscalPropria?.ativo ? 'Configuração própria ativa' : cnae.configuracaoFiscalPropria ? 'Configuração própria em rascunho' : 'Regras fiscais do SaaS'}
+                                    </span>
                                 </div>
+                                <button type="button" onClick={() => abrirConfiguracaoFiscal(cnae)} className="ml-auto rounded-lg border border-blue-200 p-2 text-blue-700 hover:bg-blue-50" title="Configurar tributação deste CNAE"><Pencil size={15} /></button>
                             </div>
                         ))}
                     </div>
                 )}
               </div>
             </div>
+            {editingFiscalCnae && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+                <div className="flex max-h-[94vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+                  <div className="flex items-start justify-between border-b bg-slate-50 p-5"><div><h3 className="text-xl font-black text-slate-900">Configuração fiscal do CNAE {editingFiscalCnae.codigo}</h3><p className="text-sm text-slate-500">{editingFiscalCnae.descricao}</p></div><button type="button" onClick={() => setEditingFiscalCnae(null)} className="p-2 text-slate-500"><X size={20}/></button></div>
+                  <div className="space-y-5 overflow-y-auto p-6">
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"><strong>Autonomia fiscal da empresa.</strong> Salve como rascunho para revisar. Ao ativar, estes dados substituem as regras do SaaS nas novas emissões deste CNAE.</div>
+                    <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900"><strong>Regime considerado: {regimeFiscal === 'LUCRO_PRESUMIDO' ? 'Lucro Presumido' : regimeFiscal === 'SIMPLES' ? 'Simples Nacional' : regimeFiscal || 'não informado'}.</strong> O formulário exibe somente os parâmetros aplicáveis a esse regime.</div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <strong className="mr-2 text-sm text-slate-800">Começar usando:</strong>
+                        <button type="button" disabled={!editingFiscalCnae.sugestaoFiscalNacional} onClick={() => carregarSugestaoFiscal('nacional')} className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-blue-700 disabled:cursor-not-allowed disabled:opacity-40">Padrão nacional</button>
+                        {permiteTributacaoMunicipal && <button type="button" disabled={!editingFiscalCnae.sugestaoFiscalMunicipal} onClick={() => carregarSugestaoFiscal('municipal')} className="rounded-lg border border-emerald-200 bg-white px-3 py-2 text-xs font-bold text-emerald-700 disabled:cursor-not-allowed disabled:opacity-40">Regra do município</button>}
+                        <button type="button" onClick={() => setFiscalForm({ ...emptyFiscalConfig })} className="rounded-lg border bg-white px-3 py-2 text-xs font-bold text-slate-600">Preencher do zero</button>
+                      </div>
+                      <div className="mt-3 grid gap-2 text-xs text-slate-600 md:grid-cols-2">
+                        <p><strong>Nacional:</strong> {editingFiscalCnae.sugestaoFiscalNacional ? `${editingFiscalCnae.sugestaoFiscalNacional.fonteNormativa || 'regra cadastrada no SaaS'}${editingFiscalCnae.sugestaoFiscalNacional.inicioVigencia ? ` · desde ${new Date(editingFiscalCnae.sugestaoFiscalNacional.inicioVigencia).toLocaleDateString('pt-BR')}` : ''}` : 'sem padrão cadastrado'}</p>
+                        {permiteTributacaoMunicipal && <p><strong>Municipal:</strong> {editingFiscalCnae.sugestaoFiscalMunicipal ? `${editingFiscalCnae.sugestaoFiscalMunicipal.fonteNormativa || `IBGE ${editingFiscalCnae.sugestaoFiscalMunicipal.codigoIbge}`}${editingFiscalCnae.sugestaoFiscalMunicipal.fimVigencia ? ` · até ${new Date(editingFiscalCnae.sugestaoFiscalMunicipal.fimVigencia).toLocaleDateString('pt-BR')}` : ''}` : 'sem regra vigente para o município'}</p>}
+                      </div>
+                      <p className="mt-2 text-[11px] text-slate-500">A sugestão é copiada para o rascunho. Alterações futuras nas tabelas do SaaS não modificam automaticamente a configuração própria já salva.</p>
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <label className="text-xs font-bold text-slate-600">Código tributário nacional<TributacaoNacionalSelector value={fiscalForm.codigoTributacaoNacional} onChange={(value) => setFiscalForm({...fiscalForm,codigoTributacaoNacional:value,itemLc: value.length >= 4 ? `${value.slice(0,2)}.${value.slice(2,4)}` : fiscalForm.itemLc})}/></label>
+                      <label className="text-xs font-bold text-slate-600">Item LC 116<input className="mt-1 w-full rounded-lg border p-3" value={fiscalForm.itemLc} onChange={e=>setFiscalForm({...fiscalForm,itemLc:e.target.value})} placeholder="Ex: 17.10"/></label>
+                      <label className="text-xs font-bold text-slate-600">Tributação ISSQN<select className="mt-1 w-full rounded-lg border bg-white p-3" value={fiscalForm.tipoTributacao} onChange={e=>setFiscalForm({...fiscalForm,tipoTributacao:e.target.value})}><option value="1">1 - Tributável no município</option><option value="2">2 - Não incidência / imunidade</option><option value="3">3 - Exterior / exportação</option><option value="4">4 - Tributável fora do município</option></select></label>
+                      {permiteTributacaoMunicipal && <label className="text-xs font-bold text-slate-600">Código municipal<input className="mt-1 w-full rounded-lg border p-3" value={fiscalForm.codigoTributacaoMunicipal || ''} onChange={e=>setFiscalForm({...fiscalForm,codigoTributacaoMunicipal:e.target.value})}/></label>}
+                      {permiteTributacaoMunicipal && <label className="text-xs font-bold text-slate-600">Alíquota ISS (%)<input type="number" min="0" max="100" step="0.01" className="mt-1 w-full rounded-lg border p-3" value={fiscalForm.aliquotaIss ?? ''} onChange={e=>setFiscalForm({...fiscalForm,aliquotaIss:e.target.value})}/></label>}
+                      <label className="text-xs font-bold text-slate-600">NBS padrão<NbsSelector value={fiscalForm.nbsPadrao || ''} onChange={(value) => setFiscalForm({...fiscalForm,nbsPadrao:value})}/></label>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-3">{permiteTributacaoMunicipal && <label className="flex items-center gap-2 rounded-xl border p-3 text-sm font-bold"><input type="checkbox" checked={fiscalForm.exigeCodigoTributacaoMunicipal} onChange={e=>setFiscalForm({...fiscalForm,exigeCodigoTributacaoMunicipal:e.target.checked})}/> Exige código municipal</label>}<label className="flex items-center gap-2 rounded-xl border p-3 text-sm font-bold"><input type="checkbox" checked={fiscalForm.exigeNbs} onChange={e=>setFiscalForm({...fiscalForm,exigeNbs:e.target.checked})}/> Exige NBS</label>{permiteRetencaoInss && <label className="text-xs font-bold text-slate-600">Retenções<select className="mt-1 w-full rounded-lg border bg-white p-3" value={fiscalForm.modoRetencoes} onChange={e=>setFiscalForm({...fiscalForm,modoRetencoes:e.target.value})}><option value="SUGERIR">Sugerir ao usuário</option><option value="AUTOMATICO">Calcular automaticamente</option></select></label>}</div>
+                    {regimeFiscal === 'MEI' ? <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600"><strong>Retenções e código municipal não se aplicam ao MEI neste fluxo.</strong> Esses campos são omitidos da configuração e da DPS.</div> : <div className="rounded-xl border border-purple-200 bg-purple-50 p-4"><h4 className="font-black text-purple-900">Retenções compatíveis</h4><div className={`mt-3 grid gap-3 ${permiteRetencoesFederais ? 'md:grid-cols-5' : 'md:grid-cols-1'}`}>{(permiteRetencoesFederais ? [['aliquotaPisRetencao','PIS %'],['aliquotaCofinsRetencao','COFINS %'],['aliquotaCsllRetencao','CSLL %'],['aliquotaIr','IR %'],['aliquotaInss','INSS %']] : [['aliquotaInss','INSS %']]).map(([key,label])=><label key={key} className="text-xs font-bold">{label}<input type="number" step="0.01" min="0" max="100" className="mt-1 w-full rounded-lg border p-2" value={fiscalForm[key] ?? ''} onChange={e=>setFiscalForm({...fiscalForm,[key]:e.target.value})}/></label>)}</div><div className="mt-3 flex flex-wrap gap-4">{(permiteRetencoesFederais ? [['retemCrsf','Reter PIS/COFINS/CSLL'],['retemIr','Reter IR'],['retemInss','Reter INSS']] : [['retemInss','Reter INSS']]).map(([key,label])=><label key={key} className="flex items-center gap-2 text-sm font-bold"><input type="checkbox" checked={fiscalForm[key]===true} onChange={e=>setFiscalForm({...fiscalForm,[key]:e.target.checked})}/>{label}</label>)}</div>{regimeFiscal === 'SIMPLES' && <p className="mt-3 text-xs text-purple-800">No Simples Nacional, PIS/COFINS/CSLL e IRRF são dispensados; somente a configuração de INSS permanece disponível.</p>}</div>}
+                    <div className="rounded-xl border border-cyan-200 bg-cyan-50 p-4"><h4 className="font-black text-cyan-950">IBS/CBS e informações complementares</h4><div className="mt-3 grid gap-3 md:grid-cols-3"><label className="flex items-center gap-2 text-sm font-bold"><input type="checkbox" checked={fiscalForm.habilitaIbsCbs===true} onChange={e=>setFiscalForm({...fiscalForm,habilitaIbsCbs:e.target.checked})}/> Habilitar IBS/CBS</label><label className="text-xs font-bold">Indicador da operação<input className="mt-1 w-full rounded-lg border p-2" value={fiscalForm.codigoIndicadorOperacao||''} onChange={e=>setFiscalForm({...fiscalForm,codigoIndicadorOperacao:e.target.value})}/></label><label className="text-xs font-bold">CST IBS/CBS<input className="mt-1 w-full rounded-lg border p-2" value={fiscalForm.cstIbsCbs||''} onChange={e=>setFiscalForm({...fiscalForm,cstIbsCbs:e.target.value})}/></label><label className="text-xs font-bold">Classe tributária<input className="mt-1 w-full rounded-lg border p-2" value={fiscalForm.classeTribIbsCbs||''} onChange={e=>setFiscalForm({...fiscalForm,classeTribIbsCbs:e.target.value})}/></label><label className="flex items-center gap-2 text-sm font-bold"><input type="checkbox" checked={(fiscalForm.complementares||[]).includes('EVENTO')} onChange={e=>setFiscalForm({...fiscalForm,complementares:e.target.checked?['EVENTO']:[]})}/> Exigir dados de evento</label></div></div>
+                    {permiteTributacaoMunicipal && <label className="block text-xs font-bold text-slate-600">Descrição do serviço municipal<textarea rows={3} className="mt-1 w-full rounded-lg border p-3" value={fiscalForm.descricaoServicoMunicipal || ''} onChange={e=>setFiscalForm({...fiscalForm,descricaoServicoMunicipal:e.target.value})}/></label>}
+                    <label className="flex items-start gap-3 rounded-xl border-2 border-blue-300 bg-blue-50 p-4"><input type="checkbox" className="mt-1 h-5 w-5" checked={fiscalForm.ativo} onChange={e=>setFiscalForm({...fiscalForm,ativo:e.target.checked})}/><span><strong className="block text-blue-950">Usar esta configuração nas emissões</strong><span className="text-sm text-blue-800">Marcada: esta empresa assume a configuração fiscal deste CNAE. Desmarcada: permanece como rascunho e o SaaS continua definindo a tributação.</span></span></label>
+                  </div>
+                  <div className="flex justify-end gap-3 border-t bg-slate-50 p-5"><button type="button" onClick={()=>setEditingFiscalCnae(null)} className="rounded-xl border px-5 py-3 font-bold">Cancelar</button><button type="button" disabled={savingFiscal} onClick={salvarConfiguracaoFiscal} className="rounded-xl bg-blue-600 px-5 py-3 font-bold text-white disabled:opacity-60">{savingFiscal?'Salvando...':fiscalForm.ativo?'Salvar e ativar':'Salvar rascunho'}</button></div>
+                </div>
+              </div>
+            )}
           </div>
 
-          <div className="p-8 border-b border-gray-100 bg-blue-50/30 tour-dps-config">
+          <div className="saas-card overflow-hidden bg-blue-50/30 p-6 sm:p-8 xl:col-span-5 tour-dps-config">
             <div className="mb-6">
               <h3 className="text-lg font-semibold text-blue-800 flex items-center gap-2">
                 <Settings size={20} /> Numeração e Ambiente (DPS)
               </h3>
               <p className="text-sm text-slate-500 mt-1">Esses dados controlam a sequência da DPS enviada ao ambiente nacional. Altere com cuidado para evitar duplicidade de numeração.</p>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
                 <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">Ambiente de Emissão</label>
                     <select disabled={carregandoDps || sincronizandoDps || loading} className="w-full p-3 border rounded-lg bg-white text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none" value={empresa.ambiente} onChange={e => void carregarSequenciaDps(e.target.value, empresa.serieDPS)}>
@@ -607,8 +728,8 @@ export default function ConfiguracoesEmpresa() {
                     <input type="text" inputMode="numeric" pattern="[0-9]{1,5}" disabled={carregandoDps || sincronizandoDps || loading} className="w-full p-3 border rounded-lg bg-white text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none" value={empresa.serieDPS} onChange={e => { ++dpsRequestVersion.current; setEmpresa({...empresa, serieDPS: e.target.value, ultimoDPS: ''}); setUltimoReservadoDps(0); }} onBlur={() => void carregarSequenciaDps(empresa.ambiente, empresa.serieDPS)} placeholder="Ex: 900" maxLength={5}/>
                     <p className="text-xs text-slate-500 mt-1">De 1 a 5 dígitos. Zeros à esquerda não criam outra série: 900 e 00900 compartilham a numeração.</p>
                 </div>
-                <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">Último Número Confirmado</label>
+                <div className="sm:col-span-2">
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Último Número Confirmado</label>
                     <input type="number" min={0} max={MAX_STORED_DPS_NUMBER} step={1} disabled={carregandoDps || sincronizandoDps || loading} className="w-full p-3 border rounded-lg bg-white text-blue-700 font-bold focus:ring-2 focus:ring-blue-500 outline-none" value={empresa.ultimoDPS} onChange={e => setEmpresa({...empresa, ultimoDPS: e.target.value})}/>
                     <p className="text-xs text-slate-500 mt-1">Maior número reservado: <strong>{ultimoReservadoDps}</strong>. Próximo candidato local: <strong>{carregandoDps ? 'consultando...' : proximoCandidatoDps}</strong>. A reserva ocorre no processamento; números usados não são reutilizados.</p>
                 </div>
@@ -634,7 +755,7 @@ export default function ConfiguracoesEmpresa() {
             </div>
           </div>
 
-          <div className="p-8 border-b border-gray-100">
+          <div className="saas-card overflow-hidden p-6 sm:p-8 xl:col-span-7">
             <div className="mb-6">
                 <h3 className="text-lg font-semibold text-blue-600 flex items-center gap-2"><MapPin size={20} /> Endereço da Empresa</h3>
                 <p className="text-sm text-slate-500 mt-1">Endereço fiscal usado pelo Portal Nacional para validar município, tributação e emissão da NFS-e.</p>
@@ -696,7 +817,7 @@ export default function ConfiguracoesEmpresa() {
             </div>
           </div>
 
-          <div className="p-8 bg-slate-50 border-t border-slate-200 tour-certificado">
+          <div className="saas-card overflow-hidden bg-slate-50 p-6 sm:p-8 xl:col-span-5 tour-certificado">
             <h3 className="text-lg font-semibold text-slate-700 mb-6 flex items-center gap-2">
                 <Lock size={20} /> Certificado Digital A1
             </h3>
@@ -775,7 +896,7 @@ export default function ConfiguracoesEmpresa() {
             )}
           </div>
 
-          <div className="bg-gray-50 p-6 flex flex-col items-center gap-4 border-t sticky bottom-0 z-10 shadow-inner">
+          <div className="saas-card sticky bottom-4 z-10 flex flex-col items-center gap-4 border border-slate-200 bg-white/95 p-5 shadow-xl backdrop-blur xl:col-span-12">
             {msg && (
               <div role={msg.tipo === 'erro' ? 'alert' : 'status'} className={`px-6 py-3 rounded-lg text-sm font-bold shadow-md ${msg.tipo === 'sucesso' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                 {msg.texto}
