@@ -9,7 +9,11 @@ import { claimFiscalNoteOperation, processFiscalNoteOperation } from '../app/ser
 import { cleanupEmailOutbox, processNextEmailDelivery } from '../app/services/emailOutboxService';
 import { EmailService } from '../app/services/EmailService';
 import { cleanupOperationalData } from '../app/services/operationalRetentionService';
-import { inspectFiscalHomologationEvidence } from '../app/utils/fiscal-homologation-evidence';
+import {
+  fiscalHomologationWaiverDetail,
+  inspectFiscalHomologationEvidence,
+  inspectFiscalHomologationWaiver,
+} from '../app/utils/fiscal-homologation-evidence';
 
 let stopping = false;
 const stop = new AbortController();
@@ -85,7 +89,16 @@ async function main() {
       rootDir: process.cwd(),
       evidenceFile: process.env.FISCAL_HOMOLOGATION_EVIDENCE_FILE,
     });
-    if (!evidence.ok) throw new Error('Homologação fiscal ausente, vencida ou incompatível com esta versão.');
+    const waiver = inspectFiscalHomologationWaiver({
+      artifactHash: evidence.artifactHash,
+      configuredArtifactHash: process.env.FISCAL_HOMOLOGATION_WAIVER_ARTIFACT_HASH,
+      issuedAt: process.env.FISCAL_HOMOLOGATION_WAIVER_ISSUED_AT,
+      expiresAt: process.env.FISCAL_HOMOLOGATION_WAIVER_EXPIRES_AT,
+      approvedBy: process.env.FISCAL_HOMOLOGATION_WAIVER_APPROVED_BY,
+      reason: process.env.FISCAL_HOMOLOGATION_WAIVER_REASON,
+    });
+    if (!evidence.ok && !waiver.ok) throw new Error('Homologação fiscal ausente, vencida ou incompatível com esta versão.');
+    if (!evidence.ok) console.warn(`[CRITICAL] FISCAL_HOMOLOGATION_WAIVER_ACTIVE: ${fiscalHomologationWaiverDetail(waiver)}`);
   }
   // Do not claim jobs or advertise a healthy worker with missing fiscal assets.
   await ensureFiscalSchemas();

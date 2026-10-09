@@ -6,7 +6,8 @@ const os = require('node:os');
 const path = require('node:path');
 const {
   calculateFiscalArtifactHash, inspectFiscalHomologationEvidence,
-  REQUIRED_FISCAL_HOMOLOGATION_SCENARIOS, validateFiscalHomologationManifest,
+  inspectFiscalHomologationWaiver, REQUIRED_FISCAL_HOMOLOGATION_SCENARIOS,
+  validateFiscalHomologationManifest,
 } = require('../app/utils/fiscal-homologation-evidence.ts');
 
 const now = new Date('2026-09-24T12:00:00.000Z');
@@ -96,4 +97,33 @@ test('diretorio de release sem os artefatos fiscais nunca pode ser aprovado', ()
     const result = inspectFiscalHomologationEvidence({ rootDir: root, evidenceFile, now, artifactPaths: ['ausente'] });
     assert.deepEqual(result.issues, [{ code: 'FISCAL_ARTIFACT_SET_EMPTY' }]);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('liberacao excepcional exige hash exato, justificativa, responsavel e no maximo sete dias', () => {
+  const result = inspectFiscalHomologationWaiver({
+    artifactHash: 'a'.repeat(64),
+    configuredArtifactHash: 'a'.repeat(64),
+    issuedAt: '2026-09-24T11:00:00.000Z',
+    expiresAt: '2026-10-01T11:00:00.000Z',
+    approvedBy: 'Proprietario do produto',
+    reason: 'Validacao operacional controlada pelo proprietario.',
+    now,
+  });
+  assert.equal(result.ok, true);
+});
+
+test('liberacao excepcional recusa outro codigo, prazo excessivo e metadados incompletos', () => {
+  const result = inspectFiscalHomologationWaiver({
+    artifactHash: 'a'.repeat(64),
+    configuredArtifactHash: 'b'.repeat(64),
+    issuedAt: '2026-09-24T11:00:00.000Z',
+    expiresAt: '2026-10-02T11:00:00.000Z',
+    approvedBy: '',
+    reason: 'curta',
+    now,
+  });
+  assert.ok(result.issues.some(issue => issue.code === 'WAIVER_ARTIFACT_HASH_MISMATCH'));
+  assert.ok(result.issues.some(issue => issue.code === 'WAIVER_EXPIRY_INVALID'));
+  assert.ok(result.issues.some(issue => issue.code === 'WAIVER_APPROVER_INVALID'));
+  assert.ok(result.issues.some(issue => issue.code === 'WAIVER_REASON_INVALID'));
 });

@@ -48,6 +48,13 @@ export type FiscalHomologationResult = {
   expiresAt?: string;
 };
 
+export type FiscalHomologationWaiverResult = {
+  ok: boolean;
+  issues: EvidenceIssue[];
+  approvedBy?: string;
+  expiresAt?: string;
+};
+
 function collectFiles(rootDir: string, relativeEntry: string, output: string[]) {
   const absolute = path.resolve(rootDir, relativeEntry);
   if (!absolute.startsWith(path.resolve(rootDir) + path.sep) || !fs.existsSync(absolute)) return;
@@ -93,6 +100,42 @@ function date(value: unknown) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value)) return null;
   const parsed = new Date(value);
   return Number.isFinite(parsed.getTime()) ? parsed : null;
+}
+
+export function inspectFiscalHomologationWaiver(options: {
+  artifactHash: string;
+  configuredArtifactHash?: string;
+  issuedAt?: string;
+  expiresAt?: string;
+  approvedBy?: string;
+  reason?: string;
+  now?: Date;
+}): FiscalHomologationWaiverResult {
+  const issues: EvidenceIssue[] = [];
+  const now = options.now ?? new Date();
+  const issuedAt = date(options.issuedAt);
+  const expiresAt = date(options.expiresAt);
+  const maximumWindow = 7 * 24 * 60 * 60 * 1000;
+
+  if (!/^[a-f0-9]{64}$/.test(options.configuredArtifactHash || '') ||
+      options.configuredArtifactHash !== options.artifactHash) {
+    issue(issues, 'WAIVER_ARTIFACT_HASH_MISMATCH', 'configuredArtifactHash');
+  }
+  if (!issuedAt || issuedAt.getTime() > now.getTime()) issue(issues, 'WAIVER_ISSUED_AT_INVALID', 'issuedAt');
+  if (!expiresAt || expiresAt.getTime() <= now.getTime() ||
+      (issuedAt && expiresAt.getTime() - issuedAt.getTime() > maximumWindow) ||
+      (issuedAt && expiresAt.getTime() <= issuedAt.getTime())) {
+    issue(issues, 'WAIVER_EXPIRY_INVALID', 'expiresAt');
+  }
+  if (!text(options.approvedBy, 3, 120)) issue(issues, 'WAIVER_APPROVER_INVALID', 'approvedBy');
+  if (!text(options.reason, 20, 500)) issue(issues, 'WAIVER_REASON_INVALID', 'reason');
+
+  return {
+    ok: issues.length === 0,
+    issues,
+    ...(text(options.approvedBy, 3, 120) ? { approvedBy: options.approvedBy } : {}),
+    ...(expiresAt ? { expiresAt: expiresAt.toISOString() } : {}),
+  };
 }
 
 function issue(issues: EvidenceIssue[], code: string, field?: string) { issues.push({ code, ...(field ? { field } : {}) }); }
@@ -195,4 +238,10 @@ export function fiscalHomologationDetail(result: FiscalHomologationResult) {
   if (result.ok) return `homologação fiscal aprovada até ${result.expiresAt}`;
   const summary = result.issues.slice(0, 5).map(item => `${item.code}${item.field ? `:${item.field}` : ''}`).join(', ');
   return `${result.issues.length} pendência(s) de homologação: ${summary}${result.issues.length > 5 ? ', ...' : ''}`;
+}
+
+export function fiscalHomologationWaiverDetail(result: FiscalHomologationWaiverResult) {
+  if (result.ok) return `liberação excepcional ativa até ${result.expiresAt}, aprovada por ${result.approvedBy}`;
+  const summary = result.issues.slice(0, 5).map(item => `${item.code}${item.field ? `:${item.field}` : ''}`).join(', ');
+  return `${result.issues.length} pendência(s) na liberação excepcional: ${summary}${result.issues.length > 5 ? ', ...' : ''}`;
 }

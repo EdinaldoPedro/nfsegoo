@@ -14,6 +14,10 @@ Testes unitários, integração sintética e uma nota isolada não liberam produ
 
 O prazo máximo da evidência é 180 dias. Uma alteração em código/ativos fiscais, mudança relevante do Portal, inclusão de regime ou falha externa exige nova execução e aprovação, mesmo antes do vencimento. Não edite o hash para contornar o gate: gere outra evidência a partir dos testes correspondentes.
 
+## Liberação excepcional controlada
+
+O proprietário pode autorizar temporariamente uma versão ainda sem nova evidência externa sem alterar ou falsificar o manifesto anterior. A exceção exige o hash fiscal exato, data de emissão, vencimento de no máximo sete dias, responsável e justificativa. O worker registra `FISCAL_HOMOLOGATION_WAIVER_ACTIVE` em nível crítico e o readiness apresenta a condição como aviso. A exceção expira automaticamente e não substitui a homologação definitiva.
+
 ## Cenários obrigatórios
 
 - Emissão para PJ e PF.

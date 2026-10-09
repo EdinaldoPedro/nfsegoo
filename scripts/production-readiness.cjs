@@ -5,7 +5,10 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { ensureFiscalSchemas } = require('../app/services/emissor/validation/FiscalSchema.ts');
 const { validarCNPJ } = require('../app/utils/cnpj.ts');
-const { fiscalHomologationDetail, inspectFiscalHomologationEvidence } = require('../app/utils/fiscal-homologation-evidence.ts');
+const {
+  fiscalHomologationDetail, fiscalHomologationWaiverDetail,
+  inspectFiscalHomologationEvidence, inspectFiscalHomologationWaiver,
+} = require('../app/utils/fiscal-homologation-evidence.ts');
 const { inspectReleaseManifest, releaseReadinessDetail } = require('./release-artifact.cjs');
 const { inspectInfrastructureEvidence, infrastructureReadinessDetail } = require('./infrastructure-readiness.cjs');
 const { inspectLegalGovernanceEvidence, legalGovernanceDetail } = require('./legal-governance-readiness.cjs');
@@ -99,7 +102,18 @@ async function main() {
     rootDir: path.join(__dirname, '..'),
     evidenceFile: process.env.FISCAL_HOMOLOGATION_EVIDENCE_FILE,
   });
-  check('fiscal_homologation', fiscalHomologation.ok, fiscalHomologationDetail(fiscalHomologation));
+  const fiscalWaiver = inspectFiscalHomologationWaiver({
+    artifactHash: fiscalHomologation.artifactHash,
+    configuredArtifactHash: process.env.FISCAL_HOMOLOGATION_WAIVER_ARTIFACT_HASH,
+    issuedAt: process.env.FISCAL_HOMOLOGATION_WAIVER_ISSUED_AT,
+    expiresAt: process.env.FISCAL_HOMOLOGATION_WAIVER_EXPIRES_AT,
+    approvedBy: process.env.FISCAL_HOMOLOGATION_WAIVER_APPROVED_BY,
+    reason: process.env.FISCAL_HOMOLOGATION_WAIVER_REASON,
+  });
+  check('fiscal_homologation', fiscalHomologation.ok || fiscalWaiver.ok,
+    fiscalHomologation.ok ? fiscalHomologationDetail(fiscalHomologation) : fiscalHomologationWaiverDetail(fiscalWaiver));
+  check('fiscal_homologation_waiver', !fiscalWaiver.ok,
+    fiscalWaiver.ok ? fiscalHomologationWaiverDetail(fiscalWaiver) : 'nenhuma liberação excepcional ativa', false);
   const release = inspectReleaseManifest({
     rootDir: path.join(__dirname, '..'),
     manifestFile: process.env.RELEASE_MANIFEST_FILE,
