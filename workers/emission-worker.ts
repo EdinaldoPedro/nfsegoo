@@ -92,8 +92,8 @@ async function main() {
     const waiver = inspectFiscalHomologationWaiver({
       artifactHash: evidence.artifactHash,
       configuredArtifactHash: process.env.FISCAL_HOMOLOGATION_WAIVER_ARTIFACT_HASH,
+      mode: process.env.FISCAL_HOMOLOGATION_WAIVER_MODE,
       issuedAt: process.env.FISCAL_HOMOLOGATION_WAIVER_ISSUED_AT,
-      expiresAt: process.env.FISCAL_HOMOLOGATION_WAIVER_EXPIRES_AT,
       approvedBy: process.env.FISCAL_HOMOLOGATION_WAIVER_APPROVED_BY,
       reason: process.env.FISCAL_HOMOLOGATION_WAIVER_REASON,
     });

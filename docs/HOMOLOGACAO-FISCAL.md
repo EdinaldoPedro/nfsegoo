@@ -16,7 +16,7 @@ O prazo máximo da evidência é 180 dias. Uma alteração em código/ativos fis
 
 ## Liberação excepcional controlada
 
-O proprietário pode autorizar temporariamente uma versão ainda sem nova evidência externa sem alterar ou falsificar o manifesto anterior. A exceção exige o hash fiscal exato, data de emissão, vencimento de no máximo sete dias, responsável e justificativa. O worker registra `FISCAL_HOMOLOGATION_WAIVER_ACTIVE` em nível crítico e o readiness apresenta a condição como aviso. A exceção expira automaticamente e não substitui a homologação definitiva.
+O proprietário pode autorizar uma versão ainda sem nova evidência externa sem alterar ou falsificar o manifesto anterior. A exceção exige modo `PER_RELEASE`, hash fiscal exato, data de emissão, responsável e justificativa. Ela permanece válida somente para esse conteúdo fiscal: qualquer alteração muda o hash e invalida automaticamente a autorização. O worker registra `FISCAL_HOMOLOGATION_WAIVER_ACTIVE` em nível crítico e o readiness apresenta a condição como aviso. A exceção não substitui a homologação definitiva.
 
 ## Cenários obrigatórios
 

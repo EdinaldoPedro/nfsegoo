@@ -99,12 +99,12 @@ test('diretorio de release sem os artefatos fiscais nunca pode ser aprovado', ()
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
-test('liberacao excepcional exige hash exato, justificativa, responsavel e no maximo sete dias', () => {
+test('liberacao excepcional por versao exige hash exato, justificativa e responsavel', () => {
   const result = inspectFiscalHomologationWaiver({
     artifactHash: 'a'.repeat(64),
     configuredArtifactHash: 'a'.repeat(64),
+    mode: 'PER_RELEASE',
     issuedAt: '2026-09-24T11:00:00.000Z',
-    expiresAt: '2026-10-01T11:00:00.000Z',
     approvedBy: 'Proprietario do produto',
     reason: 'Validacao operacional controlada pelo proprietario.',
     now,
@@ -112,18 +112,18 @@ test('liberacao excepcional exige hash exato, justificativa, responsavel e no ma
   assert.equal(result.ok, true);
 });
 
-test('liberacao excepcional recusa outro codigo, prazo excessivo e metadados incompletos', () => {
+test('liberacao excepcional recusa outro codigo, modo desconhecido e metadados incompletos', () => {
   const result = inspectFiscalHomologationWaiver({
     artifactHash: 'a'.repeat(64),
     configuredArtifactHash: 'b'.repeat(64),
+    mode: 'TEMPORARY',
     issuedAt: '2026-09-24T11:00:00.000Z',
-    expiresAt: '2026-10-02T11:00:00.000Z',
     approvedBy: '',
     reason: 'curta',
     now,
   });
   assert.ok(result.issues.some(issue => issue.code === 'WAIVER_ARTIFACT_HASH_MISMATCH'));
-  assert.ok(result.issues.some(issue => issue.code === 'WAIVER_EXPIRY_INVALID'));
+  assert.ok(result.issues.some(issue => issue.code === 'WAIVER_MODE_INVALID'));
   assert.ok(result.issues.some(issue => issue.code === 'WAIVER_APPROVER_INVALID'));
   assert.ok(result.issues.some(issue => issue.code === 'WAIVER_REASON_INVALID'));
 });
