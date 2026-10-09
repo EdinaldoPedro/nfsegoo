@@ -565,9 +565,7 @@ export async function prepararEmissaoJob(job: any) {
   if (prestador.ambiente !== job.ambiente) throw Object.assign(new Error('Ambiente alterado após o agendamento. Revise a solicitação.'), { status: 400 });
   if (job.ambiente === 'PRODUCAO') {
     const reservation = job.creditReservationId ? await prisma.emissionCreditReservation.findUnique({ where: { id: job.creditReservationId } }) : null;
-    if (!reservation || reservation.status !== 'RESERVED' || reservation.userId !== job.billingUserId) {
-      throw Object.assign(new Error('Reserva de crédito ausente ou encerrada. Concilie o pedido antes de transmitir.'), { status: 400 });
-    }
+    assertJobCreditForPreparation(job, reservation);
   }
   // Protege jobs antigos que tenham sido enfileirados antes da obrigatoriedade.
   assertTomadorPfComEndereco(tomador);
@@ -682,4 +680,20 @@ export async function prepararEmissaoJob(job: any) {
     valor: valorFloat, descricao: payload.descricao, cnae: cnaeFinal,
     prestadorDocumento: prestador.documento, tomadorDocumento: tomadorAdaptado.documento || 'EXTERIOR',
   } };
+}
+
+export function assertJobCreditForPreparation(
+  job: { ambiente: string; billingUnlimited?: boolean | null; creditReservationId?: string | null; billingUserId?: string | null },
+  reservation: { id: string; status: string; userId: string } | null,
+) {
+  if (job.ambiente !== 'PRODUCAO') return;
+  if (job.billingUnlimited) {
+    if (job.creditReservationId || reservation) {
+      throw Object.assign(new Error('Benefício administrativo não pode usar reserva de crédito.'), { status: 400 });
+    }
+    return;
+  }
+  if (!reservation || reservation.status !== 'RESERVED' || reservation.userId !== job.billingUserId) {
+    throw Object.assign(new Error('Reserva de crédito ausente ou encerrada. Concilie o pedido antes de transmitir.'), { status: 400 });
+  }
 }
