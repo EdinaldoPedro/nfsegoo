@@ -104,7 +104,13 @@ export async function resolveAdministrativeEmissionBillingUserId(params: { empre
   if (company.modoCobranca === 'POR_OPERADOR') {
     const previous = await db.emissaoJob.findFirst({ where: { vendaId: params.vendaId, empresaId: params.empresaId, billingUserId: { not: null } },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], select: { billingUserId: true } });
-    if (previous?.billingUserId) return previous.billingUserId;
+    if (previous?.billingUserId) {
+      const payer = await db.user.findUnique({ where: { id: previous.billingUserId }, select: { id: true, role: true, empresaId: true } });
+      if (!payer || !await hasCustomerCompanyAccess(payer, params.empresaId, db)) {
+        throw Object.assign(new Error('O responsável financeiro anterior não possui mais vínculo ativo com a empresa. Revise a cobrança antes de corrigir a emissão.'), { status: 409 });
+      }
+      return previous.billingUserId;
+    }
     throw Object.assign(new Error('A venda não possui responsável financeiro anterior para a correção administrativa.'), { status: 409 });
   }
   const owner = company.donoFaturamentoId || company.proprietarioUserId || company.donoUser?.id || company.contadorCustodianteId;

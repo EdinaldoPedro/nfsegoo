@@ -206,6 +206,7 @@ export const GET = withApiGuard(async function GET(request: Request, { params: r
   const params = await routeParams;
   const authError = await ensureSupport(request);
   if (authError) return authError;
+  const viewer = await getAuthenticatedUser(request);
 
   try {
     const venda = await prisma.venda.findUnique({
@@ -249,7 +250,7 @@ export const GET = withApiGuard(async function GET(request: Request, { params: r
             transmissionStartedAt: true,
             nextAttemptAt: true,
             resultNotaId: true,
-            signedXml: true,
+            ...(isAdminRole(viewer?.role) ? { signedXml: true } : {}),
             payloadJson: true,
             preparedMetadataJson: true,
             createdAt: true,
@@ -259,6 +260,7 @@ export const GET = withApiGuard(async function GET(request: Request, { params: r
       : [];
     const emissionJobsSeguros = emissionJobs.map((job: any) => ({
       ...job,
+      signedXml: isAdminRole(viewer?.role) ? job.signedXml : undefined,
       payloadJson: sanitizeStoredDetails(job.payloadJson),
       preparedMetadataJson: sanitizeStoredDetails(job.preparedMetadataJson),
     }));

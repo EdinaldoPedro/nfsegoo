@@ -23,6 +23,7 @@ test('perfil PostgreSQL: empresa/conta atomicas, versao, permissao, cotas e reau
   const base = { escopo: 'EMPRESA', razaoSocial: 'Empresa QA', regimeTributario: 'MEI', cnaes: [activity], ambiente: 'HOMOLOGACAO',
     emailComercial: 'empresa@example.invalid', cep: '01001-000', logradouro: 'Rua de QA', numero: '10', complemento: 'Sala 3', bairro: 'Centro', cidade: 'São Paulo', uf: 'SP', codigoIbge: '3550308' };
   let owner, accountant, stranger, support, commercial, admin, master, newcomer, pendingOwner, company;
+  let removeGlobalCnae = false; let removeMunicipalPlaceholder = false;
   try {
     const hash = await bcrypt.hash(password, 4);
     for (const role of ['COMUM', 'CONTADOR', 'COMUM', 'SUPORTE', 'COMERCIAL', 'ADMIN', 'MASTER', 'COMUM', 'COMUM']) users.push(await prisma.user.create({ data: {
@@ -48,17 +49,22 @@ test('perfil PostgreSQL: empresa/conta atomicas, versao, permissao, cotas e reau
       }
       assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: owner.id } })).nome, 'Novo nome pessoal');
     });
-    await t.test('empresa salva complemento/email comercial/CNAEs locais e auditoria sem publicar regras globais', async () => {
+    await t.test('empresa salva CNAEs locais e cria somente catalogo global e placeholder municipal inativo', async () => {
       const globalBefore = await prisma.globalCnae.findMany({ where: { codigo: { in: ['6201501', '6201-5/01'] } } });
       const rulesBefore = await prisma.tributacaoMunicipal.findMany({ where: { cnae: { in: ['6201501', '6201-5/01'] }, codigoIbge: '3550308' } });
+      removeGlobalCnae = globalBefore.length === 0;
+      removeMunicipalPlaceholder = rulesBefore.length === 0;
       const result = await save(owner.id, { serieDPS: '00900', ultimoDPS: 10 });
       assert.equal(result.cadastroCompleto, true); assert.equal(result.certificadoA1, undefined); assert.equal(result.primeiroCertificadoCadastrado, false);
       const after = await prisma.empresa.findUniqueOrThrow({ where: { id: company.id }, include: { atividades: true } });
       assert.equal(after.complemento, 'Sala 3'); assert.equal(after.email, base.emailComercial); assert.equal(after.serieDPS, '900');
       assert.equal(after.atividades[0].codigo, '6201501'); assert.equal(after.atividades[0].temRetencaoInss, false);
       assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: owner.id } })).email, owner.email);
-      assert.deepEqual(await prisma.globalCnae.findMany({ where: { codigo: { in: ['6201501', '6201-5/01'] } } }), globalBefore);
-      assert.deepEqual(await prisma.tributacaoMunicipal.findMany({ where: { cnae: { in: ['6201501', '6201-5/01'] }, codigoIbge: '3550308' } }), rulesBefore);
+      const globalAfter = await prisma.globalCnae.findMany({ where: { codigo: { in: ['6201501', '6201-5/01'] } } });
+      const rulesAfter = await prisma.tributacaoMunicipal.findMany({ where: { cnae: { in: ['6201501', '6201-5/01'] }, codigoIbge: '3550308' } });
+      assert.equal(globalAfter.length, 1); assert.equal(globalAfter[0].codigo, '6201501');
+      assert.equal(rulesAfter.length, 1); assert.equal(rulesAfter[0].ativo, false);
+      assert.equal(rulesAfter[0].codigoTributacaoMunicipal, 'A_DEFINIR');
       assert.equal((await prisma.dpsSequencia.findFirstOrThrow({ where: { empresaId: company.id } })).ultimoConfirmado, 10);
     });
     await t.test('CNPJ imutavel, versao/contexto errados e entrada invalida nao deixam gravacao parcial', async () => {
@@ -150,6 +156,8 @@ test('perfil PostgreSQL: empresa/conta atomicas, versao, permissao, cotas e reau
       await prisma.cnae.deleteMany({ where: { empresaId: { in: companies } } });
       await prisma.empresa.deleteMany({ where: { id: { in: companies } } });
     }
+    if (removeMunicipalPlaceholder) await prisma.tributacaoMunicipal.deleteMany({ where: { cnae: '6201501', codigoIbge: '3550308', ativo: false, codigoTributacaoMunicipal: 'A_DEFINIR' } });
+    if (removeGlobalCnae) await prisma.globalCnae.deleteMany({ where: { codigo: '6201501' } });
     if (userIds.length) { await prisma.planHistory.deleteMany({ where: { userId: { in: userIds } } }); await prisma.user.deleteMany({ where: { id: { in: userIds } } }); }
     if (plan) await prisma.plan.delete({ where: { id: plan.id } });
   }

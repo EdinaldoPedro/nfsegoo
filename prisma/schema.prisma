@@ -8,84 +8,85 @@ datasource db {
 }
 
 model User {
-  id                       String                      @id @default(uuid())
-  email                    String                      @unique
-  senha                    String
-  sessionVersion           Int                         @default(0)
-  customerPortalGrantedAt  DateTime?
-  customerPortalGrantedById String?
-  customerPortalRevokedAt  DateTime?
-  mfaSecret                String?
-  mfaPendingSecret         String?
-  mfaPendingExpires        DateTime?
-  mfaEnabledAt             DateTime?
-  mfaRecoveryCodes         String?
-  mfaLastUsedStep          Int                         @default(-1)
-  nome                     String
-  role                     Role                        @default(COMUM)
-  cpf                      String?                     @unique
-  telefone                 String?
-  plano                    String?                     @default("GRATUITO")
-  planoCiclo               String                      @default("MENSAL")
-  planoStatus              String                      @default("active")
-  planoExpiresAt           DateTime?
-  cargo                    String?
-  avatarUrl                String?
-  resetToken               String?                     @unique
-  resetExpires             DateTime?
-  darkMode                 Boolean                     @default(false)
-  idioma                   String                      @default("pt-BR")
-  notificacoesEmail        Boolean                     @default(true)
-  ipOrigem                 String?
-  lastLoginAt              DateTime?
-  empresaId                String?                     @unique
-  createdAt                DateTime                    @default(now())
-  updatedAt                DateTime                    @updatedAt
-  privacyErasedAt          DateTime?
-  tempEmail                String?                     @unique
-  verificationCode         String?
-  verificationExpires      DateTime?
-  limiteEmpresas           Int                         @default(5)
-  tutorialStep             Int                         @default(0)
-  creditosPlano            Int                         @default(0)
-  creditosExtras           Int                         @default(0)
-  dataRenovacaoCiclo       DateTime?
-  empresasContabeis        ContadorVinculo[]           @relation("ContadorUser")
-  pedidos                  Pedido[]
-  historicoPlanos          PlanHistory[]
-  ticketsAtendidos         Ticket[]                    @relation("AtendenteTicket")
-  ticketsCriados           Ticket[]                    @relation("SolicitanteTicket")
-  mensagensTicket          TicketMensagem[]
-  empresa                  Empresa?                    @relation("DonoEmpresa", fields: [empresaId], references: [id])
-  clientes                 UserCliente[]
-  empresasAdicionais       Int                         @default(0)
-  empresasFaturadas        Empresa[]                   @relation("FaturamentoEmpresa")
-  empresasCustodiadas      Empresa[]                   @relation("CustodiaEmpresa")
-  empresasProprietarias    Empresa[]                   @relation("ProprietarioEmpresa")
-  eventosCrm               UserEvent[]
-  faturas                  Fatura[]
-  cuponsUsados             CupomLog[]
-  pedidoAnexos             PedidoAnexo[]
-  impersonacoesIniciadas   ImpersonationSession[]      @relation("ImpersonationActor")
-  impersonacoesRecebidas   ImpersonationSession[]      @relation("ImpersonationTarget")
-  sessoes                  AuthSession[]
-  creditReservations       EmissionCreditReservation[]
-  ownershipInitiated       CompanyOwnershipRequest[]   @relation("OwnershipInitiator")
-  ownershipReceived        CompanyOwnershipRequest[]   @relation("OwnershipRecipient")
-  ownershipPrevious        CompanyOwnershipRequest[]   @relation("OwnershipPrevious")
-  ownershipPrimary         CompanyOwnershipRequest[]   @relation("OwnershipPrimary")
-  ownershipReviewed        CompanyOwnershipRequest[]   @relation("OwnershipReviewer")
-  ownershipConsents        CompanyOwnershipConsent[]
-  passwordResetRequests    PasswordResetRequest[]
-  legalAcceptances         LegalAcceptance[]
-  privacyRequests          PrivacyRequest[]            @relation("PrivacyRequestSubject")
-  privacyRequestsResolved  PrivacyRequest[]            @relation("PrivacyRequestResolver")
-  securityIncidentsCreated SecurityIncident[]          @relation("SecurityIncidentCreator")
-  securityIncidentsUpdated SecurityIncident[]          @relation("SecurityIncidentUpdater")
-  mfaLoginChallenges       MfaLoginChallenge[]
-  trustedDevices           MfaTrustedDevice[]
-  entidadeFiscalCorrecoes  EntidadeFiscalCorrecao[]    @relation("EntidadeFiscalCorrecaoAutor")
-  entidadeFiscalEventos    EntidadeFiscalEvento[]      @relation("EntidadeFiscalEventoAutor")
+  id                           String                          @id @default(uuid())
+  email                        String                          @unique
+  senha                        String
+  sessionVersion               Int                             @default(0)
+  customerPortalGrantedAt      DateTime?
+  customerPortalGrantedById    String?
+  customerPortalRevokedAt      DateTime?
+  mfaSecret                    String?
+  mfaPendingSecret             String?
+  mfaPendingExpires            DateTime?
+  mfaEnabledAt                 DateTime?
+  mfaRecoveryCodes             String?
+  mfaLastUsedStep              Int                             @default(-1)
+  nome                         String
+  role                         Role                            @default(COMUM)
+  cpf                          String?                         @unique
+  telefone                     String?
+  plano                        String?                         @default("GRATUITO")
+  planoCiclo                   String                          @default("MENSAL")
+  planoStatus                  String                          @default("active")
+  planoExpiresAt               DateTime?
+  cargo                        String?
+  avatarUrl                    String?
+  resetToken                   String?                         @unique
+  resetExpires                 DateTime?
+  darkMode                     Boolean                         @default(false)
+  idioma                       String                          @default("pt-BR")
+  notificacoesEmail            Boolean                         @default(true)
+  ipOrigem                     String?
+  lastLoginAt                  DateTime?
+  empresaId                    String?                         @unique
+  createdAt                    DateTime                        @default(now())
+  updatedAt                    DateTime                        @updatedAt
+  privacyErasedAt              DateTime?
+  tempEmail                    String?                         @unique
+  verificationCode             String?
+  verificationExpires          DateTime?
+  limiteEmpresas               Int                             @default(5)
+  tutorialStep                 Int                             @default(0)
+  creditosPlano                Int                             @default(0)
+  creditosExtras               Int                             @default(0)
+  dataRenovacaoCiclo           DateTime?
+  empresasContabeis            ContadorVinculo[]               @relation("ContadorUser")
+  pedidos                      Pedido[]
+  historicoPlanos              PlanHistory[]
+  ticketsAtendidos             Ticket[]                        @relation("AtendenteTicket")
+  ticketsCriados               Ticket[]                        @relation("SolicitanteTicket")
+  mensagensTicket              TicketMensagem[]
+  empresa                      Empresa?                        @relation("DonoEmpresa", fields: [empresaId], references: [id])
+  clientes                     UserCliente[]
+  empresasAdicionais           Int                             @default(0)
+  empresasFaturadas            Empresa[]                       @relation("FaturamentoEmpresa")
+  empresasCustodiadas          Empresa[]                       @relation("CustodiaEmpresa")
+  empresasProprietarias        Empresa[]                       @relation("ProprietarioEmpresa")
+  eventosCrm                   UserEvent[]
+  faturas                      Fatura[]
+  cuponsUsados                 CupomLog[]
+  pedidoAnexos                 PedidoAnexo[]
+  impersonacoesIniciadas       ImpersonationSession[]          @relation("ImpersonationActor")
+  impersonacoesRecebidas       ImpersonationSession[]          @relation("ImpersonationTarget")
+  sessoes                      AuthSession[]
+  creditReservations           EmissionCreditReservation[]
+  ownershipInitiated           CompanyOwnershipRequest[]       @relation("OwnershipInitiator")
+  ownershipReceived            CompanyOwnershipRequest[]       @relation("OwnershipRecipient")
+  ownershipPrevious            CompanyOwnershipRequest[]       @relation("OwnershipPrevious")
+  ownershipPrimary             CompanyOwnershipRequest[]       @relation("OwnershipPrimary")
+  ownershipReviewed            CompanyOwnershipRequest[]       @relation("OwnershipReviewer")
+  ownershipConsents            CompanyOwnershipConsent[]
+  passwordResetRequests        PasswordResetRequest[]
+  legalAcceptances             LegalAcceptance[]
+  privacyRequests              PrivacyRequest[]                @relation("PrivacyRequestSubject")
+  privacyRequestsResolved      PrivacyRequest[]                @relation("PrivacyRequestResolver")
+  securityIncidentsCreated     SecurityIncident[]              @relation("SecurityIncidentCreator")
+  securityIncidentsUpdated     SecurityIncident[]              @relation("SecurityIncidentUpdater")
+  mfaLoginChallenges           MfaLoginChallenge[]
+  trustedDevices               MfaTrustedDevice[]
+  entidadeFiscalCorrecoes      EntidadeFiscalCorrecao[]        @relation("EntidadeFiscalCorrecaoAutor")
+  entidadeFiscalEventos        EntidadeFiscalEvento[]          @relation("EntidadeFiscalEventoAutor")
+  configuracoesCnaeAtualizadas EmpresaCnaeConfiguracaoFiscal[] @relation("EmpresaCnaeConfiguracaoAtualizador")
 }
 
 model MfaLoginChallenge {
@@ -298,12 +299,12 @@ model LegalAcceptance {
 }
 
 model Empresa {
-  id                           String                    @id @default(uuid())
-  documento                    String                    @unique
-  ambiente                     String                    @default("PRODUCAO")
-  cadastroCompleto             Boolean                   @default(false)
-  serieDPS                     String                    @default("900")
-  ultimoDPS                    Int                       @default(0)
+  id                           String                          @id @default(uuid())
+  documento                    String                          @unique
+  ambiente                     String                          @default("PRODUCAO")
+  cadastroCompleto             Boolean                         @default(false)
+  serieDPS                     String                          @default("900")
+  ultimoDPS                    Int                             @default(0)
   email                        String?
   razaoSocial                  String
   nomeFantasia                 String?
@@ -315,12 +316,12 @@ model Empresa {
   cidade                       String?
   uf                           String?
   codigoIbge                   String?
-  aliquotaPadrao               Decimal?                  @default(0.00) @db.Decimal(5, 2)
-  issRetidoPadrao              Boolean                   @default(false)
-  tipoTributacaoPadrao         String?                   @default("1")
-  regimeEspecialTributacao     String?                   @default("0")
+  aliquotaPadrao               Decimal?                        @default(0.00) @db.Decimal(5, 2)
+  issRetidoPadrao              Boolean                         @default(false)
+  tipoTributacaoPadrao         String?                         @default("1")
+  regimeEspecialTributacao     String?                         @default("0")
   inscricaoMunicipal           String?
-  enviarInscricaoMunicipalDps  Boolean                   @default(true)
+  enviarInscricaoMunicipalDps  Boolean                         @default(true)
   regimeTributario             String?
   certificadoA1                String?
   senhaCertificado             String?
@@ -330,30 +331,31 @@ model Empresa {
   certificadoValidadoEm        DateTime?
   certificadoChainStatus       String?
   certificadoCnpjSource        String?
-  updatedAt                    DateTime                  @updatedAt
+  updatedAt                    DateTime                        @updatedAt
   lastApiCheck                 DateTime?
   arquivadoEm                  DateTime?
   arquivadoPor                 String?
   motivoArquivamento           String?
   atividades                   Cnae[]
-  contadoresLink               ContadorVinculo[]         @relation("EmpresaContabil")
-  notasEmitidas                NotaFiscal[]              @relation("PrestadorNota")
+  contadoresLink               ContadorVinculo[]               @relation("EmpresaContabil")
+  notasEmitidas                NotaFiscal[]                    @relation("PrestadorNota")
   logs                         SystemLog[]
-  donoUser                     User?                     @relation("DonoEmpresa")
+  donoUser                     User?                           @relation("DonoEmpresa")
   vinculadoA                   UserCliente[]
   ownershipRequests            CompanyOwnershipRequest[]
-  vendasRealizadas             Venda[]                   @relation("VendaPrestador")
+  vendasRealizadas             Venda[]                         @relation("VendaPrestador")
   sequenciasDps                DpsSequencia[]
   minhaCarteira                VinculoCarteira[]
   clientesCadastrados          Cliente[]
+  configuracoesCnaeFiscais     EmpresaCnaeConfiguracaoFiscal[]
   donoFaturamentoId            String?
-  donoFaturamento              User?                     @relation("FaturamentoEmpresa", fields: [donoFaturamentoId], references: [id])
+  donoFaturamento              User?                           @relation("FaturamentoEmpresa", fields: [donoFaturamentoId], references: [id])
   contadorCustodianteId        String?
-  contadorCustodiante          User?                     @relation("CustodiaEmpresa", fields: [contadorCustodianteId], references: [id])
+  contadorCustodiante          User?                           @relation("CustodiaEmpresa", fields: [contadorCustodianteId], references: [id])
   proprietarioUserId           String?
-  proprietarioUser             User?                     @relation("ProprietarioEmpresa", fields: [proprietarioUserId], references: [id])
-  modoCobranca                 String                    @default("RESPONSAVEL_UNICO")
-  statusPropriedade            String                    @default("ORFA")
+  proprietarioUser             User?                           @relation("ProprietarioEmpresa", fields: [proprietarioUserId], references: [id])
+  modoCobranca                 String                          @default("RESPONSAVEL_UNICO")
+  statusPropriedade            String                          @default("ORFA")
 
   @@index([donoFaturamentoId])
   @@index([contadorCustodianteId])
@@ -672,14 +674,15 @@ model UserCliente {
 }
 
 model Cnae {
-  id              String  @id @default(uuid())
-  codigo          String
-  descricao       String
-  principal       Boolean @default(false)
-  codigoNbs       String?
-  temRetencaoInss Boolean @default(false)
-  empresaId       String
-  empresa         Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  id                 String                         @id @default(uuid())
+  codigo             String
+  descricao          String
+  principal          Boolean                        @default(false)
+  codigoNbs          String?
+  temRetencaoInss    Boolean                        @default(false)
+  empresaId          String
+  empresa            Empresa                        @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  configuracaoFiscal EmpresaCnaeConfiguracaoFiscal?
 }
 
 model NotaFiscal {
@@ -872,15 +875,18 @@ model GlobalCnae {
 }
 
 model EmpresaCnaeConfiguracaoFiscal {
-  id          String   @id @default(uuid())
-  empresaId   String
-  cnaeId      String   @unique
-  ativo       Boolean  @default(false)
-  configuracao Json
-  versao      Int      @default(1)
+  id            String   @id @default(uuid())
+  empresaId     String
+  cnaeId        String   @unique
+  ativo         Boolean  @default(false)
+  configuracao  Json
+  versao        Int      @default(1)
   atualizadoPor String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  empresa       Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  cnae          Cnae     @relation(fields: [cnaeId], references: [id], onDelete: Cascade)
+  atualizador   User     @relation("EmpresaCnaeConfiguracaoAtualizador", fields: [atualizadoPor], references: [id], onDelete: Restrict)
 
   @@index([empresaId, ativo])
 }
