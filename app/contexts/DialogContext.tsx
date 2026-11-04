@@ -9,7 +9,7 @@ export interface DialogOptions {
   description: string;
   confirmText?: string;
   cancelText?: string;
-  type?: 'info' | 'danger' | 'warning' | 'prompt' | 'success';
+  type?: 'info' | 'danger' | 'warning' | 'prompt' | 'authorization' | 'success';
   placeholder?: string; // Apenas para prompt
   inputType?: 'text' | 'password';
   validationText?: string; // Texto que o usuário deve digitar para confirmar (ex: "DELETAR")
@@ -20,6 +20,7 @@ interface DialogContextType {
   showAlert: (opts: DialogOptions | string) => Promise<void>;
   showConfirm: (opts: DialogOptions | string) => Promise<boolean>;
   showPrompt: (opts: DialogOptions) => Promise<string | null>;
+  showAuthorization: (opts: DialogOptions) => Promise<{ justification: string; adminPassword: string } | null>;
 }
 
 const DialogContext = createContext<DialogContextType>({} as DialogContextType);
@@ -28,6 +29,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
   const [options, setOptions] = useState<DialogOptions>({ description: '' });
   const [inputValue, setInputValue] = useState('');
+  const [passwordValue, setPasswordValue] = useState('');
   const [validationError, setValidationError] = useState('');
   const pathname = usePathname();
   
@@ -37,6 +39,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
   const openDialog = (opts: DialogOptions): Promise<any> => {
     setOptions({ ...opts, audience: opts.audience || (pathname.startsWith('/admin') ? 'backoffice' : 'client') });
     setInputValue('');
+    setPasswordValue('');
     setValidationError('');
     setIsOpen(true);
     return new Promise((resolve) => {
@@ -45,6 +48,18 @@ export function DialogProvider({ children }: { children: ReactNode }) {
   };
 
   const handleConfirm = () => {
+    if (options.type === 'authorization') {
+      const justification = inputValue.trim();
+      if (justification.length < 10 || justification.length > 2000) {
+        setValidationError('A justificativa deve ter entre 10 e 2.000 caracteres.');
+        return;
+      }
+      if (!passwordValue) {
+        setValidationError('Digite sua senha administrativa.');
+        return;
+      }
+      resolver.current({ justification, adminPassword: passwordValue });
+    } else
     if (options.type === 'prompt') {
       if (options.validationText && inputValue !== options.validationText) {
         setValidationError(`Digite "${options.validationText}" exatamente como exibido.`);
@@ -55,13 +70,15 @@ export function DialogProvider({ children }: { children: ReactNode }) {
       resolver.current(true);
     }
     setInputValue('');
+    setPasswordValue('');
     setIsOpen(false);
   };
 
   const handleCancel = () => {
-    if (options.type === 'prompt') resolver.current(null);
+    if (options.type === 'prompt' || options.type === 'authorization') resolver.current(null);
     else resolver.current(false);
     setInputValue('');
+    setPasswordValue('');
     setIsOpen(false);
   };
 
@@ -84,6 +101,9 @@ export function DialogProvider({ children }: { children: ReactNode }) {
     },
     showPrompt: async (opts: DialogOptions) => {
       return await openDialog({ ...opts, type: 'prompt' });
+    },
+    showAuthorization: async (opts: DialogOptions) => {
+      return await openDialog({ ...opts, type: 'authorization', confirmText: opts.confirmText || 'Autorizar' });
     }
   };
 
@@ -93,6 +113,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
       case 'danger': return <div className="bg-red-100 p-4 rounded-full text-red-600 mb-4 mx-auto w-fit shadow-inner"><Trash2 size={32}/></div>;
       case 'warning': return <div className="bg-amber-100 p-4 rounded-full text-amber-600 mb-4 mx-auto w-fit shadow-inner"><AlertTriangle size={32}/></div>;
       case 'prompt': return <div className="bg-blue-100 p-4 rounded-full text-blue-600 mb-4 mx-auto w-fit shadow-inner"><HelpCircle size={32}/></div>;
+      case 'authorization': return <div className="bg-blue-100 p-4 rounded-full text-blue-600 mb-4 mx-auto w-fit shadow-inner"><HelpCircle size={32}/></div>;
       case 'success': return <div className="bg-green-100 p-4 rounded-full text-green-600 mb-4 mx-auto w-fit shadow-inner"><CheckCircle size={32}/></div>;
       default: return <div className="bg-slate-100 p-4 rounded-full text-slate-600 mb-4 mx-auto w-fit shadow-inner"><Info size={32}/></div>;
     }
@@ -151,8 +172,39 @@ export function DialogProvider({ children }: { children: ReactNode }) {
               </div>
             )}
 
+            {options.type === 'authorization' && (
+              <div className="mb-6 space-y-3 text-left">
+                <label className="block text-xs font-bold text-slate-700">
+                  Justificativa
+                  <textarea
+                    autoFocus
+                    rows={3}
+                    minLength={10}
+                    maxLength={2000}
+                    className="mt-1 w-full resize-none rounded-md border border-slate-300 bg-white p-2.5 text-sm text-slate-800 outline-none transition focus:ring-2 focus:ring-blue-500"
+                    placeholder="Informe o motivo com ao menos 10 caracteres"
+                    value={inputValue}
+                    onChange={e => { setInputValue(e.target.value); setValidationError(''); }}
+                  />
+                </label>
+                <label className="block text-xs font-bold text-slate-700">
+                  Senha administrativa
+                  <input
+                    type="password"
+                    autoComplete="current-password"
+                    className="mt-1 w-full rounded-md border border-slate-300 bg-white p-2.5 text-sm text-slate-800 outline-none transition focus:ring-2 focus:ring-blue-500"
+                    placeholder="Digite sua senha atual"
+                    value={passwordValue}
+                    onChange={e => { setPasswordValue(e.target.value); setValidationError(''); }}
+                    onKeyDown={e => e.key === 'Enter' && handleConfirm()}
+                  />
+                </label>
+                {validationError && <p className="text-xs font-semibold text-red-600" role="alert">{validationError}</p>}
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-3">
-              {Boolean(options.cancelText) || options.type === 'danger' || options.type === 'warning' || options.type === 'prompt' ? (
+              {Boolean(options.cancelText) || options.type === 'danger' || options.type === 'warning' || options.type === 'prompt' || options.type === 'authorization' ? (
                 <>
                   <button 
                     onClick={handleCancel}

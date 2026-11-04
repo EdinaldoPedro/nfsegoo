@@ -49,6 +49,7 @@ export const GET = withApiGuard(async function GET(request: Request) {
         status: limits.allowedBase && !limits.unlimited && limits.notasUsadas >= limits.limiteNotas ? 'LIMITE_ATINGIDO' : limits.status,
         dataInicio: limits.planoBase?.dataInicio, dataFim: limits.planoBase?.dataFim,
         usoEmissoes: limits.notasUsadas, limiteEmissoes: limits.limiteNotas, diasTeste: limits.planoBase?.diasTeste || 0,
+        usoEmpresas: limits.empresasUsadas, limiteEmpresas: limits.limiteEmpresas,
         usoClientes: limits.clientesUsados, limiteClientes: limits.limiteClientes, unlimited: limits.unlimited,
       };
 

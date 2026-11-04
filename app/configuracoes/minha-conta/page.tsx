@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { User, Save, ArrowLeft, Mail, CreditCard, Settings, Monitor, X, Calendar, TrendingUp, KeyRound, Lock, CheckCircle, Loader2, ShieldCheck, Fingerprint, ArrowRightLeft, ChevronRight } from 'lucide-react';
+import { User, Save, ArrowLeft, Mail, CreditCard, Settings, Monitor, X, Calendar, TrendingUp, KeyRound, Lock, CheckCircle, Loader2, ShieldCheck, Fingerprint, ArrowRightLeft, ChevronRight, Building2 } from 'lucide-react';
 import PlanSelector from '@/components/PlanSelector';
 import { useAppConfig } from '@/app/contexts/AppConfigContext';
 import AppHeader from '@/components/AppHeader';
@@ -47,6 +47,7 @@ export default function MinhaContaPage() {
     planoDetalhado: { 
         nome: '', slug: '', status: '', 
         usoEmissoes: 0, limiteEmissoes: 0, 
+        usoEmpresas: 0, limiteEmpresas: 0,
         usoClientes: 0, limiteClientes: 0, 
         dataInicio: '', dataFim: '', unlimited: false
     },
@@ -470,10 +471,23 @@ export default function MinhaContaPage() {
                         </div>}
                     </div>
 
-                    {/* BARRA 2: LIMITE DE CLIENTES */}
+                    {/* BARRA 2: EMPRESAS VINCULADAS À CONTA */}
                     <div>
                         <div className="flex justify-between items-center mb-1">
-                            <span className="text-xs font-bold text-slate-500 flex items-center gap-1"><User size={12}/> Limite de Clientes</span>
+                            <span className="text-xs font-bold text-slate-500 flex items-center gap-1"><Building2 size={12}/> Limite de Empresas</span>
+                            <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{p.usoEmpresas} / {p.unlimited ? 'Ilimitado' : p.limiteEmpresas}</span>
+                        </div>
+                        {!p.unlimited && p.limiteEmpresas > 0 && (
+                            <div className="w-full bg-slate-200 rounded-full h-2 dark:bg-slate-700">
+                                <div className={`h-2 rounded-full transition-all duration-500 ${Math.min(100, (p.usoEmpresas / p.limiteEmpresas) * 100) > 80 ? 'bg-red-500' : 'bg-purple-500'}`} style={{width: `${Math.min(100, (p.usoEmpresas / p.limiteEmpresas) * 100)}%`}}></div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* BARRA 3: CLIENTES/TOMADORES CADASTRADOS */}
+                    <div>
+                        <div className="flex justify-between items-center mb-1">
+                            <span className="text-xs font-bold text-slate-500 flex items-center gap-1"><User size={12}/> Limite de Clientes Cadastrados</span>
                             <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{p.usoClientes} / {p.unlimited ? 'Ilimitado' : p.limiteClientes}</span>
                         </div>
                         {!p.unlimited && p.limiteClientes > 0 && (

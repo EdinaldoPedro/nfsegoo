@@ -21,6 +21,11 @@ test('contador custom rejeita coercoes, fracionados e limites excessivos; zero e
     assert.throws(() => parseAccountantBenefit({ ...base, customers: value }));
   }
 });
+test('aumento imediato exige modelo custom e preserva contrato como operacao distinta', () => {
+  const result = parseAccountantBenefit({ action: 'INCREASE_NOW', kind: 'CUSTOM', cycle: 'MENSAL', notes: 80, customers: 40 });
+  assert.deepEqual(result, { action: 'INCREASE_NOW', kind: 'CUSTOM', cycle: 'MENSAL', notes: 80, customers: 40 });
+  assert.throws(() => parseAccountantBenefit({ action: 'INCREASE_NOW', kind: 'DEFAULT', cycle: 'MENSAL', notes: 80, customers: 40 }));
+});
 
 function fixture() {
   const input = { actorId: 'admin', userId: 'contador', operationId: randomUUID(), planSlug: 'CUSTOM', cycle: 'MENSAL', justification: 'Concessao administrativa de teste' };

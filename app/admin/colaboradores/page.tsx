@@ -53,27 +53,11 @@ export default function GestaoColaboradores() {
   const [customerActionPending, setCustomerActionPending] = useState(false);
 
   const solicitarAutorizacaoAdministrativa = async (acao: string) => {
-    const justification = await dialog.showPrompt({
-      title: 'Justificativa obrigatoria',
-      description: `Descreva o motivo para ${acao}. A operacao ficara registrada na auditoria.`,
-      placeholder: 'Informe o motivo com ao menos 10 caracteres',
-      confirmText: 'Continuar',
-    });
-    if (!justification) return null;
-    if (justification.trim().length < 10) {
-      await dialog.showAlert({ type: 'warning', description: 'A justificativa precisa ter ao menos 10 caracteres.' });
-      return null;
-    }
-
-    const adminPassword = await dialog.showPrompt({
-      title: 'Confirme sua identidade',
-      description: 'Digite sua senha administrativa para autorizar a operacao sensivel.',
-      placeholder: 'Senha administrativa',
-      inputType: 'password',
+    return dialog.showAuthorization({
+      title: 'Autorizar operação',
+      description: `Informe a justificativa e sua senha administrativa para ${acao}. A operação ficará registrada na auditoria.`,
       confirmText: 'Autorizar',
     });
-    if (!adminPassword) return null;
-    return { justification: justification.trim(), adminPassword };
   };
 
   const getActivePlanHistory = (user: any) => {
@@ -489,7 +473,8 @@ export default function GestaoColaboradores() {
                       </section>
                     )}
                     {selectedUserFull.role === 'CONTADOR' && <AccountantBenefitPanel key={selectedUserFull.id} userId={selectedUserFull.id}
-                      suspended={selectedUserFull.planoStatus === 'suspended'} onChanged={async () => { await handleOpenEdit(selectedUserFull.id); carregarDados(); }} />}
+                      suspended={selectedUserFull.planoStatus === 'suspended'} limits={selectedUserFull.limits}
+                      onChanged={async () => { await handleOpenEdit(selectedUserFull.id); carregarDados(); }} />}
 
                     {['COMUM', 'CONTADOR'].includes(selectedUserFull.role) && <AdminAccountCompaniesPanel key={selectedUserFull.id} userId={selectedUserFull.id} onChanged={carregarDados} />}
 
