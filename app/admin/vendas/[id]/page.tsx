@@ -602,11 +602,11 @@ export default function DetalheVendaCompleto() {
   };
 
   const pedirReautenticacao = async (title: string) => {
-    const justification = await dialog.showPrompt({ title, description: 'Informe uma justificativa com pelo menos 10 caracteres.' });
-    if (!justification) return null;
-    if (justification.trim().length < 10) { await dialog.showAlert('Descreva a justificativa com pelo menos 10 caracteres.'); return null; }
-    const adminPassword = await dialog.showPrompt({ title: 'Confirmar identidade', description: 'Digite sua senha administrativa atual.', inputType: 'password' });
-    return adminPassword ? { justification: justification.trim(), adminPassword } : null;
+    return dialog.showAuthorization({
+      title,
+      description: 'Informe a justificativa e sua senha administrativa. A operação ficará registrada na auditoria.',
+      confirmText: 'Confirmar',
+    });
   };
 
   const retomarConciliacaoNota = async (operationId: string) => {
@@ -620,6 +620,31 @@ export default function DetalheVendaCompleto() {
       await dialog.showAlert({ type: 'info', title: 'Conciliação registrada', description: 'O worker fará somente consultas. Nenhum pedido fiscal será reenviado.' });
     } catch (error: any) { await dialog.showAlert({ type: 'warning', description: error.message }); }
     finally { setSincronizandoRetorno(false); fetchVenda(true); }
+  };
+
+  const encerrarCancelamentoNaoConfirmado = async (operationId: string) => {
+    const credentials = await dialog.showAuthorization({
+      title: 'Encerrar como não cancelado',
+      description: 'O SaaS fará duas conferências completas e somente leitura no Portal. Se nenhum evento existir, a nota permanecerá autorizada e uma nova solicitação será liberada. Se um evento for encontrado, o cancelamento será concluído.',
+      confirmText: 'Conferir e encerrar',
+    });
+    if (!credentials) return;
+    setSincronizandoRetorno(true);
+    try {
+      const response = await fetch('/api/admin/emissoes/encerrar-cancelamento', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ operationId, ...credentials }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'A conciliação não pôde ser encerrada.');
+      await dialog.showAlert({ type: data.outcome === 'EVENT_FOUND' ? 'info' : 'success',
+        title: data.outcome === 'EVENT_FOUND' ? 'Evento localizado' : 'Cliente liberado', description: data.message });
+    } catch (error: any) {
+      await dialog.showAlert({ type: 'warning', title: 'Conciliação preservada', description: error.message });
+    } finally {
+      setSincronizandoRetorno(false);
+      fetchVenda(true);
+    }
   };
 
   const retomarConciliacaoEmissao = async (jobId: string) => {
@@ -695,14 +720,28 @@ export default function DetalheVendaCompleto() {
 
     const ambiente = venda?.empresa?.ambiente;
     const confirmationText = ambiente === 'PRODUCAO' ? 'EMITIR NFSE' : 'EMITIR TESTE';
-    const justification = await dialog.showPrompt({
-      title: ambiente === 'PRODUCAO' ? 'Emitir NFS-e corrigida' : 'Emitir novo teste corrigido',
-      description: 'Informe uma justificativa administrativa com pelo menos 10 caracteres.',
-    });
-    if (!justification) return;
-    if (justification.trim().length < 10) {
-      await dialog.showAlert('Descreva a justificativa com pelo menos 10 caracteres.');
-      return;
+    let justification: string;
+    let adminPassword: string | undefined;
+    if (ambiente === 'PRODUCAO') {
+      const authorization = await dialog.showAuthorization({
+        title: 'Emitir NFS-e corrigida',
+        description: 'Informe a justificativa e sua senha administrativa para autorizar uma nova emissão em produção.',
+        confirmText: 'Continuar',
+      });
+      if (!authorization) return;
+      justification = authorization.justification;
+      adminPassword = authorization.adminPassword;
+    } else {
+      const informedJustification = await dialog.showPrompt({
+        title: 'Emitir novo teste corrigido',
+        description: 'Informe uma justificativa administrativa com pelo menos 10 caracteres.',
+      });
+      if (!informedJustification) return;
+      if (informedJustification.trim().length < 10) {
+        await dialog.showAlert('Descreva a justificativa com pelo menos 10 caracteres.');
+        return;
+      }
+      justification = informedJustification.trim();
     }
     const confirmation = await dialog.showPrompt({
       title: 'Confirmar nova tentativa',
@@ -712,23 +751,13 @@ export default function DetalheVendaCompleto() {
       if (confirmation) await dialog.showAlert(`Digite ${confirmationText} exatamente como exibido.`);
       return;
     }
-    let adminPassword: string | undefined;
-    if (ambiente === 'PRODUCAO') {
-      const password = await dialog.showPrompt({
-        title: 'Confirmar identidade',
-        description: 'Por segurança, informe sua senha administrativa para emitir em produção.',
-        inputType: 'password',
-      });
-      if (!password) return;
-      adminPassword = password;
-    }
 
     setProcessing(true);
     try {
       const response = await fetch(`/api/admin/vendas/${vendaId}/emitir-correcao`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ overrides: payloadEnvio(), justification: justification.trim(), confirmation, adminPassword }),
+        body: JSON.stringify({ overrides: payloadEnvio(), justification, confirmation, adminPassword }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
@@ -1091,7 +1120,12 @@ export default function DetalheVendaCompleto() {
   const nomeTomador = venda.cliente?.nome || venda.cliente?.razaoSocial || 'Tomador não informado';
   const ultimaMensagemErro = retornoLogs[0]?.message;
   const erroTemporarioPortal = retornoLogs.some(logIndicaErroTemporario);
-  const noteOperation = notaAtual?.fiscalOperations?.[0];
+  const latestNoteOperation = notaAtual?.fiscalOperations?.[0];
+  const pendingCancellationOperation = notaAtual?.fiscalOperations?.find((operation: any) =>
+    operation.tipo === 'CANCELAR' && ['ERRO_TEMPORARIO', 'RECONCILIACAO_MANUAL'].includes(operation.status));
+  // Uma consulta posterior não deve esconder o cancelamento transmitido que
+  // ainda precisa de uma decisão administrativa.
+  const noteOperation = pendingCancellationOperation || latestNoteOperation;
   const emissionJob = venda.emissionJobs?.[0];
   const notasDaVenda = Array.isArray(venda.notas) ? venda.notas : [];
   const jobsDaVenda = Array.isArray(venda.emissionJobs) ? venda.emissionJobs : [];
@@ -1384,7 +1418,14 @@ export default function DetalheVendaCompleto() {
                     <strong>{fiscalOperationLabel(noteOperation)}</strong>
                     <p>{noteOperation.statusMessage}</p>
                     <p className="text-xs text-slate-500">Operação: {noteOperation.id}</p>
-                    {canAdminister && noteOperation.status === 'RECONCILIACAO_MANUAL' && <button disabled={sincronizandoRetorno} onClick={() => retomarConciliacaoNota(noteOperation.id)} className="mt-2 underline font-bold">Retomar somente consultas</button>}
+                    {canAdminister && ['ERRO_TEMPORARIO', 'RECONCILIACAO_MANUAL'].includes(noteOperation.status) && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {noteOperation.status === 'RECONCILIACAO_MANUAL' && <button disabled={sincronizandoRetorno} onClick={() => retomarConciliacaoNota(noteOperation.id)} className="rounded-lg border border-amber-300 bg-white px-3 py-2 font-bold text-amber-900 disabled:opacity-50">Retomar somente consultas</button>}
+                        <button disabled={sincronizandoRetorno} onClick={() => encerrarCancelamentoNaoConfirmado(noteOperation.id)} className="rounded-lg border border-slate-300 bg-white px-3 py-2 font-bold text-slate-800 disabled:opacity-50">
+                          {sincronizandoRetorno ? 'Conferindo Portal...' : 'Encerrar como não cancelado'}
+                        </button>
+                      </div>
+                    )}
                   </div>}
                   {emissionJob && ['RECONCILIACAO_MANUAL', 'ERRO_TEMPORARIO', 'PENDENTE', 'PROCESSANDO'].includes(emissionJob.status) && (
                     <div className={`mt-3 rounded-xl border p-4 text-sm ${emissionJob.status === 'RECONCILIACAO_MANUAL' ? 'border-red-200 bg-red-50 text-red-900' : 'border-blue-200 bg-blue-50 text-blue-900'}`} role="status">

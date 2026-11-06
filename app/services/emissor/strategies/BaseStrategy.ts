@@ -166,14 +166,15 @@ export abstract class BaseStrategy {
     const results = await Promise.all(['101101', '105102', '105104', '305101'].map(async (type) => {
       try {
         const response = await this.portalRequest(empresa, 'GET', `/nfse/${chave}/eventos/${type}/1`);
-        if (response.status === 404) return { absent: true };
-        if (response.status !== 200) return { absent: false };
+        if (response.status === 404) return { type, status: 404, absent: true };
+        if (response.status !== 200) return { type, status: Number(response.status) || null, absent: false };
         const event = await validateCancellationEvent(response.data?.eventoXmlGZipB64 || response.data, { key: chave, ambiente: empresa.ambiente });
-        if (event.type !== type) return { absent: false };
-        return { absent: false, event };
-      } catch { return { absent: false }; }
+        if (event.type !== type) return { type, status: 200, absent: false };
+        return { type, status: 200, absent: false, event };
+      } catch { return { type, status: null, absent: false }; }
     }));
-    return { event: results.find((result) => result.event)?.event, complete: results.every((result) => result.absent || result.event) };
+    return { event: results.find((result) => result.event)?.event, complete: results.every((result) => result.absent || result.event),
+      checks: results.map(({ type, status }) => ({ type, status })) };
   }
 
   async consultar(chave: string, empresa: any): Promise<IResultadoConsulta> {
@@ -207,27 +208,42 @@ export abstract class BaseStrategy {
         || request.getAttribute('Id') !== `PRE${chave}101101`) throw new Error('Autor, ambiente ou tipo de evento divergente.');
       directElement(request, 'e101101');
     } catch { return { sucesso: false, failureKind: 'LOCAL_REJECTION', motivo: 'Pedido de cancelamento inválido; nenhum envio realizado.' }; }
+    let response;
     try {
-      const response = await this.portalRequest(empresa, 'POST', `/nfse/${chave}/eventos`, { pedidoRegistroEventoXmlGZipB64: zlib.gzipSync(Buffer.from(xml)).toString('base64') });
-      if (response.status >= 200 && response.status < 300) {
+      response = await this.portalRequest(empresa, 'POST', `/nfse/${chave}/eventos`, { pedidoRegistroEventoXmlGZipB64: zlib.gzipSync(Buffer.from(xml)).toString('base64') });
+    } catch (error: any) {
+      const code = String(error?.code || '').toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 40);
+      return { sucesso: false, failureKind: 'UNKNOWN', motivo: 'Não foi possível confirmar o pedido. A retomada fará somente consultas.',
+        portalDiagnostic: { stage: 'CANCEL_POST', category: 'PORTAL_TRANSPORT', ...(code ? { transportCode: code } : {}) } };
+    }
+    const errors = safePortalErrors(response.data?.erros);
+    if (response.status >= 200 && response.status < 300) {
+      try {
         // Never accept an echoed pedRegEvento as an authorized evento.
         const event = await validateCancellationEvent(response.data?.eventoXmlGZipB64, { key: chave, ambiente: empresa.ambiente, preparedRequest: xml });
         return { sucesso: true, xmlEvento: event.xmlEvento, dataCancelamento: event.dataCancelamento, requestMatched: true };
+      } catch {
+        return { sucesso: false, failureKind: 'UNKNOWN', motivo: 'O Portal recebeu o pedido, mas não devolveu um evento conclusivo válido.',
+          portalDiagnostic: { stage: 'CANCEL_POST', category: 'INVALID_PORTAL_EVENT', httpStatus: response.status } };
       }
-      const alreadyCancelled = safePortalErrors(response.data?.erros).some((error) => error.codigo === 'E0840');
-      return { sucesso: false, failureKind: alreadyCancelled ? 'UNKNOWN' : classifyPortalRejection(response.status, response.data?.erros), motivo: 'O resultado do pedido de cancelamento requer conferência.' };
-    } catch { return { sucesso: false, failureKind: 'UNKNOWN', motivo: 'Não foi possível confirmar o pedido. A retomada fará somente consultas.' }; }
+    }
+    const alreadyCancelled = errors.some((error) => error.codigo === 'E0840');
+    const failureKind = alreadyCancelled ? 'UNKNOWN' : classifyPortalRejection(response.status, response.data?.erros);
+    return { sucesso: false, failureKind, motivo: failureKind === 'PORTAL_REJECTION' ? 'O Portal recusou o pedido de cancelamento.' : 'O resultado do pedido de cancelamento requer conferência.',
+      portalDiagnostic: { stage: 'CANCEL_POST', category: 'PORTAL_REJECTION', httpStatus: response.status, ...(errors.length ? { errors } : {}) } };
   }
 
   async conciliarCancelamento(xml: string, chave: string, empresa: any): Promise<IResultadoCancelamento> {
     try {
-      const { event } = await this.cancellationEvents(chave, empresa);
-      if (!event) return { sucesso: false, failureKind: 'UNKNOWN', motivo: 'Evento conclusivo ainda não recuperado. Não reenviar o pedido.' };
+      const { event, complete, checks } = await this.cancellationEvents(chave, empresa);
+      if (!event) return { sucesso: false, failureKind: 'UNKNOWN', motivo: 'Evento conclusivo ainda não recuperado. Não reenviar o pedido.',
+        portalDiagnostic: { stage: 'CANCEL_EVENT_LOOKUP', category: complete ? 'CANCELLATION_EVENT_ABSENT' : 'CANCELLATION_EVENT_LOOKUP_INCOMPLETE', eventChecks: checks } };
       let requestMatched = false;
       try { await validateCancellationEvent(event.xmlEvento, { key: chave, ambiente: empresa.ambiente, preparedRequest: xml }); requestMatched = true; }
       catch { /* A different official cancellation still establishes the note's state. */ }
       return { sucesso: true, xmlEvento: event.xmlEvento, dataCancelamento: event.dataCancelamento, requestMatched };
-    } catch { return { sucesso: false, failureKind: 'UNKNOWN', motivo: 'Conciliação do cancelamento pendente.' }; }
+    } catch { return { sucesso: false, failureKind: 'UNKNOWN', motivo: 'Conciliação do cancelamento pendente.',
+      portalDiagnostic: { stage: 'CANCEL_EVENT_LOOKUP', category: 'CANCELLATION_EVENT_LOOKUP_INCOMPLETE' } }; }
   }
 }
 

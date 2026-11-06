@@ -144,26 +144,11 @@ export default function GestaoClientes() {
 
   // --- FUNÇÕES UTILITÁRIAS ---
   const solicitarAutorizacaoAdministrativa = async (acao: string) => {
-      const justification = await dialog.showPrompt({
-          title: 'Justificativa obrigatoria',
-          description: `Descreva o motivo para ${acao}. Esta operacao sera auditada.`,
-          placeholder: 'Informe o motivo com ao menos 10 caracteres',
-          confirmText: 'Continuar',
-      });
-      if (!justification) return null;
-      if (justification.trim().length < 10) {
-          await dialog.showAlert({ type: 'warning', description: 'A justificativa precisa ter ao menos 10 caracteres.' });
-          return null;
-      }
-      const password = await dialog.showPrompt({
-          title: 'Confirme sua identidade',
-          description: 'Digite sua senha administrativa para autorizar esta operacao.',
-          placeholder: 'Senha administrativa',
-          inputType: 'password',
+      return dialog.showAuthorization({
+          title: 'Autorizar operação',
+          description: `Informe a justificativa e sua senha administrativa para ${acao}. Esta operação será auditada.`,
           confirmText: 'Autorizar',
       });
-      if (!password) return null;
-      return { justification: justification.trim(), adminPassword: password };
   };
 
   const handleSendReset = async () => { await fetch('/api/auth/forgot-password', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ email: editingUser.email }) }); dialog.showAlert("Email enviado."); };
@@ -204,25 +189,12 @@ export default function GestaoClientes() {
         if (adminRole) localStorage.setItem('adminBackUpRole', adminRole);
     }
 
-    const reason = await dialog.showPrompt({
-      title: 'Justificativa do acesso',
-      description: 'Informe por que precisa visualizar a conta. O acesso sera somente leitura e auditado.',
-      placeholder: 'Ex.: investigar o ticket 1234 informado pelo cliente',
-      confirmText: 'Continuar',
-    });
-    if (!reason) return;
-    if (reason.trim().length < 10) {
-      return dialog.showAlert({ type: 'warning', description: 'Informe uma justificativa com ao menos 10 caracteres.' });
-    }
-
-    const password = await dialog.showPrompt({
-      title: 'Confirme sua identidade',
-      description: 'Digite sua senha administrativa para iniciar a sessao de suporte por 30 minutos.',
-      placeholder: 'Senha administrativa',
-      inputType: 'password',
+    const authorization = await dialog.showAuthorization({
+      title: 'Autorizar acesso de suporte',
+      description: 'Informe a justificativa e sua senha administrativa. O acesso será somente leitura, durará 30 minutos e ficará auditado.',
       confirmText: 'Iniciar acesso',
     });
-    if (!password) return;
+    if (!authorization) return;
 
     try {
         const res = await fetch('/api/admin/impersonate', { 
@@ -230,7 +202,7 @@ export default function GestaoClientes() {
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ targetUserId: targetId, reason: reason.trim(), password })
+            body: JSON.stringify({ targetUserId: targetId, reason: authorization.justification, password: authorization.adminPassword })
         });
 
         if (res.status === 401) {

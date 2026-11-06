@@ -18,7 +18,9 @@ export function isFiscalOperationPolling(operation?: FiscalOperationView | null)
 }
 export function fiscalOperationLabel(operation: FiscalOperationView, options: { workerOnline?: boolean | null; now?: number } = {}) {
   if (operation.status === 'RECONCILIACAO_MANUAL') return 'Resultado não confirmado — solicitar conciliação';
-  if (operation.status === 'ERRO_FINAL') return 'Solicitação não concluída — nota preservada';
+  if (operation.status === 'ERRO_FINAL') return operation.tipo === 'CANCELAR' && operation.resultStatus === 'AUTORIZADA'
+    ? 'Cancelamento não realizado — nota autorizada'
+    : 'Solicitação não concluída — nota preservada';
   if (operation.status === 'CONCLUIDA') return operation.resultStatus === 'CANCELADA' ? 'Cancelamento confirmado' : 'Consulta concluída';
   if (operation.tipo === 'CANCELAR') return operation.status === 'PROCESSANDO' ? 'Cancelamento em processamento — aguardando confirmação' : 'Cancelamento solicitado — aguardando confirmação';
   if (operation.status === 'PROCESSANDO') return 'Consultando o portal fiscal';

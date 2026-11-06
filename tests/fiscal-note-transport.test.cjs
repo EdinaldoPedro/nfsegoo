@@ -61,16 +61,37 @@ test('cancelamento: um POST; eco do pedido, E0840, timeout e evento adulterado p
     new Error('timeout private-secret'),
   ];
   try {
-    for (const response of cases) {
+    for (const [index, response] of cases.entries()) {
       const calls = [];
       axios.request = async (config) => { calls.push(config); if (response instanceof Error) throw response; return response; };
       const result = await new FixtureStrategy().transmitirCancelamento(xml, key, company);
       assert.equal(result.sucesso, false); assert.equal(result.failureKind, 'UNKNOWN');
+      assert.equal(result.portalDiagnostic.category, index === 1 ? 'PORTAL_REJECTION' : index === 3 ? 'PORTAL_TRANSPORT' : 'INVALID_PORTAL_EVENT');
       assert.equal(calls.length, 1); assert.equal(calls[0].method, 'POST');
       assert.equal(calls[0].url, `https://sefin.nfse.gov.br/SefinNacional/nfse/${key}/eventos`);
       assert.ok(calls[0].data.pedidoRegistroEventoXmlGZipB64); assert.equal(calls[0].headers.Authorization, undefined);
       assert.ok(!JSON.stringify(result).includes('private-secret'));
     }
+  } finally { axios.request = original; }
+});
+test('cancelamento: rejeicao fiscal preserva somente diagnostico seguro e libera decisao definitiva', async () => {
+  const original = axios.request; const xml = await prepare();
+  try {
+    axios.request = async () => ({ status: 422, data: { erros: [{ Codigo: 'E1234', Descricao: 'Cancelamento fora das regras municipais.' }] } });
+    const result = await new FixtureStrategy().transmitirCancelamento(xml, key, company);
+    assert.equal(result.sucesso, false); assert.equal(result.failureKind, 'PORTAL_REJECTION');
+    assert.deepEqual(result.portalDiagnostic.errors, [{ codigo: 'E1234', mensagem: 'Cancelamento fora das regras municipais.' }]);
+    assert.equal(result.portalDiagnostic.httpStatus, 422);
+  } finally { axios.request = original; }
+});
+test('cancelamento: conciliacao ausente registra as quatro consultas GET sem afirmar cancelamento', async () => {
+  const original = axios.request; const xml = await prepare();
+  try {
+    axios.request = async () => ({ status: 404 });
+    const result = await new FixtureStrategy().conciliarCancelamento(xml, key, company);
+    assert.equal(result.sucesso, false); assert.equal(result.failureKind, 'UNKNOWN');
+    assert.equal(result.portalDiagnostic.category, 'CANCELLATION_EVENT_ABSENT');
+    assert.deepEqual(result.portalDiagnostic.eventChecks, ['101101', '105102', '105104', '305101'].map(type => ({ type, status: 404 })));
   } finally { axios.request = original; }
 });
 test('cancelamento: resposta conclusiva vincula pedido; conciliacao externa usa somente GET sem inventar autoria', async () => {

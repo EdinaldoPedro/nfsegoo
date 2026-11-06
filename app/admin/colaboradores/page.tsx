@@ -94,6 +94,7 @@ export default function GestaoColaboradores() {
       isCustom,
       status: user?.planoStatus === 'suspended' ? 'SUSPENSO' : (user?.limits?.status || history?.status || 'INATIVO'),
       maxNotas: user?.limits?.limiteNotas ?? history?.limiteNotasContratado ?? 0,
+      maxEmpresas: user?.limits?.limiteEmpresas ?? Math.max(0, Number(user?.limiteEmpresas || 0)) + Math.max(0, Number(user?.empresasAdicionais || 0)),
       maxClientes: user?.limits?.limiteClientes ?? history?.limiteClientesContratado ?? 0,
       vencimento,
     };
@@ -420,13 +421,17 @@ export default function GestaoColaboradores() {
 
                         </div>
 
-                        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+                        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
                           <div className="rounded-xl border border-slate-200 bg-white/80 p-3">
                             <p className="text-xs font-black uppercase text-slate-400">Limite NFS-e</p>
                             <p className="mt-1 text-xl font-black text-slate-950">{selectedPlanInfo.maxNotas}</p>
                           </div>
                           <div className="rounded-xl border border-slate-200 bg-white/80 p-3">
-                            <p className="text-xs font-black uppercase text-slate-400">Limite clientes</p>
+                            <p className="text-xs font-black uppercase text-slate-400">Limite empresas</p>
+                            <p className="mt-1 text-xl font-black text-slate-950">{selectedPlanInfo.maxEmpresas}</p>
+                          </div>
+                          <div className="rounded-xl border border-slate-200 bg-white/80 p-3">
+                            <p className="text-xs font-black uppercase text-slate-400">Limite clientes cadastrados</p>
                             <p className="mt-1 text-xl font-black text-slate-950">{selectedPlanInfo.maxClientes}</p>
                           </div>
                           <div className="rounded-xl border border-slate-200 bg-white/80 p-3">
@@ -565,7 +570,7 @@ export default function GestaoColaboradores() {
                                             </span>
                                         </div>
                                         <p className="max-w-[190px] truncate text-xs font-bold text-slate-700" title={planInfo.slug}>{planInfo.name}</p>
-                                        <p className="text-[10px] text-slate-400">{planInfo.maxNotas} notas · {planInfo.maxClientes} clientes</p>
+                                        <p className="text-[10px] text-slate-400">{planInfo.maxNotas} notas · {planInfo.maxEmpresas} empresas · {planInfo.maxClientes} clientes</p>
                                     </div>
                                 );
                             })() : (

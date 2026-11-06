@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fiscalRoot, fiscalXml, parseFiscalXml } from './FiscalXml';
+import { XMLSerializer } from '@xmldom/xmldom';
+import { directElement, directElements, fiscalRoot, fiscalXml, parseFiscalXml } from './FiscalXml';
 
 const SCHEMAS = { DPS: 'DPS_v1.01.xsd', NFSe: 'NFSe_v1.01.xsd', pedRegEvento: 'pedRegEvento_v1.01.xsd', evento: 'evento_v1.01.xsd' } as const;
 type SchemaRoot = keyof typeof SCHEMAS;
@@ -75,4 +76,46 @@ export async function validateFiscalSchema(value: unknown, root: SchemaRoot): Pr
     const fields = [...new Set(Array.from(message.matchAll(/Element '\{http:\/\/www\.sped\.fazenda\.gov\.br\/nfse\}([A-Za-z0-9_]+)'/g), (match) => match[1]))].slice(0, 8);
     throw new FiscalSchemaError(fields);
   } finally { document.dispose(); }
+}
+
+/** The National Portal has emitted cryptographically valid NFS-e documents with
+ * two narrow lexical defects in portal-generated fields: trailing whitespace in
+ * xNBS and a dropped leading zero in the issuer CEP. Validate a normalized copy
+ * only for XSD compatibility; callers must verify the signature and persist the
+ * original XML unchanged. DPS/customer content is never normalized here. */
+export async function validateOfficialNfseSchema(value: unknown): Promise<void> {
+  const xml = fiscalXml(value);
+  try {
+    await validateFiscalSchema(xml, 'NFSe');
+    return;
+  } catch (error) {
+    if (!(error instanceof FiscalSchemaError) || !error.fields.length
+      || error.fields.some((field) => !['xNBS', 'CEP'].includes(field))) throw error;
+  }
+
+  const document = parseFiscalXml(xml);
+  const inf = directElement(fiscalRoot(document, 'NFSe'), 'infNFSe');
+  let normalized = 0;
+
+  for (const node of directElements(inf, 'xNBS')) {
+    const original = node.textContent || '';
+    const trimmed = original.trim();
+    if (trimmed && original !== trimmed) {
+      node.textContent = trimmed;
+      normalized += 1;
+    }
+  }
+
+  const emit = directElement(inf, 'emit');
+  const issuerAddress = directElements(emit, 'enderNac')[0];
+  if (issuerAddress) {
+    const issuerCep = directElements(issuerAddress, 'CEP')[0];
+    if (issuerCep && /^\d{7}$/.test(issuerCep.textContent || '')) {
+      issuerCep.textContent = '0' + issuerCep.textContent;
+      normalized += 1;
+    }
+  }
+
+  if (!normalized) throw new FiscalSchemaError(['NFSe']);
+  await validateFiscalSchema(new XMLSerializer().serializeToString(document), 'NFSe');
 }

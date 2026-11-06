@@ -216,7 +216,7 @@ export const GET = withApiGuard(async function GET(request: Request, { params: r
         cliente: true,
         notas: {
           orderBy: { createdAt: 'desc' },
-          include: { fiscalOperations: { orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1, select: fiscalOperationSelect }, documentTask: { select: { status: true, completedAt: true } } },
+          include: { fiscalOperations: { orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 10, select: fiscalOperationSelect }, documentTask: { select: { status: true, completedAt: true } } },
         },
         logs: {
           orderBy: { createdAt: 'desc' },

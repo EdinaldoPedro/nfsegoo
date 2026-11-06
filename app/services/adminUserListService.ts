@@ -37,7 +37,7 @@ export async function listAdminUsers(actorId: string, query: URLSearchParams) {
     const where: Prisma.UserWhereInput = { role: { in: parsed.roles as any }, AND: [segment],
       ...(parsed.search ? { OR: [{ nome: { contains: parsed.search, mode: 'insensitive' } }, { email: { contains: parsed.search, mode: 'insensitive' } }] } : {}) };
     const select = { id: true, nome: true, email: true, role: true, telefone: true, cargo: true, planoStatus: true, planoCiclo: true,
-      limiteEmpresas: true, empresaId: true, createdAt: true, updatedAt: true,
+      limiteEmpresas: true, empresasAdicionais: true, empresaId: true, createdAt: true, updatedAt: true,
       empresa: { select: { id: true, documento: true, razaoSocial: true, ambiente: true, arquivadoEm: true } },
       historicoPlanos: { where: { status: 'ATIVO', arquivadoEm: null }, orderBy: [{ dataInicio: 'desc' as const }, { id: 'asc' as const }], take: 20,
         select: { id: true, status: true, tipoContratado: true, nomeContratado: true, dataInicio: true, dataFim: true,

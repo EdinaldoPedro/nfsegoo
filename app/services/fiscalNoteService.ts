@@ -6,6 +6,8 @@ import { fiscalCnpj, isNfseAccessKey } from '@/app/utils/fiscal-identifiers';
 import { cancellationReason } from './emissor/validation/CancellationEvent';
 import { fiscalXml } from './emissor/validation/FiscalXml';
 import { originalNfseEnvironment, validateNfseDocument } from './emissor/validation/AuthorizedNfseValidator';
+import { EmissorFactory } from './emissor/factories/EmissorFactory';
+import type { IEmissorStrategy, IResultadoCancelamento } from './emissor/interfaces/IEmissorStrategy';
 
 export const ACTIVE_NOTE_OPERATIONS = ['PENDENTE', 'PROCESSANDO', 'ERRO_TEMPORARIO', 'RECONCILIACAO_MANUAL'];
 export function fiscalError(message: string, status = 409): never { throw Object.assign(new Error(message), { status }); }
@@ -105,4 +107,78 @@ export async function resumeFiscalNoteReconciliation(actorId: string, operationI
       message: 'Conciliação GET-only solicitada, sem reenvio de pedido fiscal.', userId: actorId, empresaId: operation.empresaId,
       details: JSON.stringify({ operationId, notaId: operation.notaId, justification: justification.trim().slice(0, 500) }) } });
   });
+}
+
+const CANCELLATION_EVENT_TYPES = ['101101', '105102', '105104', '305101'];
+
+function confirmsCancellationEventAbsence(result: IResultadoCancelamento) {
+  const diagnostic = result.portalDiagnostic;
+  if (result.sucesso || diagnostic?.stage !== 'CANCEL_EVENT_LOOKUP' || diagnostic.category !== 'CANCELLATION_EVENT_ABSENT') return false;
+  const checks = diagnostic.eventChecks || [];
+  return CANCELLATION_EVENT_TYPES.every((type) => checks.some((check) => check.type === type && check.status === 404));
+}
+
+/** Administrative terminal path for an old, ambiguous cancellation POST.
+ * It performs two GET-only complete checks before releasing the local lock.
+ * A discovered event is never ignored: the operation is requeued for the
+ * normal worker to validate and persist the official cancellation XML. */
+export async function closeUnconfirmedCancellation(actorId: string, operationId: string, justification: string, suppliedStrategy?: IEmissorStrategy) {
+  const reason = String(justification || '').trim();
+  if (reason.length < 10 || reason.length > 2000) fiscalError('Informe uma justificativa de 10 a 2.000 caracteres.', 400);
+  const [actor, operation] = await Promise.all([
+    prisma.user.findUnique({ where: { id: actorId }, select: { role: true } }),
+    prisma.fiscalNoteOperation.findUnique({ where: { id: operationId }, include: { nota: { select: { status: true, vendaId: true } } } }),
+  ]);
+  if (!actor || !isAdminRole(actor.role)) fiscalError('Operação não permitida.', 403);
+  if (!operation || operation.tipo !== 'CANCELAR' || !['ERRO_TEMPORARIO', 'RECONCILIACAO_MANUAL'].includes(operation.status)
+    || !operation.transmissionStartedAt || !operation.signedRequestXml || operation.nota.status !== 'AUTORIZADA') {
+    fiscalError('Cancelamento não elegível para encerramento administrativo. Atualize a bancada.', 409);
+  }
+  const storedCompany = await prisma.empresa.findUnique({ where: { id: operation.empresaId } });
+  if (!storedCompany || storedCompany.arquivadoEm) fiscalError('Empresa indisponível para a conferência fiscal.', 409);
+  const company = { ...storedCompany, ambiente: operation.ambiente, documento: operation.issuerDocument };
+  const strategy = suppliedStrategy || EmissorFactory.getStrategy(company);
+
+  const first = await strategy.conciliarCancelamento(operation.signedRequestXml, operation.chaveAcesso, company);
+  if (!first.sucesso && !confirmsCancellationEventAbsence(first)) fiscalError('O Portal não confirmou a ausência dos eventos. A conciliação continuará bloqueada.', 409);
+  if (!first.sucesso) await new Promise((resolve) => setTimeout(resolve, 1500));
+  const second = first.sucesso ? first : await strategy.conciliarCancelamento(operation.signedRequestXml, operation.chaveAcesso, company);
+
+  if (second.sucesso) {
+    await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "FiscalNoteOperation" WHERE "id" = ${operation.id} FOR UPDATE`;
+      const current = await tx.fiscalNoteOperation.findUniqueOrThrow({ where: { id: operation.id } });
+      if (!['ERRO_TEMPORARIO', 'RECONCILIACAO_MANUAL'].includes(current.status)) fiscalError('A operação mudou durante a conferência. Atualize a bancada.', 409);
+      await tx.fiscalNoteOperation.update({ where: { id: current.id }, data: { status: 'ERRO_TEMPORARIO', nextAttemptAt: new Date(),
+        maxAttempts: current.attempts + 2, finishedAt: null, statusMessage: 'Evento oficial localizado. Conclusão do cancelamento agendada.' } });
+      await tx.systemLog.create({ data: { level: 'INFO', action: 'FISCAL_CANCELLATION_EVENT_FOUND', userId: actorId,
+        empresaId: current.empresaId, vendaId: operation.nota.vendaId, message: 'Evento oficial localizado na conferência administrativa; persistência agendada no worker.',
+        details: JSON.stringify({ operationId: current.id, notaId: current.notaId, justification: reason }) } });
+    });
+    return { outcome: 'EVENT_FOUND' as const };
+  }
+  if (!confirmsCancellationEventAbsence(second)) fiscalError('A segunda consulta não confirmou a ausência dos eventos. A conciliação continuará bloqueada.', 409);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "FiscalNoteOperation" WHERE "id" = ${operation.id} FOR UPDATE`;
+    await tx.$queryRaw`SELECT "id" FROM "NotaFiscal" WHERE "id" = ${operation.notaId} FOR UPDATE`;
+    const [current, note] = await Promise.all([
+      tx.fiscalNoteOperation.findUniqueOrThrow({ where: { id: operation.id } }),
+      tx.notaFiscal.findUniqueOrThrow({ where: { id: operation.notaId } }),
+    ]);
+    if (!['ERRO_TEMPORARIO', 'RECONCILIACAO_MANUAL'].includes(current.status) || note.status !== 'AUTORIZADA' || note.chaveAcesso !== current.chaveAcesso) {
+      fiscalError('A situação fiscal mudou durante a conferência. Atualize a bancada.', 409);
+    }
+    const statusMessage = 'Conciliação encerrada: duas consultas completas não localizaram evento de cancelamento. A nota permanece autorizada e uma nova solicitação foi liberada.';
+    await tx.fiscalNoteOperation.update({ where: { id: current.id }, data: { status: 'ERRO_FINAL', resultStatus: 'AUTORIZADA',
+      statusMessage, nextAttemptAt: null, leaseToken: null, leaseUntil: null, finishedAt: new Date() } });
+    await tx.systemLog.create({ data: { level: 'ALERTA', action: 'FISCAL_CANCELLATION_CLOSED_AS_NOT_CANCELLED', userId: actorId,
+      empresaId: current.empresaId, vendaId: note.vendaId, message: statusMessage,
+      details: JSON.stringify({ operationId: current.id, notaId: current.notaId, justification: reason,
+        firstCheck: first.portalDiagnostic, secondCheck: second.portalDiagnostic }) } });
+    await tx.appNotification.createMany({ skipDuplicates: true, data: [{ recipientId: current.actorUserId, empresaId: current.empresaId,
+      vendaId: note.vendaId, notaId: note.id, type: 'CANCELAMENTO_NAO_CONCLUIDO', title: 'Nota permanece autorizada', message: statusMessage,
+      eventKey: `fiscal-note:${current.id}:CLOSED_AS_NOT_CANCELLED`, priority: 'HIGH', payloadJson: JSON.stringify({ notaId: note.id, operationId: current.id }) }] });
+  });
+  return { outcome: 'CLOSED_AS_NOT_CANCELLED' as const };
 }

@@ -118,6 +118,19 @@ test('operacoes de nota PostgreSQL: cancelamento duravel, consulta, documentos e
       assert.equal(postCalls, before); assert.equal((await currentOp(op)).status, 'ERRO_FINAL');
       assert.equal((await currentOp(op)).transmissionStartedAt, null); assert.equal((await currentNote(note)).status, 'AUTORIZADA');
     });
+    await t.test('rejeicao definitiva do Portal informa o cliente, preserva autorizacao e libera nova solicitacao', async () => {
+      const note = await createNote(); const op = await queue(note);
+      await processFiscalNoteOperation(await claim(note), { ...fake, transmitirCancelamento: async () => ({ sucesso: false,
+        failureKind: 'PORTAL_REJECTION', motivo: 'O Portal recusou o pedido de cancelamento.',
+        portalDiagnostic: { stage: 'CANCEL_POST', category: 'PORTAL_REJECTION', httpStatus: 422,
+          errors: [{ codigo: 'E1234', mensagem: 'Cancelamento fora das regras municipais.' }] } }) });
+      const failed = await currentOp(op);
+      assert.equal(failed.status, 'ERRO_FINAL'); assert.equal(failed.resultStatus, 'AUTORIZADA');
+      assert.match(failed.statusMessage, /E1234/); assert.match(failed.statusMessage, /nova solicitação/);
+      assert.equal((await currentNote(note)).status, 'AUTORIZADA');
+      assert.equal(await prisma.appNotification.count({ where: { recipientId: owner.id, eventKey: `fiscal-note:${op.id}:ERRO_FINAL` } }), 1);
+      const retry = await queue(note); assert.notEqual(retry.id, op.id);
+    });
     await t.test('incerteza esgotada bloqueia novos pedidos; somente admin retoma GET sem limpar marcador', async () => {
       const note = await createNote(); const op = await queue(note);
       await prisma.fiscalNoteOperation.update({ where: { id: op.id }, data: { maxAttempts: 1 } });

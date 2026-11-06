@@ -1,7 +1,7 @@
 import { C14nCanonicalization } from 'xml-crypto';
 import { directElement, directElements, FISCAL_NS, fiscalEnvironment, fiscalRoot, fiscalXml, parseFiscalXml } from './FiscalXml';
 import { verifiedFiscalReference } from './FiscalSignature';
-import { validateFiscalSchema } from './FiscalSchema';
+import { validateOfficialNfseSchema } from './FiscalSchema';
 import { fiscalCnpj, isDpsId, isNfseId } from '@/app/utils/fiscal-identifiers';
 
 export { fiscalXml } from './FiscalXml';
@@ -31,7 +31,7 @@ export function originalNfseEnvironment(value: unknown): 'PRODUCAO' | 'HOMOLOGAC
 
 async function authenticatedNfse(value: unknown, ambiente: string, expectedKey?: string, issuer?: string) {
   const xml = fiscalXml(value);
-  await validateFiscalSchema(xml, 'NFSe');
+  await validateOfficialNfseSchema(xml);
   const inf = verifiedFiscalReference(xml, 'NFSe');
   const id = inf.getAttribute('Id') || '';
   if (!isNfseId(id)) throw new Error('Identificador da NFS-e não confere.');

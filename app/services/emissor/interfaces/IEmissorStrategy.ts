@@ -31,6 +31,14 @@ export interface IResultadoCancelamento {
     xmlEvento?: string;       
     motivo?: string;
     failureKind?: 'LOCAL_REJECTION' | 'PORTAL_REJECTION' | 'UNKNOWN';
+    portalDiagnostic?: {
+        stage: 'CANCEL_POST' | 'CANCEL_EVENT_LOOKUP';
+        category: 'PORTAL_REJECTION' | 'INVALID_PORTAL_EVENT' | 'PORTAL_TRANSPORT' | 'CANCELLATION_EVENT_ABSENT' | 'CANCELLATION_EVENT_LOOKUP_INCOMPLETE';
+        httpStatus?: number;
+        transportCode?: string;
+        eventChecks?: Array<{ type: string; status: number | null }>;
+        errors?: Array<{ codigo: string; mensagem: string }>;
+    };
 }
 
 export interface IDadosEmissao {

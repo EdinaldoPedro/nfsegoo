@@ -99,12 +99,12 @@ export default function BaseEmpresas() {
             : `Cadastro: ${editing.razaoSocial}. Os vínculos existentes serão preservados e as cotas conferidas.`,
           confirmText: action === 'ARCHIVE' ? 'Confirmar arquivamento' : 'Confirmar restauração', type: 'warning' });
         if (!confirmed) return;
-        const justification = await dialog.showPrompt({ title: action === 'ARCHIVE' ? 'Motivo do arquivamento' : 'Motivo da restauração',
-          description: 'Informe uma justificativa com pelo menos 10 caracteres.' });
-        if (!justification || justification.trim().length < 10) return;
-        const adminPassword = await dialog.showPrompt({ title: 'Confirmar identidade', description: 'Digite sua senha administrativa atual.', inputType: 'password' });
-        if (!adminPassword) return;
-        protectedCredentials = { adminPassword, justification: justification.trim() };
+        protectedCredentials = await dialog.showAuthorization({
+          title: action === 'ARCHIVE' ? 'Autorizar arquivamento' : 'Autorizar restauração',
+          description: 'Informe a justificativa e sua senha administrativa. A operação ficará registrada na auditoria.',
+          confirmText: 'Autorizar',
+        });
+        if (!protectedCredentials) return;
       } else {
         const confirmed = await dialog.showConfirm({
           title: action === 'REFRESH' ? 'Aplicar atualização consultada?' : 'Salvar alterações cadastrais?',

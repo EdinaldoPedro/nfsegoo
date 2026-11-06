@@ -64,17 +64,42 @@ async function authorizeBeforeRequest(tx: Prisma.TransactionClient, operation: F
   return { ...company, documento: operation.issuerDocument, ambiente: operation.ambiente };
 }
 
-export async function failFiscalNoteOperation(operation: LeasedNoteOperation, definitive: boolean) {
+type FiscalOperationFailure = { motivo?: string; failureKind?: string; portalDiagnostic?: unknown };
+
+function definitiveFailureMessage(current: FiscalNoteOperation, failure: FiscalOperationFailure) {
+  if (current.tipo !== 'CANCELAR') return 'Operação não concluída. Nota e documentos preservados; revise a solicitação.';
+  const diagnostic = failure.portalDiagnostic as { errors?: Array<{ codigo?: string; mensagem?: string }> } | undefined;
+  const portalError = diagnostic?.errors?.[0];
+  const code = String(portalError?.codigo || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 20);
+  const message = Array.from(String(portalError?.mensagem || ''))
+    .map((character) => { const codePoint = character.charCodeAt(0); return codePoint < 32 || codePoint === 127 ? ' ' : character; })
+    .join('').trim().slice(0, 320);
+  if (message) return `Cancelamento recusado pelo Portal${code ? ` (${code})` : ''}: ${message} A nota continua autorizada e uma nova solicitação pode ser feita.`;
+  return `${failure.motivo || 'O pedido de cancelamento não foi aceito.'} A nota continua autorizada e uma nova solicitação pode ser feita.`;
+}
+
+export async function failFiscalNoteOperation(operation: LeasedNoteOperation, failureOrDefinitive: boolean | FiscalOperationFailure) {
   return withNoteLease(operation, async (tx, current) => {
+    const failure = typeof failureOrDefinitive === 'boolean' ? {} : failureOrDefinitive;
+    const definitive = typeof failureOrDefinitive === 'boolean' ? failureOrDefinitive
+      : ['LOCAL_REJECTION', 'PORTAL_REJECTION'].includes(failure.failureKind || '');
     const status = definitive ? 'ERRO_FINAL' : current.attempts >= current.maxAttempts ? 'RECONCILIACAO_MANUAL' : 'ERRO_TEMPORARIO';
-    const statusMessage = definitive ? 'Operação não concluída. Nota e documentos preservados; revise a solicitação.'
+    const statusMessage = definitive ? definitiveFailureMessage(current, failure)
       : status === 'RECONCILIACAO_MANUAL' ? 'Resultado não confirmado. É necessária conciliação; não reenviar o cancelamento.'
         : current.transmissionStartedAt ? 'Consultando o evento original. Nenhum novo pedido será enviado.' : 'Operação pendente; nova verificação agendada.';
     await tx.fiscalNoteOperation.update({ where: { id: current.id }, data: { status, statusMessage,
       leaseToken: null, leaseUntil: null, nextAttemptAt: status === 'ERRO_TEMPORARIO' ? new Date(Date.now() + retryDelayMs(current.attempts)) : null,
+      resultStatus: definitive && current.tipo === 'CANCELAR' ? 'AUTORIZADA' : current.resultStatus,
       finishedAt: definitive ? new Date() : null } });
     await tx.systemLog.create({ data: { level: 'ALERTA', action: 'FISCAL_NOTE_' + status, message: statusMessage,
-      userId: current.actorUserId, empresaId: current.empresaId, details: JSON.stringify({ operationId: current.id, notaId: current.notaId, transmitted: !!current.transmissionStartedAt }) } });
+      userId: current.actorUserId, empresaId: current.empresaId, details: JSON.stringify({ operationId: current.id, notaId: current.notaId,
+        transmitted: !!current.transmissionStartedAt, failureKind: failure.failureKind, motivo: failure.motivo, portalDiagnostic: failure.portalDiagnostic }) } });
+    if (definitive && current.tipo === 'CANCELAR') {
+      const note = await tx.notaFiscal.findUniqueOrThrow({ where: { id: current.notaId }, select: { vendaId: true } });
+      await tx.appNotification.create({ data: { recipientId: current.actorUserId, empresaId: current.empresaId, vendaId: note.vendaId, notaId: current.notaId,
+        type: 'CANCELAMENTO_NAO_CONCLUIDO', title: 'Cancelamento não realizado', message: statusMessage,
+        eventKey: `fiscal-note:${current.id}:ERRO_FINAL`, priority: 'HIGH', payloadJson: JSON.stringify({ notaId: current.notaId, operationId: current.id }) } });
+    }
     // No credit reservation/usage is changed by cancelling or consulting a note.
     return status;
   });
@@ -169,7 +194,7 @@ export async function processFiscalNoteOperation(claimed: LeasedNoteOperation, s
       result = await strategy.transmitirCancelamento(operation.signedRequestXml!, operation.chaveAcesso, company);
     }
     if (result.sucesso) await finishFiscalNoteOperation(operation, result);
-    else await failFiscalNoteOperation(operation, 'failureKind' in result && ['LOCAL_REJECTION','PORTAL_REJECTION'].includes(result.failureKind || ''));
+    else await failFiscalNoteOperation(operation, result);
   } catch (error) {
     if (error instanceof LostNoteLease) return;
     const fresh = await prisma.fiscalNoteOperation.findUnique({ where: { id: operation.id }, select: { transmissionStartedAt: true } });

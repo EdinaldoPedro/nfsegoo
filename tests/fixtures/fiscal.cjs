@@ -32,8 +32,8 @@ function canonicalRps(number = 1) {
 function makeDps(number = 1, mutate = (rps) => rps) {
   return signFiscalXml(new NacionalAdapter().toXml(mutate(canonicalRps(number))), 'DPS', signingCredentials());
 }
-function makeNfse(dps = makeDps(), { numero = '123', chave = key, issuerDocument = '11222333000181' } = {}) {
-  const content = `<NFSe xmlns="${ns}" versao="1.01"><infNFSe Id="NFS${chave}"><xLocEmi>Sao Paulo</xLocEmi><xLocPrestacao>Sao Paulo</xLocPrestacao><nNFSe>${numero}</nNFSe><xTribNac>Analise de sistemas</xTribNac><verAplic>QA-1</verAplic><ambGer>2</ambGer><tpEmis>1</tpEmis><cStat>107</cStat><dhProc>2026-09-02T10:30:00-03:00</dhProc><nDFSe>123</nDFSe><emit><CNPJ>${issuerDocument}</CNPJ><xNome>Emitente de teste</xNome><enderNac><xLgr>Rua de teste</xLgr><nro>10</nro><xBairro>Centro</xBairro><cMun>3550308</cMun><UF>SP</UF><CEP>01001000</CEP></enderNac></emit><valores><vLiq>123.45</vLiq></valores>${dps.replace(/<\?xml[^?]*\?>/, '')}</infNFSe></NFSe>`;
+function makeNfse(dps = makeDps(), { numero = '123', chave = key, issuerDocument = '11222333000181', issuerCep = '01001000', xNbs = '' } = {}) {
+  const content = `<NFSe xmlns="${ns}" versao="1.01"><infNFSe Id="NFS${chave}"><xLocEmi>Sao Paulo</xLocEmi><xLocPrestacao>Sao Paulo</xLocPrestacao><nNFSe>${numero}</nNFSe><xTribNac>Analise de sistemas</xTribNac>${xNbs ? `<xNBS>${xNbs}</xNBS>` : ''}<verAplic>QA-1</verAplic><ambGer>2</ambGer><tpEmis>1</tpEmis><cStat>107</cStat><dhProc>2026-09-02T10:30:00-03:00</dhProc><nDFSe>123</nDFSe><emit><CNPJ>${issuerDocument}</CNPJ><xNome>Emitente de teste</xNome><enderNac><xLgr>Rua de teste</xLgr><nro>10</nro><xBairro>Centro</xBairro><cMun>3550308</cMun><UF>SP</UF><CEP>${issuerCep}</CEP></enderNac></emit><valores><vLiq>123.45</vLiq></valores>${dps.replace(/<\?xml[^?]*\?>/, '')}</infNFSe></NFSe>`;
   return signFiscalXml(content, 'NFSe', signingCredentials());
 }
 function makeCancellationEvent(requestXml, chave = key, type = '101101') {

@@ -19,6 +19,27 @@ test('retorno: XSD, assinatura, DPS preparada, chave e ambiente conferem', async
   }
 });
 
+test('retorno oficial: tolera apenas defeitos lexicais comprovados sem alterar o XML armazenado', async () => {
+  for (const official of [
+    makeNfse(dps, { xNbs: 'Servicos de teste  ' }),
+    makeNfse(dps, { issuerCep: '1001000' }),
+    makeNfse(dps, { xNbs: 'Servicos de teste  ', issuerCep: '1001000' }),
+  ]) {
+    const result = await validateAuthorizedNfse(official, dps, 'PRODUCAO', key);
+    assert.equal(Buffer.from(result.xml, 'base64').toString(), official);
+  }
+});
+
+test('retorno oficial: nao flexibiliza CEP da DPS, CEP arbitrario ou xNBS vazio', async () => {
+  const dpsWithInvalidCustomerCep = dps.replace('<CEP>01001000</CEP>', '<CEP>1001000</CEP>');
+  for (const [official, original] of [
+    [makeNfse(dps, { issuerCep: '100100' }), dps],
+    [makeNfse(dps, { issuerCep: 'ABCDEFG' }), dps],
+    [makeNfse(dps, { xNbs: '  ' }), dps],
+    [makeNfse(dpsWithInvalidCustomerCep), dpsWithInvalidCustomerCep],
+  ]) await assert.rejects(validateAuthorizedNfse(official, original, 'PRODUCAO', key));
+});
+
 test('retorno: outra DPS assinada, ambiente, chave e texto Autorizado nao comprovam autorizacao', async () => {
   await assert.rejects(validateAuthorizedNfse(makeNfse(makeDps(2)), dps, 'PRODUCAO'), /outra DPS/);
   await assert.rejects(validateAuthorizedNfse(nfse, dps, 'HOMOLOGACAO'), /Ambiente/);
