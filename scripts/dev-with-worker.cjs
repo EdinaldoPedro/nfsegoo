@@ -1,7 +1,8 @@
 'use strict';
 
-// Explicit local workflow: run web and the homologation worker together.
-// Never enable new production transmissions from this convenience command.
+// Explicit local workflow: run web and worker together. Regular production
+// emissions remain blocked; production cancellations are enabled so an
+// operator can exercise the real cancellation flow from the local admin.
 const { spawn, spawnSync } = require('node:child_process');
 const path = require('node:path');
 
@@ -18,7 +19,15 @@ const web = spawn(process.execPath, [path.join(root, 'node_modules/next/dist/bin
   { cwd: root, stdio: 'inherit', env: process.env });
 const worker = spawn(process.execPath, ['--env-file=.env', '-r', path.join(root, 'scripts/register-worker.cjs'),
   path.join(root, 'dist/worker/workers/emission-worker.js')],
-  { cwd: root, stdio: 'inherit', env: { ...process.env, FISCAL_WORKER_ALLOW_PRODUCTION: 'false' } });
+  { cwd: root, stdio: 'inherit', env: {
+    ...process.env,
+    FISCAL_WORKER_ALLOW_PRODUCTION: 'false',
+    FISCAL_WORKER_ALLOW_PRODUCTION_CANCELLATIONS: 'true',
+    // Node uses its bundled CA set by default. On Windows, antivirus/proxy TLS
+    // inspection roots live in the system store; trusting that store preserves
+    // full certificate verification without resorting to rejectUnauthorized=false.
+    ...(process.platform === 'win32' ? { NODE_USE_SYSTEM_CA: '1' } : {}),
+  } });
 
 let stopping = false;
 function stopAll(code) {

@@ -1,5 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const { SignedXml } = require('xml-crypto');
 const { cancellationReason, prepareCancellationRequest, validateCancellationEvent } = require('../app/services/emissor/validation/CancellationEvent.ts');
 const { signFiscalXml } = require('../app/services/emissor/validation/FiscalSignature.ts');
 const { validateFiscalSchema } = require('../app/services/emissor/validation/FiscalSchema.ts');
@@ -7,7 +8,19 @@ const { signingCredentials, ns, key } = require('./fixtures/fiscal.cjs');
 const input = { key, ambiente: 'PRODUCAO', authorDocument: '11222333000181', reason: { code: '1', justification: 'Erro identificado na descricao do servico' }, timestamp: new Date('2026-09-02T13:00:00Z') };
 async function request(overrides = {}) { return prepareCancellationRequest({ ...input, ...overrides }, signingCredentials()); }
 function event(requestXml, type = '101101') {
-  return signFiscalXml(`<evento xmlns="${ns}" versao="1.01"><infEvento Id="EVT${key}${type}001"><verAplic>Portal-QA</verAplic><ambGer>2</ambGer><nSeqEvento>1</nSeqEvento><dhProc>2026-09-02T13:01:00+00:00</dhProc><nDFSe>456</nDFSe>${requestXml}</infEvento></evento>`, 'evento', signingCredentials());
+  return signFiscalXml(`<evento xmlns="${ns}" versao="1.01"><infEvento Id="EVT${key}${type}001"><verAplic>Portal-QA</verAplic><ambGer>2</ambGer><nSeqEvento>1</nSeqEvento><dhProc>2026-09-02T13:01:00+00:00</dhProc><nDFSe>456</nDFSe>${requestXml.replace(/<\?xml[^?]*\?>/, '')}</infEvento></evento>`, 'evento', signingCredentials());
+}
+
+function portalEvent(requestXml) {
+  const xml = `<evento xmlns="${ns}" versao="1.01"><infEvento Id="EVT${key}101101001"><verAplic>Portal-QA</verAplic><ambGer>2</ambGer><nSeqEvento>1</nSeqEvento><dhProc>2026-09-02T13:01:00+00:00</dhProc><nDFSe>456</nDFSe>${requestXml.replace(/<\?xml[^?]*\?>/, '')}</infEvento></evento>`;
+  const credentials = signingCredentials();
+  const exclusive = 'http://www.w3.org/2001/10/xml-exc-c14n#WithComments';
+  const signer = new SignedXml({ privateKey: credentials.key, publicCert: credentials.cert,
+    signatureAlgorithm: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256', canonicalizationAlgorithm: exclusive });
+  signer.addReference({ xpath: `/*/*[@Id='EVT${key}101101001']`, digestAlgorithm: 'http://www.w3.org/2001/04/xmlenc#sha256',
+    transforms: ['http://www.w3.org/2000/09/xmldsig#enveloped-signature', exclusive] });
+  signer.computeSignature(xml, { location: { reference: '/*', action: 'append' } });
+  return signer.getSignedXml();
 }
 
 test('cancelamento: motivos oficiais 1/2/9 e justificativa real limitada, sem texto inventado', () => {
@@ -19,6 +32,7 @@ test('cancelamento: motivos oficiais 1/2/9 e justificativa real limitada, sem te
 test('cancelamento: pedido assinado preserva justificativa e escapa injecao XML', async () => {
   const justification = 'Erro: valor < 10 & nome "A"; revisar';
   const xml = await request({ reason: { code: '9', justification } });
+  assert.ok(xml.startsWith('<?xml version="1.0" encoding="UTF-8"?>'));
   assert.ok(xml.includes('&lt;')); assert.ok(xml.includes('&amp;'));
   assert.ok(xml.includes('<cMotivo>9</cMotivo>'));
   assert.ok(!xml.includes('Solicitação do contribuinte'));
@@ -50,6 +64,12 @@ test('cancelamento: assinatura do prestador sem assinatura do portal nao comprov
   const valid = event(prepared);
   const outerStart = valid.lastIndexOf('<Signature');
   await assert.rejects(validateCancellationEvent(valid.slice(0, outerStart) + '</evento>', { key, ambiente: 'PRODUCAO' }));
+});
+
+test('cancelamento: aceita canonicalizacao exclusiva somente no evento oficial externo', async () => {
+  const prepared = await request();
+  const result = await validateCancellationEvent(portalEvent(prepared), { key, ambiente: 'PRODUCAO', preparedRequest: prepared });
+  assert.equal(result.type, '101101');
 });
 
 test('cancelamento: solicitacao de analise e indeferimento oficiais nao sao cancelamento', async () => {

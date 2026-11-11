@@ -158,6 +158,27 @@ test('gera MEI para PF com endereco, NBS e IBS/CBS sem CTM nem aliquota de ISS',
   assert.match(xml, /<IBSCBS><finNFSe>0<\/finNFSe>/);
   assert.deepEqual(validateDpsXml(xml), []);
 
+  const simplesSemRetencao = new NacionalAdapter().toXml({
+    ...base,
+    prestador: { ...base.prestador, regimeTributario: 'SIMPLES' },
+    servico: { ...base.servico, issRetido: false, aliquotaAplicada: 5 },
+  });
+  assert.match(simplesSemRetencao, /<opSimpNac>3<\/opSimpNac>/);
+  assert.match(simplesSemRetencao, /<tpRetISSQN>1<\/tpRetISSQN>/);
+  assert.doesNotMatch(simplesSemRetencao, /<pAliq>/);
+  assert.deepEqual(validateDpsXml(simplesSemRetencao), []);
+
+  const simplesComRetencao = new NacionalAdapter().toXml({
+    ...base,
+    prestador: { ...base.prestador, regimeTributario: 'SIMPLES' },
+    servico: { ...base.servico, issRetido: true, aliquotaAplicada: 5 },
+  });
+  assert.match(simplesComRetencao, /<tpRetISSQN>2<\/tpRetISSQN>/);
+  assert.match(simplesComRetencao, /<pAliq>5\.00<\/pAliq>/);
+  assert.deepEqual(validateDpsXml(simplesComRetencao), []);
+  assert.ok(validateDpsXml(simplesComRetencao.replace('<tpRetISSQN>2</tpRetISSQN>', '<tpRetISSQN>1</tpRetISSQN>'))
+    .some(issue => issue.code === 'SIMPLES_PALIQ_SEM_RETENCAO'));
+
   const semEndereco = xml.replace(/<end>[\s\S]*?<\/end>/, '');
   assert.ok(validateDpsXml(semEndereco).some(issue => issue.code === 'TOMADOR_PF_ENDERECO_AUSENTE'));
   assert.throws(() => new NacionalAdapter().toXml({

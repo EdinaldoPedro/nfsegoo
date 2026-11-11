@@ -85,7 +85,7 @@ export abstract class BaseStrategy {
 
   async transmitirPreparado(xmlAssinado: string, prestador: any): Promise<IResultadoEmissao> {
     try {
-      await validateFiscalSchema(xmlAssinado, 'DPS');
+      await validateFiscalSchema(xmlAssinado, 'DPS', prestador.ambiente);
       verifiedFiscalReference(xmlAssinado, 'DPS');
     } catch {
       // No network request has happened in this invocation.
@@ -96,12 +96,13 @@ export abstract class BaseStrategy {
       const response = await this.portalRequest(prestador, 'POST', '/nfse',
         { dpsXmlGZipB64: zlib.gzipSync(Buffer.from(xmlAssinado)).toString('base64') });
       const data = response.data;
-      if (response.status >= 200 && response.status < 300 && !data?.erros?.length) {
+      const portalErrors = safePortalErrors(data?.erros ?? data?.erro);
+      if (response.status >= 200 && response.status < 300 && !portalErrors.length) {
         const notaGov = await validateAuthorizedNfse(data?.nfseXmlGZipB64 || data?.xmlProcessado, xmlAssinado, prestador.ambiente, data?.chaveAcesso);
         return { sucesso: true, notaGov };
       }
-      return { sucesso: false, failureKind: classifyPortalRejection(response.status, data?.erros),
-        motivo: 'Resposta do Portal Nacional requer verificação.', erros: safePortalErrors(data?.erros) };
+      return { sucesso: false, failureKind: classifyPortalRejection(response.status, portalErrors),
+        motivo: 'Resposta do Portal Nacional requer verificação.', erros: portalErrors };
     } catch {
       // Never serialize Axios errors: config contains certificate/private key.
       return { sucesso: false, failureKind: 'UNKNOWN', motivo: 'Não foi possível confirmar o resultado do envio.' };
@@ -168,7 +169,7 @@ export abstract class BaseStrategy {
         const response = await this.portalRequest(empresa, 'GET', `/nfse/${chave}/eventos/${type}/1`);
         if (response.status === 404) return { type, status: 404, absent: true };
         if (response.status !== 200) return { type, status: Number(response.status) || null, absent: false };
-        const event = await validateCancellationEvent(response.data?.eventoXmlGZipB64 || response.data, { key: chave, ambiente: empresa.ambiente });
+        const event = await validatePortalCancellationEvent(response.data, { key: chave, ambiente: empresa.ambiente });
         if (event.type !== type) return { type, status: 200, absent: false };
         return { type, status: 200, absent: false, event };
       } catch { return { type, status: null, absent: false }; }
@@ -200,7 +201,7 @@ export abstract class BaseStrategy {
 
   async transmitirCancelamento(xml: string, chave: string, empresa: any): Promise<IResultadoCancelamento> {
     try {
-      await validateFiscalSchema(xml, 'pedRegEvento');
+      await validateFiscalSchema(xml, 'pedRegEvento', empresa.ambiente);
       const request = verifiedFiscalReference(xml, 'pedRegEvento');
       if (!isNfseAccessKey(chave) || directElement(request, 'chNFSe').textContent !== chave) throw new Error('Chave divergente.');
       if (directElement(request, 'tpAmb').textContent !== fiscalEnvironment(empresa.ambiente)
@@ -213,14 +214,25 @@ export abstract class BaseStrategy {
       response = await this.portalRequest(empresa, 'POST', `/nfse/${chave}/eventos`, { pedidoRegistroEventoXmlGZipB64: zlib.gzipSync(Buffer.from(xml)).toString('base64') });
     } catch (error: any) {
       const code = String(error?.code || '').toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 40);
+      const localTlsRejection = [
+        'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+        'SELF_SIGNED_CERT_IN_CHAIN', 'DEPTH_ZERO_SELF_SIGNED_CERT',
+        'CERT_HAS_EXPIRED', 'ERR_TLS_CERT_ALTNAME_INVALID',
+      ].includes(code);
+      if (localTlsRejection) {
+        return { sucesso: false, failureKind: 'LOCAL_REJECTION', motivo: 'A conexão segura local recusou o certificado TLS antes do envio do pedido.',
+          portalDiagnostic: { stage: 'CANCEL_POST', category: 'LOCAL_TLS_TRUST', ...(code ? { transportCode: code } : {}) } };
+      }
       return { sucesso: false, failureKind: 'UNKNOWN', motivo: 'Não foi possível confirmar o pedido. A retomada fará somente consultas.',
         portalDiagnostic: { stage: 'CANCEL_POST', category: 'PORTAL_TRANSPORT', ...(code ? { transportCode: code } : {}) } };
     }
-    const errors = safePortalErrors(response.data?.erros);
+    // O endpoint de eventos usa `erro` (singular) no ResponseErro atual,
+    // enquanto outras respostas do Portal ainda usam `erros`.
+    const errors = safePortalErrors(response.data?.erros ?? response.data?.erro);
     if (response.status >= 200 && response.status < 300) {
       try {
         // Never accept an echoed pedRegEvento as an authorized evento.
-        const event = await validateCancellationEvent(response.data?.eventoXmlGZipB64, { key: chave, ambiente: empresa.ambiente, preparedRequest: xml });
+        const event = await validatePortalCancellationEvent(response.data, { key: chave, ambiente: empresa.ambiente, preparedRequest: xml });
         return { sucesso: true, xmlEvento: event.xmlEvento, dataCancelamento: event.dataCancelamento, requestMatched: true };
       } catch {
         return { sucesso: false, failureKind: 'UNKNOWN', motivo: 'O Portal recebeu o pedido, mas não devolveu um evento conclusivo válido.',
@@ -228,7 +240,7 @@ export abstract class BaseStrategy {
       }
     }
     const alreadyCancelled = errors.some((error) => error.codigo === 'E0840');
-    const failureKind = alreadyCancelled ? 'UNKNOWN' : classifyPortalRejection(response.status, response.data?.erros);
+    const failureKind = alreadyCancelled ? 'UNKNOWN' : classifyPortalRejection(response.status, errors);
     return { sucesso: false, failureKind, motivo: failureKind === 'PORTAL_REJECTION' ? 'O Portal recusou o pedido de cancelamento.' : 'O resultado do pedido de cancelamento requer conferência.',
       portalDiagnostic: { stage: 'CANCEL_POST', category: 'PORTAL_REJECTION', httpStatus: response.status, ...(errors.length ? { errors } : {}) } };
   }
@@ -247,10 +259,48 @@ export abstract class BaseStrategy {
   }
 }
 
+type ExpectedCancellationEvent = Parameters<typeof validateCancellationEvent>[1];
+
+/** The current Portal envelope returns `eventos[].arquivoXml` double-wrapped
+ * (base64(base64(gzip(xml)))); older installations return eventoXmlGZipB64.
+ * Only unwrap the extra textual base64 layer and leave XML/gzip parsing and
+ * all authenticity checks to validateCancellationEvent. */
+function portalCancellationEventPayloads(data: any): string[] {
+  const values = [
+    typeof data === 'string' ? data : undefined,
+    data?.eventoXmlGZipB64,
+    data?.arquivoXml,
+    ...(Array.isArray(data?.eventos) ? data.eventos.flatMap((item: any) => [item?.eventoXmlGZipB64, item?.arquivoXml]) : []),
+  ].filter((value): value is string => typeof value === 'string' && value.length > 0 && value.length <= 6 * 1024 * 1024);
+  return values.map((value) => {
+    const compact = value.trim().replace(/\s/g, '');
+    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(compact) || compact.length % 4 !== 0) return value;
+    const decoded = Buffer.from(compact, 'base64');
+    if (decoded.length > 6 * 1024 * 1024
+      || (decoded[0] === 0x1f && decoded[1] === 0x8b)
+      || decoded.toString('utf8', 0, 20).trimStart().startsWith('<')) return value;
+    const inner = decoded.toString('utf8').replace(/\s/g, '');
+    return /^[A-Za-z0-9+/]+={0,2}$/.test(inner) && inner.length % 4 === 0 ? inner : value;
+  });
+}
+
+async function validatePortalCancellationEvent(data: unknown, expected: ExpectedCancellationEvent) {
+  const payloads = portalCancellationEventPayloads(data);
+  for (const payload of payloads) {
+    try { return await validateCancellationEvent(payload, expected); }
+    catch { /* Try another event in the authenticated Portal envelope. */ }
+  }
+  throw new Error('Resposta do Portal sem evento de cancelamento válido.');
+}
+
 function safePortalErrors(value: unknown) {
-  if (!Array.isArray(value)) return [];
-  return value.slice(0, 10).map((item) => ({
+  const values = Array.isArray(value) ? value : value && typeof value === 'object' ? [value] : [];
+  return values.slice(0, 10).map((item: any) => {
+    const description = String(item?.Descricao || item?.descricao || item?.mensagem || '').trim();
+    const complement = String(item?.Complemento || item?.complemento || '').trim();
+    return {
     codigo: String(item?.Codigo || item?.codigo || '').slice(0, 20),
-    mensagem: String(item?.Descricao || item?.descricao || item?.mensagem || '').slice(0, 500),
-  }));
+    mensagem: [description, complement].filter(Boolean).join(' ').slice(0, 500),
+    };
+  }).filter((item) => item.codigo || item.mensagem);
 }

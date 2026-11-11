@@ -33,7 +33,7 @@ export interface IResultadoCancelamento {
     failureKind?: 'LOCAL_REJECTION' | 'PORTAL_REJECTION' | 'UNKNOWN';
     portalDiagnostic?: {
         stage: 'CANCEL_POST' | 'CANCEL_EVENT_LOOKUP';
-        category: 'PORTAL_REJECTION' | 'INVALID_PORTAL_EVENT' | 'PORTAL_TRANSPORT' | 'CANCELLATION_EVENT_ABSENT' | 'CANCELLATION_EVENT_LOOKUP_INCOMPLETE';
+        category: 'PORTAL_REJECTION' | 'INVALID_PORTAL_EVENT' | 'PORTAL_TRANSPORT' | 'LOCAL_TLS_TRUST' | 'CANCELLATION_EVENT_ABSENT' | 'CANCELLATION_EVENT_LOOKUP_INCOMPLETE';
         httpStatus?: number;
         transportCode?: string;
         eventChecks?: Array<{ type: string; status: number | null }>;

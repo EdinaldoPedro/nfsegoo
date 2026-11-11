@@ -25,9 +25,9 @@ export async function prepareCancellationRequest(input: { key: string; ambiente:
   const reason = cancellationReason(input.reason.code, input.reason.justification);
   if (!Number.isFinite(input.timestamp.getTime())) throw new Error('Data do pedido inválida.');
   const timestamp = input.timestamp.toISOString().replace(/\.\d{3}Z$/, '+00:00');
-  const xml = `<pedRegEvento xmlns="${FISCAL_NS}" versao="1.01"><infPedReg Id="PRE${input.key}101101"><tpAmb>${fiscalEnvironment(input.ambiente)}</tpAmb><verAplic>NFSeGoo-1</verAplic><dhEvento>${timestamp}</dhEvento><CNPJAutor>${authorDocument}</CNPJAutor><chNFSe>${input.key}</chNFSe><e101101><xDesc>Cancelamento de NFS-e</xDesc><cMotivo>${reason.code}</cMotivo><xMotivo>${escapeXml(reason.justification)}</xMotivo></e101101></infPedReg></pedRegEvento>`;
+  const xml = `<?xml version="1.0" encoding="UTF-8"?><pedRegEvento xmlns="${FISCAL_NS}" versao="1.01"><infPedReg Id="PRE${input.key}101101"><tpAmb>${fiscalEnvironment(input.ambiente)}</tpAmb><verAplic>NFSeGoo-1</verAplic><dhEvento>${timestamp}</dhEvento><CNPJAutor>${authorDocument}</CNPJAutor><chNFSe>${input.key}</chNFSe><e101101><xDesc>Cancelamento de NFS-e</xDesc><cMotivo>${reason.code}</cMotivo><xMotivo>${escapeXml(reason.justification)}</xMotivo></e101101></infPedReg></pedRegEvento>`;
   const signed = signFiscalXml(xml, 'pedRegEvento', credentials);
-  await validateFiscalSchema(signed, 'pedRegEvento');
+  await validateFiscalSchema(signed, 'pedRegEvento', input.ambiente === 'HOMOLOGACAO' ? 'HOMOLOGACAO' : 'PRODUCAO');
   return signed;
 }
 
@@ -36,7 +36,7 @@ export async function prepareCancellationRequest(input: { key: string; ambiente:
 export async function validateCancellationEvent(value: unknown, expected: { key: string; ambiente: string; preparedRequest?: string }) {
   if (!isNfseAccessKey(expected.key)) throw new Error('Chave esperada inválida.');
   const xml = fiscalXml(value);
-  await validateFiscalSchema(xml, 'evento');
+  await validateFiscalSchema(xml, 'evento', expected.ambiente === 'HOMOLOGACAO' ? 'HOMOLOGACAO' : 'PRODUCAO');
   const event = verifiedFiscalReference(xml, 'evento');
   const request = directElement(directElement(event, 'pedRegEvento'), 'infPedReg');
   if (directElement(request, 'chNFSe').textContent !== expected.key || directElement(request, 'tpAmb').textContent !== fiscalEnvironment(expected.ambiente)) throw new Error('Evento pertence a outra nota ou ambiente.');

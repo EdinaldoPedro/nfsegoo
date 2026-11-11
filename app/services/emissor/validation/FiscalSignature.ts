@@ -29,11 +29,12 @@ export function verifiedFiscalReference(xml: string, rootName: FiscalRoot, expec
   // The national portal signs the outer NFSe with exclusive canonicalization
   // (including comments), while the taxpayer-signed requests use canonical XML
   // 1.0. Both variants remain RSA/SHA-256 and are verified cryptographically.
-  // Keep the portal-only variant out of DPS/event signing to prevent algorithm
-  // substitution in documents produced by this application.
+  // Keep the portal-only variant out of taxpayer-signed requests (DPS and
+  // pedRegEvento). The Portal also uses it on the outer, official `evento`.
+  // Signing produced by this application remains fixed to canonical XML 1.0.
   const canonicalization = method('CanonicalizationMethod');
   const allowedCanonicalization = canonicalization === C14N
-    || rootName === 'NFSe' && canonicalization === EXCLUSIVE_C14N_WITH_COMMENTS;
+    || (rootName === 'NFSe' || rootName === 'evento') && canonicalization === EXCLUSIVE_C14N_WITH_COMMENTS;
   if (!allowedCanonicalization || method('SignatureMethod') !== RSA_SHA256) throw new Error('Algoritmo de assinatura fiscal não permitido.');
   const reference = directElement(info, 'Reference', SIGNATURE_NS);
   if (reference.getAttribute('URI') !== '#' + id) throw new Error('Assinatura não referencia o documento fiscal esperado.');
