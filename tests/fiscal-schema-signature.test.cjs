@@ -66,6 +66,31 @@ test('XSD: valida DPS e NFS-e completas com assinatura e recusa ordenacao/campos
   await assert.rejects(validateFiscalSchema(makeNfse(dps, { numero: '12345678901234' }), 'NFSe'), FiscalSchemaError);
 });
 
+test('XSD: homologacao usa pacote 20261020 e a nova posicao de finNFSe', async () => {
+  const dps = makeDps(3, (rps) => {
+    rps.meta.ambiente = 'HOMOLOGACAO';
+    rps.servico.ibscbs = { enabled: true, finNFSe: '0', indFinal: '0', cIndOp: '100301', indDest: '0', cst: '000', cClassTrib: '000001' };
+    return rps;
+  });
+  assert.match(dps, /<tpEmit>1<\/tpEmit><finNFSe>0<\/finNFSe><cLocEmi>/);
+  assert.match(dps, /<IBSCBS><indFinal>0<\/indFinal><cIndOp>100301<\/cIndOp><indDest>0<\/indDest><valores><trib><CST>000<\/CST><cClassTrib>000001<\/cClassTrib><\/trib><\/valores><\/IBSCBS>/);
+  assert.doesNotMatch(dps, /<IBSCBS><finNFSe>/);
+  assert.doesNotMatch(dps, /<gIBSCBS>/);
+  await validateFiscalSchema(dps, 'DPS', 'HOMOLOGACAO');
+  await assert.rejects(validateFiscalSchema(dps, 'DPS', 'PRODUCAO'), FiscalSchemaError);
+});
+
+test('XSD: NBS aparece antes da descricao do servico no leiaute oficial', async () => {
+  const dps = makeDps(4, (rps) => {
+    rps.meta.ambiente = 'HOMOLOGACAO';
+    rps.servico.codigoNbs = '114011900';
+    rps.servico.ibscbs = { enabled: true, finNFSe: '0', indFinal: '0', cIndOp: '100301', indDest: '0', cst: '000', cClassTrib: '000001' };
+    return rps;
+  });
+  assert.match(dps, /<cTribNac>010101<\/cTribNac><cNBS>114011900<\/cNBS><xDescServ>/);
+  await validateFiscalSchema(dps, 'DPS', 'HOMOLOGACAO');
+});
+
 test('XSD: tomador PF com telefone e email usa a ordem oficial', async () => {
   const dps = makeDps(2, (rps) => {
     rps.tomador.telefone = '11987654321';

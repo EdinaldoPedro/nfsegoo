@@ -121,6 +121,7 @@ export class NacionalAdapter {
         const idDps = `DPS${municipioPrestador}2${documentoPrestador}${serie.padStart(5,'0')}${String(numero).padStart(15,'0')}`;
         
         const tpAmb = normalizeDpsEnvironment(m.ambiente) === 'PRODUCAO' ? '1' : '2';
+        const restrictedLayout20261020 = tpAmb === '2';
         const opSimpNac = this.mapRegime(p.regimeTributario);
         
         const paisNormalizado = String(t.pais || '').trim().toUpperCase();
@@ -225,13 +226,14 @@ export class NacionalAdapter {
             servXml += `<cTribMun>${codTribMunLimpo}</cTribMun>`;
         }
         
-        servXml += `<xDescServ>${descricaoServico}</xDescServ>`;
-        
-        // Só injeta o NBS se o Backend tiver cruzado os dados e confirmado que precisa
+        // No leiaute oficial, cNBS precede xDescServ. A ordem é relevante no XSD.
+        // Só injeta o NBS se o Backend tiver cruzado os dados e confirmado que precisa.
         const nbsLimpo = s.codigoNbs ? this.clean(s.codigoNbs) : '';
         if (nbsLimpo.length > 0) {
             servXml += `<cNBS>${nbsLimpo}</cNBS>`;
         }
+
+        servXml += `<xDescServ>${descricaoServico}</xDescServ>`;
         
         servXml += `</cServ>`
 
@@ -279,7 +281,7 @@ export class NacionalAdapter {
             
             // Tags pAliq e vISSQN soltas são exclusivas do Simples Nacional (opSimpNac = 3).
             // Lucro Presumido (1) NÃO leva essas tags aqui.
-            if (opSimpNac === '3') {
+            if (opSimpNac === '3' && s.issRetido) {
                 if (s.aliquotaAplicada && s.aliquotaAplicada > 0) tribXml += `<pAliq>${s.aliquotaAplicada.toFixed(2)}</pAliq>`;
             }
         }
@@ -359,14 +361,16 @@ export class NacionalAdapter {
                 throw new Error('Classificacao IBS/CBS incompleta para gerar a DPS.');
             }
             ibsCbsXml = `<IBSCBS>` +
-                `<finNFSe>${this.clean(ibscbs.finNFSe)}</finNFSe>` +
+                (restrictedLayout20261020 ? '' : `<finNFSe>${this.clean(ibscbs.finNFSe)}</finNFSe>`) +
                 (ibscbs.indFinal !== undefined ? `<indFinal>${this.clean(ibscbs.indFinal)}</indFinal>` : '') +
                 `<cIndOp>${this.clean(ibscbs.cIndOp)}</cIndOp>` +
                 `<indDest>${this.clean(ibscbs.indDest)}</indDest>` +
-                `<valores><trib><gIBSCBS>` +
+                `<valores><trib>` +
+                    (restrictedLayout20261020 ? '' : '<gIBSCBS>') +
                     `<CST>${this.clean(ibscbs.cst).padStart(3, '0')}</CST>` +
                     `<cClassTrib>${this.clean(ibscbs.cClassTrib).padStart(6, '0')}</cClassTrib>` +
-                `</gIBSCBS></trib></valores>` +
+                    (restrictedLayout20261020 ? '' : '</gIBSCBS>') +
+                `</trib></valores>` +
             `</IBSCBS>`;
         }
 
@@ -382,6 +386,7 @@ export class NacionalAdapter {
                 `<nDPS>${numero}</nDPS>` +
                 `<dCompet>${dCompet}</dCompet>` + 
                 `<tpEmit>1</tpEmit>` + 
+                (restrictedLayout20261020 ? `<finNFSe>${this.clean(ibscbs?.finNFSe || '0')}</finNFSe>` : '') +
                 `<cLocEmi>${this.clean(p.endereco.codigoIbge)}</cLocEmi>` + 
                 prestXml + 
                 tomaXml + 

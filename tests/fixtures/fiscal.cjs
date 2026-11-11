@@ -37,6 +37,6 @@ function makeNfse(dps = makeDps(), { numero = '123', chave = key, issuerDocument
   return signFiscalXml(content, 'NFSe', signingCredentials());
 }
 function makeCancellationEvent(requestXml, chave = key, type = '101101') {
-  return signFiscalXml(`<evento xmlns="${ns}" versao="1.01"><infEvento Id="EVT${chave}${type}001"><verAplic>Portal-QA</verAplic><ambGer>2</ambGer><nSeqEvento>1</nSeqEvento><dhProc>2026-09-02T13:01:00+00:00</dhProc><nDFSe>456</nDFSe>${requestXml}</infEvento></evento>`, 'evento', signingCredentials());
+  return signFiscalXml(`<evento xmlns="${ns}" versao="1.01"><infEvento Id="EVT${chave}${type}001"><verAplic>Portal-QA</verAplic><ambGer>2</ambGer><nSeqEvento>1</nSeqEvento><dhProc>2026-09-02T13:01:00+00:00</dhProc><nDFSe>456</nDFSe>${requestXml.replace(/<\?xml[^?]*\?>/, '')}</infEvento></evento>`, 'evento', signingCredentials());
 }
 module.exports = { ns, key, signingCredentials, canonicalRps, makeDps, makeNfse, makeCancellationEvent };

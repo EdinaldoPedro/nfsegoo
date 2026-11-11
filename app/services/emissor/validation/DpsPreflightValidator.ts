@@ -7,6 +7,8 @@ export interface DpsValidationIssue {
 }
 
 const text = (document: Document, tag: string) => document.getElementsByTagName(tag)[0]?.textContent?.trim() || '';
+const directText = (parent: Element | undefined, tag: string) => Array.from(parent?.childNodes || [])
+  .find((node): node is Element => node.nodeType === 1 && (node as Element).localName === tag)?.textContent?.trim() || '';
 
 export function validateDpsXml(xml: string): DpsValidationIssue[] {
   const issues: DpsValidationIssue[] = [];
@@ -78,10 +80,25 @@ export function validateDpsXml(xml: string): DpsValidationIssue[] {
     }
   }
 
+  if (opSimpNac === '3' && text(document, 'tpRetISSQN') === '1'
+    && document.getElementsByTagName('pAliq').length > 0) {
+    issues.push({
+      code: 'SIMPLES_PALIQ_SEM_RETENCAO',
+      message: 'pAliq do ISS deve ser omitida para empresa do Simples Nacional quando não há retenção do ISSQN.',
+      path: '/DPS/infDPS/trib/tribMun/pAliq',
+    });
+  }
+
   const ibs = document.getElementsByTagName('IBSCBS')[0];
+  const restrictedLayout20261020 = text(document, 'tpAmb') === '2';
+  const finNFSe = restrictedLayout20261020 ? directText(infDps, 'finNFSe') : directText(ibs, 'finNFSe');
+  if (!/^0$/.test(finNFSe)) {
+    issues.push({ code: 'IBSCBS_FINNFSE_INVALIDO', message: 'finNFSe esta ausente ou invalido.',
+      path: restrictedLayout20261020 ? '/DPS/infDPS/finNFSe' : '/DPS/infDPS/IBSCBS/finNFSe' });
+  }
   if (ibs) {
     const requiredIbs: Array<[string, RegExp]> = [
-      ['finNFSe', /^0$/], ['cIndOp', /^\d{6}$/], ['indDest', /^[01]$/], ['CST', /^\d{3}$/], ['cClassTrib', /^\d{6}$/],
+      ['cIndOp', /^\d{6}$/], ['indDest', /^[01]$/], ['CST', /^\d{3}$/], ['cClassTrib', /^\d{6}$/],
     ];
     for (const [tag, pattern] of requiredIbs) {
       const nodes = ibs.getElementsByTagName(tag);

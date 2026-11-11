@@ -22,6 +22,7 @@ const workerId = `emission-${randomUUID()}`;
 const configured = Number(process.env.EMISSION_WORKER_CONCURRENCY || 2);
 if (!Number.isInteger(configured) || configured < 1 || configured > 8) throw new Error('EMISSION_WORKER_CONCURRENCY deve ser inteiro entre 1 e 8.');
 const allowProduction = process.env.FISCAL_WORKER_ALLOW_PRODUCTION === 'true';
+const allowProductionCancellations = allowProduction || process.env.FISCAL_WORKER_ALLOW_PRODUCTION_CANCELLATIONS === 'true';
 
 async function pause(ms: number) { await delay(ms, undefined, { signal: stop.signal }).catch(() => {}); }
 
@@ -43,7 +44,7 @@ async function documentLoop() {
 async function fiscalNoteLoop() {
   while (!stopping) {
     try {
-      const operation = await claimFiscalNoteOperation(allowProduction);
+      const operation = await claimFiscalNoteOperation(allowProductionCancellations);
       if (operation) await processFiscalNoteOperation(operation);
       else await pause(1_500);
     } catch { console.error('[emission-worker] Operações de notas aguardam retomada segura.'); await pause(5_000); }
@@ -102,7 +103,7 @@ async function main() {
   }
   // Do not claim jobs or advertise a healthy worker with missing fiscal assets.
   await ensureFiscalSchemas();
-  console.info(`[emission-worker] Iniciado. Concorrência: ${configured}. Envio de produção: ${allowProduction ? 'habilitado' : 'desabilitado'}.`);
+  console.info(`[emission-worker] Iniciado. Concorrência: ${configured}. Envio de produção: ${allowProduction ? 'habilitado' : 'desabilitado'}. Cancelamento de produção: ${allowProductionCancellations ? 'habilitado' : 'desabilitado'}.`);
   try { await Promise.all([healthLoop(), retentionLoop(), documentLoop(), fiscalNoteLoop(), emailLoop(), ...Array.from({ length: configured }, () => emissionLoop())]); }
   finally { await prisma.$disconnect(); }
 }

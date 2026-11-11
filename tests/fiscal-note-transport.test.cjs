@@ -1,6 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const axios = require('axios');
+const { gzipSync } = require('node:zlib');
 process.env.ENCRYPTION_KEY = '12345678901234567890123456789012'; // Synthetic, isolated test process.
 const { BaseStrategy } = require('../app/services/emissor/strategies/BaseStrategy.ts');
 const { prepareCancellationRequest } = require('../app/services/emissor/validation/CancellationEvent.ts');
@@ -74,6 +75,17 @@ test('cancelamento: um POST; eco do pedido, E0840, timeout e evento adulterado p
     }
   } finally { axios.request = original; }
 });
+test('cancelamento: falha local de confianca TLS e definitiva e nao simula resposta do Portal', async () => {
+  const original = axios.request; const xml = await prepare();
+  try {
+    axios.request = async () => { throw Object.assign(new Error('synthetic tls detail'), { code: 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' }); };
+    const result = await new FixtureStrategy().transmitirCancelamento(xml, key, company);
+    assert.equal(result.sucesso, false);
+    assert.equal(result.failureKind, 'LOCAL_REJECTION');
+    assert.equal(result.portalDiagnostic.category, 'LOCAL_TLS_TRUST');
+    assert.ok(!JSON.stringify(result).includes('synthetic tls detail'));
+  } finally { axios.request = original; }
+});
 test('cancelamento: rejeicao fiscal preserva somente diagnostico seguro e libera decisao definitiva', async () => {
   const original = axios.request; const xml = await prepare();
   try {
@@ -82,6 +94,20 @@ test('cancelamento: rejeicao fiscal preserva somente diagnostico seguro e libera
     assert.equal(result.sucesso, false); assert.equal(result.failureKind, 'PORTAL_REJECTION');
     assert.deepEqual(result.portalDiagnostic.errors, [{ codigo: 'E1234', mensagem: 'Cancelamento fora das regras municipais.' }]);
     assert.equal(result.portalDiagnostic.httpStatus, 422);
+  } finally { axios.request = original; }
+});
+test('cancelamento: ResponseErro singular do endpoint de eventos e tratado como rejeicao definitiva', async () => {
+  const original = axios.request; const xml = await prepare();
+  try {
+    axios.request = async () => ({ status: 400, data: { erro: {
+      codigo: 'E1234', descricao: 'Pedido recusado.', complemento: 'Revise o motivo informado.'
+    } } });
+    const result = await new FixtureStrategy().transmitirCancelamento(xml, key, company);
+    assert.equal(result.sucesso, false);
+    assert.equal(result.failureKind, 'PORTAL_REJECTION');
+    assert.deepEqual(result.portalDiagnostic.errors, [{
+      codigo: 'E1234', mensagem: 'Pedido recusado. Revise o motivo informado.'
+    }]);
   } finally { axios.request = original; }
 });
 test('cancelamento: conciliacao ausente registra as quatro consultas GET sem afirmar cancelamento', async () => {
@@ -106,5 +132,20 @@ test('cancelamento: resposta conclusiva vincula pedido; conciliacao externa usa 
     const result = await new FixtureStrategy().conciliarCancelamento(xml, key, company);
     assert.equal(result.sucesso, true); assert.equal(result.requestMatched, false);
     assert.equal(calls.length, 4); assert.ok(calls.every(c => c.method === 'GET'));
+  } finally { axios.request = original; }
+});
+
+test('cancelamento: le envelope atual eventos[].arquivoXml com base64 externo do Portal', async () => {
+  const original = axios.request; const xml = await prepare();
+  const official = makeCancellationEvent(xml);
+  const arquivoXml = Buffer.from(gzipSync(Buffer.from(official)).toString('base64')).toString('base64');
+  try {
+    axios.request = async (config) => config.url.endsWith('/101101/1')
+      ? { status: 200, data: { eventos: [{ tipoEvento: '101101', arquivoXml }] } }
+      : { status: 404 };
+    const result = await new FixtureStrategy().conciliarCancelamento(xml, key, company);
+    assert.equal(result.sucesso, true);
+    assert.equal(result.requestMatched, true);
+    assert.ok(result.xmlEvento);
   } finally { axios.request = original; }
 });

@@ -798,7 +798,9 @@ function EmitirNotaContent() {
           valorMoedaEstrangeira: nfData.valorMoedaEstrangeira,
           descricao: nfData.servicoDescricao,
           codigoCnae: nfData.codigoCnae,
-          aliquota: nfData.aliquota,
+          // A alíquota pode permanecer no estado para voltar a aparecer se o
+          // usuário marcar retenção, mas não integra a DPS sem ISS retido.
+          aliquota: nfData.issRetido ? nfData.aliquota : '',
           issRetido: nfData.issRetido,
           dataCompetencia: nfData.dataCompetencia,
           numeroDPS: nfData.numeroDPS || undefined,

@@ -163,7 +163,7 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
             const idDps = `DPS${this.cleanString(rps.prestador.endereco.codigoIbge).padStart(7,'0')}2${this.cleanString(rps.prestador.documento).padStart(14,'0')}${this.cleanString(rps.meta.serie).padStart(5,'0')}${String(rps.meta.numero).padStart(15,'0')}`;
             
             const xmlAssinado = this.assinarXML(xmlGerado, idDps, prestador);
-            await validateFiscalSchema(xmlAssinado, 'DPS');
+            await validateFiscalSchema(xmlAssinado, 'DPS', ambiente);
             return xmlAssinado;
 
         } catch (error: any) {
