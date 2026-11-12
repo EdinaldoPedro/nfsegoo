@@ -80,7 +80,7 @@ test('XSD: homologacao usa pacote 20261020 e a nova posicao de finNFSe', async (
   await assert.rejects(validateFiscalSchema(dps, 'DPS', 'PRODUCAO'), FiscalSchemaError);
 });
 
-test('XSD: NBS aparece antes da descricao do servico no leiaute oficial', async () => {
+test('XSD: homologacao posiciona NBS antes da descricao conforme pacote 20261020', async () => {
   const dps = makeDps(4, (rps) => {
     rps.meta.ambiente = 'HOMOLOGACAO';
     rps.servico.codigoNbs = '114011900';
@@ -89,6 +89,16 @@ test('XSD: NBS aparece antes da descricao do servico no leiaute oficial', async 
   });
   assert.match(dps, /<cTribNac>010101<\/cTribNac><cNBS>114011900<\/cNBS><xDescServ>/);
   await validateFiscalSchema(dps, 'DPS', 'HOMOLOGACAO');
+});
+
+test('XSD: producao posiciona NBS depois da descricao conforme pacote vigente', async () => {
+  const dps = makeDps(5, (rps) => {
+    rps.meta.ambiente = 'PRODUCAO';
+    rps.servico.codigoNbs = '114011900';
+    return rps;
+  });
+  assert.match(dps, /<cTribNac>010101<\/cTribNac><xDescServ>[^<]+<\/xDescServ><cNBS>114011900<\/cNBS>/);
+  await validateFiscalSchema(dps, 'DPS', 'PRODUCAO');
 });
 
 test('XSD: tomador PF com telefone e email usa a ordem oficial', async () => {
