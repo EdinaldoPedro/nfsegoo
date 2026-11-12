@@ -1,6 +1,28 @@
 import { prisma } from '@/app/utils/prisma';
 import { hasCustomerCompanyAccess, isAdminRole } from '@/app/utils/access-control';
 import { fiscalError } from './fiscalNoteService';
+import { hasDefinitivePortalRejection } from './emissaoJobService';
+
+type ArchiveEmissionJob = {
+  status: string;
+  transmissionStartedAt: Date | null;
+  signedXml: string | null;
+  dpsId: string | null;
+  lastError: string | null;
+  creditReservation: { status: string } | null;
+};
+
+/** A processing marker alone is not proof of an unresolved fiscal obligation.
+ * Old workers could set it before preparing the DPS. Terminal Portal rejections
+ * are also conclusive and do not require reconciliation. */
+export function emissionJobBlocksSaleArchive(job: ArchiveEmissionJob) {
+  if (job.status !== 'ERRO_FINAL') return true;
+  if (job.creditReservation?.status === 'RESERVED') return true;
+  if (!job.transmissionStartedAt) return false;
+  if (job.creditReservation && job.creditReservation.status !== 'RELEASED') return true;
+  if (!job.signedXml && !job.dpsId) return false;
+  return !hasDefinitivePortalRejection(job.lastError);
+}
 
 /** Archiving is not fiscal cancellation. Never hide an authorized/cancelled
  * document, an uncertain transmission, or an outstanding credit reservation. */
@@ -16,8 +38,18 @@ export async function archiveSale(actorId: string, saleId: string, administrativ
     const current = await tx.venda.findUniqueOrThrow({ where: { id: sale.id } });
     if (current.empresaId !== sale.empresaId) fiscalError('Vínculo da venda alterado.');
     const official = await tx.notaFiscal.count({ where: { vendaId: sale.id, OR: [{ status: { in: ['AUTORIZADA', 'CANCELADA'] } }, { chaveAcesso: { not: null } }] } });
-    const jobs = await tx.emissaoJob.findMany({ where: { vendaId: sale.id }, select: { status: true, transmissionStartedAt: true, creditReservation: { select: { status: true } } } });
-    if (official || jobs.some((job) => job.status !== 'ERRO_FINAL' || job.creditReservation?.status === 'RESERVED' || (job.transmissionStartedAt && job.creditReservation?.status !== 'RELEASED'))) fiscalError('Venda com obrigação fiscal ou emissão não conciliada não pode ser arquivada.');
+    const jobs = await tx.emissaoJob.findMany({
+      where: { vendaId: sale.id },
+      select: {
+        status: true,
+        transmissionStartedAt: true,
+        signedXml: true,
+        dpsId: true,
+        lastError: true,
+        creditReservation: { select: { status: true } },
+      },
+    });
+    if (official || jobs.some(emissionJobBlocksSaleArchive)) fiscalError('Venda com obrigação fiscal ou emissão não conciliada não pode ser arquivada.');
     if (current.arquivadoEm) return;
     const reason = administrative && justification?.trim()
       ? justification.trim()

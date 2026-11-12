@@ -51,6 +51,7 @@ export default function GestaoColaboradores() {
   const [customerPlans, setCustomerPlans] = useState<Array<{ slug: string; name: string; tipo: string }>>([]);
   const [customerPlanSelection, setCustomerPlanSelection] = useState('');
   const [customerActionPending, setCustomerActionPending] = useState(false);
+  const [companySearch, setCompanySearch] = useState('');
 
   const solicitarAutorizacaoAdministrativa = async (acao: string) => {
     return dialog.showAuthorization({
@@ -131,6 +132,7 @@ export default function GestaoColaboradores() {
       setModalEditOpen(true);
       setCustomerAccess(null);
       setCustomerPlanSelection('');
+      setCompanySearch('');
       
       try {
           const res = await fetch(`/api/admin/users/${userId}`, { headers: {} });
@@ -293,6 +295,43 @@ export default function GestaoColaboradores() {
   const totalContadores = colabs.filter((u) => u.role === 'CONTADOR').length;
   const totalEquipeInterna = colabs.filter((u) => u.role !== 'CONTADOR').length;
   const selectedPlanInfo = selectedUserFull ? getPlanInfo(selectedUserFull) : null;
+  const relatedCompanies = (() => {
+    if (!selectedUserFull) return [];
+    const normalizeSearch = (value: unknown) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('pt-BR').replace(/[^a-z0-9]/g, '');
+    type RelatedCompany = { id: string; documento: string; razaoSocial: string; relations: Set<string>; accountingLinkId?: string };
+    const companies = new Map<string, RelatedCompany>();
+    const include = (company: any, relation: string, accountingLinkId?: string) => {
+      if (!company?.id) return;
+      const current: RelatedCompany = companies.get(company.id) || {
+        id: company.id,
+        documento: company.documento,
+        razaoSocial: company.razaoSocial,
+        relations: new Set<string>(),
+      };
+      current.relations.add(relation);
+      if (accountingLinkId) current.accountingLinkId = accountingLinkId;
+      companies.set(company.id, current);
+    };
+    selectedUserFull.empresasContabeis?.forEach((link: any) => include(link.empresa, 'Acesso contábil', link.id));
+    selectedUserFull.empresasFaturadas?.forEach((company: any) => include(company, 'Faturamento'));
+    selectedUserFull.empresasCustodiadas?.forEach((company: any) => include(company, 'Custódia'));
+    selectedUserFull.empresasProprietarias?.forEach((company: any) => include(company, 'Titularidade'));
+    const query = normalizeSearch(companySearch.trim());
+    return Array.from(companies.values())
+      .filter((company) => !query || normalizeSearch(`${company.razaoSocial}${company.documento}`).includes(query))
+      .sort((left, right) => left.razaoSocial.localeCompare(right.razaoSocial, 'pt-BR'));
+  })();
+  const relatedCompanyCount = (() => {
+    if (!selectedUserFull) return 0;
+    const ids = new Set<string>();
+    selectedUserFull.empresasContabeis?.forEach((link: any) => ids.add(link.empresa.id));
+    selectedUserFull.empresasFaturadas?.forEach((company: any) => ids.add(company.id));
+    selectedUserFull.empresasCustodiadas?.forEach((company: any) => ids.add(company.id));
+    selectedUserFull.empresasProprietarias?.forEach((company: any) => ids.add(company.id));
+    return ids.size;
+  })();
+  const hasTruncatedCompanyRelations = selectedUserFull && ['empresasContabeis', 'empresasFaturadas', 'empresasCustodiadas', 'empresasProprietarias']
+    .some((relation) => Number(selectedUserFull._count?.[relation] || 0) > 50);
 
   return (
     <div className="space-y-6">
@@ -485,21 +524,31 @@ export default function GestaoColaboradores() {
 
                     {selectedUserFull.role === 'CONTADOR' && (
                         <div className="rounded-2xl border border-slate-200 p-4">
-                            <h4 className="font-bold text-sm text-slate-700 mb-3 flex items-center gap-2"><Building2 size={16}/> Carteira de Empresas Ativas ({selectedUserFull._count?.empresasContabeis ?? selectedUserFull.empresasContabeis?.length ?? 0})</h4>
-                            {selectedUserFull._count?.empresasContabeis > 50 && <p className="mb-2 text-xs text-slate-600">Mostrando os 50 vínculos ativos mais recentes. Consulte todos em <Link className="underline" href="/admin/vinculos-custodia">Vínculos e custódia</Link>.</p>}
+                            <h4 className="font-bold text-sm text-slate-700 flex items-center gap-2"><Building2 size={16}/> Empresas relacionadas ({relatedCompanyCount})</h4>
+                            <p className="mt-1 text-xs text-slate-500">Reúne acesso contábil, faturamento, custódia e titularidade.</p>
+                            <div className="relative my-3">
+                              <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16}/>
+                              <label htmlFor="accountant-company-search" className="sr-only">Pesquisar empresa por nome ou CNPJ</label>
+                              <input id="accountant-company-search" value={companySearch} onChange={(event) => setCompanySearch(event.target.value)}
+                                placeholder="Pesquisar por nome ou CNPJ" className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+                            </div>
+                            {hasTruncatedCompanyRelations && <p className="mb-2 text-xs text-slate-600">Esta visão rápida mostra até 50 empresas por tipo de relação. Consulte todos em <Link className="underline" href="/admin/vinculos-custodia">Vínculos e custódia</Link>.</p>}
                             <div className="max-h-52 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50">
-                                {selectedUserFull.empresasContabeis?.length === 0 ? (
-                                    <p className="p-4 text-xs text-center text-slate-400">Nenhuma empresa vinculada.</p>
+                                {relatedCompanies.length === 0 ? (
+                                    <p className="p-4 text-xs text-center text-slate-400">{companySearch.trim() ? 'Nenhuma empresa encontrada.' : 'Nenhuma empresa relacionada.'}</p>
                                 ) : (
-                                    selectedUserFull.empresasContabeis?.map((v: any) => (
-                                        <div key={v.id} className="flex items-center justify-between border-b p-3 text-sm transition last:border-0 hover:bg-white">
+                                    relatedCompanies.map((company) => (
+                                        <div key={company.id} className="flex items-center justify-between gap-3 border-b p-3 text-sm transition last:border-0 hover:bg-white">
                                             <div>
-                                                <p className="font-bold text-slate-700">{v.empresa.razaoSocial}</p>
-                                                <p className="text-[10px] text-slate-500">CNPJ: {v.empresa.documento}</p>
+                                                <p className="font-bold text-slate-700">{company.razaoSocial}</p>
+                                                <p className="text-[10px] text-slate-500">CNPJ: {company.documento}</p>
+                                                <div className="mt-1 flex flex-wrap gap-1">
+                                                  {Array.from(company.relations).map((relation) => <span key={relation} className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700">{relation}</span>)}
+                                                </div>
                                             </div>
-                                            <button onClick={() => handleUnlinkCompany(v.id)} className="text-red-500 hover:bg-red-50 p-1.5 rounded border border-transparent hover:border-red-200 transition" title="Desvincular do Contador">
+                                            {company.accountingLinkId && <button onClick={() => handleUnlinkCompany(company.accountingLinkId!)} className="text-red-500 hover:bg-red-50 p-1.5 rounded border border-transparent hover:border-red-200 transition" title="Revogar somente o acesso contábil">
                                                 <Ban size={14}/>
-                                            </button>
+                                            </button>}
                                         </div>
                                     ))
                                 )}

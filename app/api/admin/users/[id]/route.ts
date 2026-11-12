@@ -28,7 +28,24 @@ export const GET = withApiGuard(async function GET(request: Request, { params: r
           take: 50, orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
           select: { id: true, status: true, empresa: { select: { id: true, documento: true, razaoSocial: true } } },
         },
-        _count: { select: { empresasContabeis: { where: { status: 'APROVADO', arquivadoEm: null, empresa: { arquivadoEm: null } } } } },
+        empresasFaturadas: {
+          where: { arquivadoEm: null }, take: 50, orderBy: [{ razaoSocial: 'asc' }, { id: 'asc' }],
+          select: { id: true, documento: true, razaoSocial: true },
+        },
+        empresasCustodiadas: {
+          where: { arquivadoEm: null }, take: 50, orderBy: [{ razaoSocial: 'asc' }, { id: 'asc' }],
+          select: { id: true, documento: true, razaoSocial: true },
+        },
+        empresasProprietarias: {
+          where: { arquivadoEm: null }, take: 50, orderBy: [{ razaoSocial: 'asc' }, { id: 'asc' }],
+          select: { id: true, documento: true, razaoSocial: true },
+        },
+        _count: { select: {
+          empresasContabeis: { where: { status: 'APROVADO', arquivadoEm: null, empresa: { arquivadoEm: null } } },
+          empresasFaturadas: { where: { arquivadoEm: null } },
+          empresasCustodiadas: { where: { arquivadoEm: null } },
+          empresasProprietarias: { where: { arquivadoEm: null } },
+        } },
         historicoPlanos: {
           include: { plan: true }, orderBy: [{ createdAt: 'desc' }, { id: 'asc' }], take: 5,
         },
