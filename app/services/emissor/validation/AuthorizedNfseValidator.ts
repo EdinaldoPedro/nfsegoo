@@ -31,6 +31,7 @@ export function originalNfseEnvironment(value: unknown): 'PRODUCAO' | 'HOMOLOGAC
 
 async function authenticatedNfse(value: unknown, ambiente: string, expectedKey?: string, issuer?: string) {
   const xml = fiscalXml(value);
+  if (originalNfseEnvironment(xml) !== ambiente) throw new Error('Ambiente do documento não confere.');
   await validateOfficialNfseSchema(xml, ambiente === 'HOMOLOGACAO' ? 'HOMOLOGACAO' : 'PRODUCAO');
   const inf = verifiedFiscalReference(xml, 'NFSe');
   const id = inf.getAttribute('Id') || '';

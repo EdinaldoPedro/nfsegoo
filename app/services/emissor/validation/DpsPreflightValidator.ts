@@ -91,10 +91,12 @@ export function validateDpsXml(xml: string): DpsValidationIssue[] {
 
   const ibs = document.getElementsByTagName('IBSCBS')[0];
   const restrictedLayout20261020 = text(document, 'tpAmb') === '2';
-  const finNFSe = restrictedLayout20261020 ? directText(infDps, 'finNFSe') : directText(ibs, 'finNFSe');
-  if (!/^0$/.test(finNFSe)) {
-    issues.push({ code: 'IBSCBS_FINNFSE_INVALIDO', message: 'finNFSe esta ausente ou invalido.',
-      path: restrictedLayout20261020 ? '/DPS/infDPS/finNFSe' : '/DPS/infDPS/IBSCBS/finNFSe' });
+  if (restrictedLayout20261020 || ibs) {
+    const finNFSe = restrictedLayout20261020 ? directText(infDps, 'finNFSe') : directText(ibs, 'finNFSe');
+    if (!/^0$/.test(finNFSe)) {
+      issues.push({ code: 'IBSCBS_FINNFSE_INVALIDO', message: 'finNFSe esta ausente ou invalido.',
+        path: restrictedLayout20261020 ? '/DPS/infDPS/finNFSe' : '/DPS/infDPS/IBSCBS/finNFSe' });
+    }
   }
   if (ibs) {
     const requiredIbs: Array<[string, RegExp]> = [
