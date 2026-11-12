@@ -226,14 +226,19 @@ export class NacionalAdapter {
             servXml += `<cTribMun>${codTribMunLimpo}</cTribMun>`;
         }
         
-        // No leiaute oficial, cNBS precede xDescServ. A ordem é relevante no XSD.
+        // A ordem de cNBS mudou no pacote de homologação de 20/10/2026.
+        // Produção ainda exige xDescServ antes de cNBS; homologação exige o inverso.
         // Só injeta o NBS se o Backend tiver cruzado os dados e confirmado que precisa.
         const nbsLimpo = s.codigoNbs ? this.clean(s.codigoNbs) : '';
-        if (nbsLimpo.length > 0) {
+        if (restrictedLayout20261020 && nbsLimpo.length > 0) {
             servXml += `<cNBS>${nbsLimpo}</cNBS>`;
         }
 
         servXml += `<xDescServ>${descricaoServico}</xDescServ>`;
+
+        if (!restrictedLayout20261020 && nbsLimpo.length > 0) {
+            servXml += `<cNBS>${nbsLimpo}</cNBS>`;
+        }
         
         servXml += `</cServ>`
 
