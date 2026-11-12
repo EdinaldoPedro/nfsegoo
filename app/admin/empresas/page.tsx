@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { Archive, Building2, ChevronLeft, ChevronRight, Database, Edit, Loader2, RefreshCw, RotateCcw, Search, Users } from 'lucide-react';
+import { Archive, Building2, ChevronLeft, ChevronRight, Database, Edit, Loader2, RefreshCw, RotateCcw, Search, ShieldCheck, Unlink, Users } from 'lucide-react';
 import { useDialog } from '@/app/contexts/DialogContext';
 import Link from 'next/link';
 
@@ -21,6 +21,11 @@ type Item = { id: string; origem: 'PRESTADOR'; documento: string; razaoSocial: s
   donoUser?: { nome: string; email: string } | null } & Partial<Record<Field, string | null>>;
 type PublicPreview = { data: Record<PublicField, string | null>; fonte: string; consultedAt: string;
   sourceHash: string; expectedUpdatedAt: string };
+type AccessUser = { id: string; nome: string; email: string; role: string };
+type CompanyAccess = { empresa: { id: string; razaoSocial: string; documento: string; statusPropriedade: string };
+  responsabilidades: Array<{ kind: string; label: string; user: AccessUser }>;
+  acessosContabeis: Array<{ kind: 'ACCOUNTANT'; linkId: string; user: AccessUser; nivelPortal: string; revogavel: boolean }>;
+  acessosOperacionais: Array<{ kind: 'OPERATOR'; linkId: string; user: AccessUser; createdAt: string; revogavel: boolean }> };
 
 const labels = Object.fromEntries(fields.map(([field, label]) => [field, label])) as Record<Field, string>;
 const inputClass = 'w-full rounded-xl border border-slate-300 bg-white p-3 text-sm text-slate-900 disabled:bg-slate-100';
@@ -36,6 +41,12 @@ export default function BaseEmpresas() {
   const [search, setSearch] = useState(''); const [revision, setRevision] = useState(0);
   const [busy, setBusy] = useState(false); const busyRef = useRef(false);
   const [operationError, setOperationError] = useState(''); const [message, setMessage] = useState('');
+  const [accesses, setAccesses] = useState<CompanyAccess | null>(null); const [accessLoading, setAccessLoading] = useState(false);
+
+  useEffect(() => {
+    const initialSearch = new URLSearchParams(window.location.search).get('search');
+    if (initialSearch) setSearch(initialSearch.slice(0, 120));
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController(); setLoading(true); setLoadError('');
@@ -64,7 +75,7 @@ export default function BaseEmpresas() {
 
   function open(item: Item) {
     setEditing(item); setForm(Object.fromEntries(fields.map(([key]) => [key, item[key] ?? ''])));
-    setPreview(null); setOperationError(''); setMessage('');
+    setPreview(null); setAccesses(null); setOperationError(''); setMessage('');
   }
   function focusReview(id: string) {
     window.setTimeout(() => document.getElementById('company-review-' + id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
@@ -147,6 +158,34 @@ export default function BaseEmpresas() {
     finally { busyRef.current = false; setBusy(false); }
   }
 
+  async function loadAccesses(companyId: string) {
+    setAccessLoading(true); setOperationError('');
+    try {
+      const response = await fetch(`/api/admin/empresas/${companyId}/acessos`);
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Não foi possível consultar pessoas e acessos.');
+      setAccesses(result);
+    } catch (error) { setOperationError(error instanceof Error ? error.message : 'Falha ao consultar acessos.'); }
+    finally { setAccessLoading(false); }
+  }
+
+  async function revokeAccess(kind: 'ACCOUNTANT' | 'OPERATOR', linkId: string, name: string) {
+    if (!editing || busyRef.current) return;
+    const authorization = await dialog.showAuthorization({ title: 'Encerrar acesso à empresa',
+      description: `O acesso de ${name} será encerrado imediatamente. Informe a justificativa e sua senha administrativa. O histórico será preservado.`,
+      confirmText: 'Encerrar acesso' });
+    if (!authorization) return;
+    busyRef.current = true; setBusy(true); setOperationError('');
+    try {
+      const response = await fetch(`/api/admin/empresas/${editing.id}/acessos`, { method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, linkId, ...authorization }) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Não foi possível encerrar o acesso.');
+      setMessage(result.message); await loadAccesses(editing.id);
+    } catch (error) { setOperationError(error instanceof Error ? error.message : 'Falha ao encerrar acesso.'); }
+    finally { busyRef.current = false; setBusy(false); }
+  }
+
   return <div className="mx-auto max-w-6xl space-y-6 p-4 md:p-8">
     <header><h1 className="text-2xl font-black text-slate-900">Empresas prestadoras</h1>
       <p className="mt-2 text-sm text-slate-600">Manutenção administrativa auditada dos prestadores, com atualização cadastral manual ou por fonte pública.</p></header>
@@ -190,6 +229,18 @@ export default function BaseEmpresas() {
                     <tbody>{publicFields.map(field => { const current = editing[field] || ''; const incoming = preview.data[field];
                       return <tr key={field} className="border-b border-blue-100"><td className="p-2 font-semibold">{labels[field]}</td><td className="p-2">{current || 'Não informado'}</td>
                         <td className="p-2">{incoming || 'Não informado pela fonte'}</td><td className="p-2">{incoming === null ? 'Cadastro atual será mantido' : current === incoming ? 'Sem alteração' : 'Será atualizado'}</td></tr>; })}</tbody></table></div></section>}
+                {!editing.archived && <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="flex items-center gap-2 font-black text-slate-900"><ShieldCheck size={18} /> Pessoas e acessos</h3>
+                    <p className="mt-1 text-sm text-slate-600">Consulte responsáveis, contadores e operadores vinculados. Titularidade é alterada somente pelo fluxo próprio.</p></div>
+                    <button type="button" className={buttonClass} disabled={accessLoading || busy} onClick={() => void loadAccesses(editing.id)}>{accessLoading ? <Loader2 className="animate-spin" size={18} /> : <Users size={18} />} {accesses?.empresa.id === editing.id ? 'Atualizar acessos' : 'Ver pessoas e acessos'}</button></div>
+                  {accesses?.empresa.id === editing.id && <div className="mt-4 space-y-4">
+                    <div className="grid gap-3 md:grid-cols-2">{accesses.responsabilidades.map((item, index) => <article key={`${item.kind}-${item.user.id}-${index}`} className="rounded-xl border border-blue-100 bg-white p-3">
+                      <span className="text-[11px] font-black uppercase text-blue-700">{item.label}</span><p className="mt-1 font-bold">{item.user.nome}</p><p className="text-sm text-slate-500">{item.user.email}</p></article>)}</div>
+                    <div><h4 className="mb-2 text-sm font-black">Acessos contábeis</h4><div className="space-y-2">{accesses.acessosContabeis.map(item => <article key={item.linkId} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-white p-3"><div><p className="font-bold">{item.user.nome}</p><p className="text-sm text-slate-500">{item.user.email} · {item.nivelPortal || 'nível padrão'}</p></div>{item.revogavel ? <button type="button" className={buttonClass} disabled={busy} onClick={() => void revokeAccess(item.kind, item.linkId, item.user.nome)}><Unlink size={16} /> Encerrar acesso</button> : <span className="text-xs font-bold text-amber-700">Custodiante: transfira a custódia antes</span>}</article>)}{!accesses.acessosContabeis.length && <p className="text-sm text-slate-500">Nenhum acesso contábil ativo.</p>}</div></div>
+                    <div><h4 className="mb-2 text-sm font-black">Acessos operacionais</h4><div className="space-y-2">{accesses.acessosOperacionais.map(item => <article key={item.linkId} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-white p-3"><div><p className="font-bold">{item.user.nome}</p><p className="text-sm text-slate-500">{item.user.email} · {item.user.role}</p></div><button type="button" className={buttonClass} disabled={busy} onClick={() => void revokeAccess(item.kind, item.linkId, item.user.nome)}><Unlink size={16} /> Encerrar acesso</button></article>)}{!accesses.acessosOperacionais.length && <p className="text-sm text-slate-500">Nenhum operador adicional ativo.</p>}</div></div>
+                    <Link href={`/admin/titularidade?empresaId=${editing.id}`} className="inline-flex text-sm font-bold text-blue-700 underline">Abrir fluxo de titularidade desta empresa</Link>
+                  </div>}
+                </section>}
                 <div className="flex flex-wrap gap-3">{editing.archived ? <button type="submit" value="RESTORE" disabled={busy} className={buttonClass}><RotateCcw size={18} /> Restaurar cadastro</button> : <>
                   <button type="submit" value="UPDATE" disabled={busy || !Object.keys(changed).length} className={buttonClass}><Edit size={18} /> Salvar alterações</button>
                   <button type="button" disabled={busy} className={buttonClass} onClick={() => void consultPublicSource()}><RefreshCw size={18} /> Consultar fonte pública</button>

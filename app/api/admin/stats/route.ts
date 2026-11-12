@@ -27,10 +27,12 @@ export const GET = withApiGuard(async function GET(request: Request) {
     if (!['MASTER', 'ADMIN'].includes(user.role)) return forbidden();
 
     const agora = new Date();
-    const periods = fiscalStatsPeriods(agora);
+    const requestedDays = Number(new URL(request.url).searchParams.get('days') || 30);
+    const days = [7, 30, 90].includes(requestedDays) ? requestedDays : 30;
+    const periods = fiscalStatsPeriods(agora, days);
     const mesAtual = periods.current.startsAt;
     const mesAnterior = periods.previous.startsAt;
-    const ultimos7Dias = new Date(agora.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const ultimos7Dias = periods.current.startsAt;
     const proximos30Dias = new Date(agora.getTime() + 30 * 24 * 60 * 60 * 1000);
 
     const totalUsuarios = await prisma.user.count();
@@ -78,7 +80,7 @@ export const GET = withApiGuard(async function GET(request: Request) {
     const totalClientes = await prisma.cliente.count({ where: { arquivadoEm: null } });
     const totalVinculosCarteira = await prisma.vinculoCarteira.count({ where: { arquivadoEm: null } });
 
-    const fiscal = await getAdminFiscalStats(agora);
+    const fiscal = await getAdminFiscalStats(agora, days);
     const { total: totalNotas, byStatus: notasPorStatus, month: notasMes,
       previousMonth: notasMesAnterior, cancelled: notasCanceladasMes, byDay: notasPorDia } = fiscal;
 
@@ -141,6 +143,7 @@ export const GET = withApiGuard(async function GET(request: Request) {
 
     return NextResponse.json({
       atualizadoEm: agora.toISOString(),
+      periodo: { days, startDate: periods.current.startDate, endDate: periods.current.endDate },
       resumo: {
         usuarios: totalUsuarios,
         usuariosOperacionais,

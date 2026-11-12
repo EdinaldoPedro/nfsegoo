@@ -3,7 +3,15 @@ import { prisma } from '@/app/utils/prisma';
 import { currentFiscalMonth, reportPeriod } from '@/app/utils/fiscal-report';
 import { noteDateWhere, noteEnvironmentWhere } from './fiscalReportService';
 
-export function fiscalStatsPeriods(now = new Date()) {
+export function fiscalStatsPeriods(now = new Date(), rollingDays?: number) {
+  if (rollingDays) {
+    const endDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+    const startDate = new Date(Date.parse(endDate) - (rollingDays - 1) * 86_400_000).toISOString().slice(0, 10);
+    const previousEnd = new Date(Date.parse(startDate) - 86_400_000).toISOString().slice(0, 10);
+    const previousStart = new Date(Date.parse(previousEnd) - (rollingDays - 1) * 86_400_000).toISOString().slice(0, 10);
+    return { current: reportPeriod(startDate, endDate, now), previous: reportPeriod(previousStart, previousEnd, now),
+      daily: reportPeriod(startDate, endDate, now) };
+  }
   const month = currentFiscalMonth(now);
   const current = reportPeriod(month.startDate, month.endDate, now);
   const previousEnd = new Date(Date.parse(month.startDate) - 86_400_000).toISOString().slice(0, 10);
@@ -14,8 +22,8 @@ export function fiscalStatsPeriods(now = new Date()) {
 
 /** Bounded administrative aggregates, with no document blobs. Fiscal values
  * exclude tests and unclassified legacy records. */
-export async function getAdminFiscalStats(now = new Date()) {
-  const periods = fiscalStatsPeriods(now);
+export async function getAdminFiscalStats(now = new Date(), rollingDays?: number) {
+  const periods = fiscalStatsPeriods(now, rollingDays);
   const production: Prisma.NotaFiscalWhereInput = { ambiente: 'PRODUCAO', arquivadoEm: null };
   const current = { ...production, AND: [noteDateWhere(periods.current.startsAt, periods.current.endsAt)] };
   const previous = { ...production, AND: [noteDateWhere(periods.previous.startsAt, periods.previous.endsAt)] };

@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { formatReportMoney } from '@/app/utils/fiscal-report';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 
 const statusNotaClasses: Record<string, string> = {
   AUTORIZADA: 'bg-emerald-100 text-emerald-700',
@@ -33,7 +34,6 @@ const statusNotaClasses: Record<string, string> = {
 function formatNumber(value: number | undefined) {
   return new Intl.NumberFormat('pt-BR').format(value || 0);
 }
-
 function formatMoney(value: number | string | undefined) { return formatReportMoney(value); }
 
 function formatDate(value?: string) {
@@ -46,7 +46,7 @@ function pct(part: number, total: number) {
   return Math.min(100, Math.round((part / total) * 100));
 }
 
-function KpiCard({ icon: Icon, label, value, hint, tone = 'blue' }: any) {
+function KpiCard({ icon: Icon, label, value, hint, tone = 'blue', href }: any) {
   const tones: any = {
     blue: 'bg-blue-50 text-blue-700 ring-blue-100',
     emerald: 'bg-emerald-50 text-emerald-700 ring-emerald-100',
@@ -56,8 +56,8 @@ function KpiCard({ icon: Icon, label, value, hint, tone = 'blue' }: any) {
     slate: 'bg-slate-50 text-slate-700 ring-slate-100'
   };
 
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+  const card = (
+    <div className={`rounded-2xl border border-slate-200 bg-white p-5 shadow-sm ${href ? 'transition hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-md' : ''}`}>
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-xs font-bold uppercase tracking-wider text-slate-400">{label}</p>
@@ -70,6 +70,7 @@ function KpiCard({ icon: Icon, label, value, hint, tone = 'blue' }: any) {
       {hint && <p className="mt-4 text-sm font-medium text-slate-500">{hint}</p>}
     </div>
   );
+  return href ? <Link href={href}>{card}</Link> : card;
 }
 
 function Section({ title, subtitle, children, action }: any) {
@@ -110,7 +111,6 @@ function ProgressRow({ label, value, total, tone = 'blue', right }: any) {
     </div>
   );
 }
-
 function DictionaryList({ data, total, tone = 'blue', labels = {} }: any) {
   const entries = Object.entries(data || {}).sort((a: any, b: any) => b[1] - a[1]);
   if (!entries.length) return <p className="text-sm text-slate-500">Sem dados para exibir.</p>;
@@ -161,12 +161,14 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
+  const [days, setDays] = useState(30);
+  const [autoRefresh, setAutoRefresh] = useState(true);
 
   const carregarStats = useCallback(async () => {
     setRefreshing(true);
     setError('');
     try {
-      const res = await fetch('/api/admin/stats', { cache: 'no-store' });
+      const res = await fetch(`/api/admin/stats?days=${days}`, { cache: 'no-store' });
       if (res.status === 401 || res.status === 403) {
         router.push('/login');
         return;
@@ -185,11 +187,19 @@ export default function AdminDashboard() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [router]);
+  }, [router, days]);
 
   useEffect(() => {
     carregarStats();
   }, [carregarStats]);
+
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const timer = window.setInterval(() => { if (document.visibilityState === 'visible') void carregarStats(); }, 60_000);
+    const onVisibility = () => { if (document.visibilityState === 'visible') void carregarStats(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisibility); };
+  }, [autoRefresh, carregarStats]);
 
   const totalStatusNotas = useMemo(() => {
     return Object.values(stats?.notas?.porStatus || {}).reduce((acc: any, item: any) => acc + item, 0);
@@ -244,7 +254,11 @@ export default function AdminDashboard() {
             Visão executiva do SaaS: consumo, emissão, carteira, suporte, financeiro, cobertura fiscal e base técnica.
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-xs font-bold text-slate-600 ring-1 ring-slate-200">Período
+            <select value={days} onChange={event => setDays(Number(event.target.value))} className="bg-transparent text-sm font-black text-slate-900 outline-none"><option value={7}>7 dias</option><option value={30}>30 dias</option><option value={90}>90 dias</option></select>
+          </label>
+          <label className="flex cursor-pointer items-center gap-2 rounded-xl bg-white px-3 py-2 text-xs font-bold text-slate-600 ring-1 ring-slate-200"><input type="checkbox" checked={autoRefresh} onChange={event => setAutoRefresh(event.target.checked)} /> Atualização automática</label>
           <span className="rounded-full bg-white px-4 py-2 text-xs font-bold text-slate-500 ring-1 ring-slate-200">
             Atualizado em {formatDate(stats?.atualizadoEm)}
           </span>
@@ -264,22 +278,22 @@ export default function AdminDashboard() {
         {!!((stats?.notas?.porAmbiente?.HOMOLOGACAO || 0) + (stats?.notas?.semAmbiente || 0)) && <p>
           Indicadores fiscais somente de produção. {formatNumber(stats?.notas?.porAmbiente?.HOMOLOGACAO)} documento(s) de teste e {formatNumber(stats?.notas?.semAmbiente)} sem ambiente confirmado não compõem os valores.
         </p>}
-        {!!stats?.notas?.datasEstimadasMes && <p className="mt-1">{formatNumber(stats.notas.datasEstimadasMes)} nota(s) no mês usam data de cadastro porque a data oficial ainda não foi verificada.</p>}
-        {!!stats?.notas?.canceladasSemData && <p className="mt-1">{formatNumber(stats.notas.canceladasSemData)} cancelamento(s) sem data oficial não foram atribuídos a um mês.</p>}
+        {!!stats?.notas?.datasEstimadasMes && <p className="mt-1">{formatNumber(stats.notas.datasEstimadasMes)} nota(s) no período usam data de cadastro porque a data oficial ainda não foi verificada.</p>}
+        {!!stats?.notas?.canceladasSemData && <p className="mt-1">{formatNumber(stats.notas.canceladasSemData)} cancelamento(s) sem data oficial não puderam ser atribuídos ao período.</p>}
       </div>}
 
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
-        <KpiCard icon={Users} label="Usuários operacionais" value={formatNumber(resumo.usuariosOperacionais)} hint={`${formatNumber(usuarios.novosMes)} novos no mês (${resumo.crescimentoUsuariosMes || 0}%)`} />
-        <KpiCard icon={Building2} label="Empresas no SaaS" value={formatNumber(resumo.empresas)} hint={`${formatNumber(resumo.empresasCompletas)} completas, ${formatNumber(resumo.empresasIncompletas)} pendentes`} tone="purple" />
-        <KpiCard icon={FileCheck} label="Autorizadas no mês (produção)" value={formatNumber(resumo.notasMes)} hint={`${resumo.variacaoNotasMes || 0}% contra o mês anterior`} tone="emerald" />
-        <KpiCard icon={CreditCard} label="Receita paga no mês" value={formatMoney(financeiro.valorPagoMes)} hint={`${formatNumber(financeiro.faturasPagasMes)} faturas pagas`} tone="amber" />
+        <KpiCard href="/admin/colaboradores" icon={Users} label="Usuários operacionais" value={formatNumber(resumo.usuariosOperacionais)} hint={`${formatNumber(usuarios.novosMes)} novos no período (${resumo.crescimentoUsuariosMes || 0}%)`} />
+        <KpiCard href="/admin/empresas" icon={Building2} label="Empresas no SaaS" value={formatNumber(resumo.empresas)} hint={`${formatNumber(resumo.empresasCompletas)} completas, ${formatNumber(resumo.empresasIncompletas)} pendentes`} tone="purple" />
+        <KpiCard href="/admin/emissoes" icon={FileCheck} label="Autorizadas no período (produção)" value={formatNumber(resumo.notasMes)} hint={`${resumo.variacaoNotasMes || 0}% contra o período anterior`} tone="emerald" />
+        <KpiCard href="/admin/contratacoes" icon={CreditCard} label="Receita paga no período" value={formatMoney(financeiro.valorPagoMes)} hint={`${formatNumber(financeiro.faturasPagasMes)} faturas pagas`} tone="amber" />
       </div>
 
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
-        <KpiCard icon={Receipt} label="Valor autorizado (produção)" value={formatMoney(resumo.valorNotasMes)} hint="Não é a receita do SaaS; exclui homologação, canceladas e legado sem ambiente" tone="emerald" />
-        <KpiCard icon={LifeBuoy} label="Tickets abertos" value={formatNumber(suporte.abertos)} hint={`${formatNumber(suporte.novos7d)} novos nos últimos 7 dias`} tone={suporte.abertos ? 'amber' : 'slate'} />
-        <KpiCard icon={AlertTriangle} label="Atenções fiscais" value={formatNumber((empresas.semIbge || 0) + (empresas.semCertificado || 0))} hint={`${formatNumber(empresas.semIbge)} sem IBGE, ${formatNumber(empresas.semCertificado)} sem certificado`} tone="red" />
-        <KpiCard icon={Database} label="Base técnica" value={formatNumber(tecnico.globalCnae)} hint={`${formatNumber(tecnico.tributacoesMunicipais)} regras municipais`} tone="blue" />
+        <KpiCard href="/admin/emissoes" icon={Receipt} label="Valor autorizado (produção)" value={formatMoney(resumo.valorNotasMes)} hint="Não é a receita do SaaS; exclui homologação, canceladas e legado sem ambiente" tone="emerald" />
+        <KpiCard href="/admin/suporte" icon={LifeBuoy} label="Tickets abertos" value={formatNumber(suporte.abertos)} hint={`${formatNumber(suporte.novos7d)} novos no período`} tone={suporte.abertos ? 'amber' : 'slate'} />
+        <KpiCard href="/admin/empresas" icon={AlertTriangle} label="Atenções fiscais" value={formatNumber((empresas.semIbge || 0) + (empresas.semCertificado || 0))} hint={`${formatNumber(empresas.semIbge)} sem IBGE, ${formatNumber(empresas.semCertificado)} sem certificado`} tone="red" />
+        <KpiCard href="/admin/tributacao-municipal" icon={Database} label="Base técnica" value={formatNumber(tecnico.globalCnae)} hint={`${formatNumber(tecnico.tributacoesMunicipais)} regras municipais`} tone="blue" />
       </div>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
@@ -332,7 +346,7 @@ export default function AdminDashboard() {
               <p className="mt-2 text-3xl font-black text-slate-950">{formatNumber(financeiro.planosAtivos)}</p>
             </div>
             <div className="rounded-2xl bg-slate-50 p-4">
-              <p className="text-xs font-bold uppercase text-slate-400">Cupons usados no mês</p>
+              <p className="text-xs font-bold uppercase text-slate-400">Cupons usados no período</p>
               <p className="mt-2 text-3xl font-black text-slate-950">{formatNumber(financeiro.cuponsUsadosMes)}</p>
             </div>
           </div>
@@ -447,3 +461,4 @@ export default function AdminDashboard() {
     </div>
   );
 }
+AdminDashboard.displayName = 'AdminDashboard';

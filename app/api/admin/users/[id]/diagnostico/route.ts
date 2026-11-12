@@ -46,21 +46,23 @@ export const GET = withApiGuard(async function GET(request: Request, { params: r
 
     const limites = await getEffectivePlanLimits(userId);
 
-    const [empresasProprietarias, vinculosContador, tickets, logsRecentes, vendasRecentes] = await Promise.all([
+    const [empresasProprietarias, vinculosContador, totalVinculosContador, tickets, logsRecentes, vendasRecentes] = await Promise.all([
       prisma.empresa.findMany({
         where: { proprietarioUserId: userId, arquivadoEm: null } as any,
         select: { id: true, documento: true, razaoSocial: true, statusPropriedade: true, ambiente: true },
         orderBy: { razaoSocial: 'asc' },
-        take: 20,
+        take: 100,
       }),
       prisma.contadorVinculo.findMany({
         where: { contadorId: userId, arquivadoEm: null } as any,
         include: {
-          empresa: { select: { id: true, documento: true, razaoSocial: true, ambiente: true, statusPropriedade: true } },
+          empresa: { select: { id: true, documento: true, razaoSocial: true, ambiente: true, statusPropriedade: true,
+            codigoIbge: true, cadastroCompleto: true, certificadoVencimento: true, certificadoA1: true } },
         },
         orderBy: { updatedAt: 'desc' },
-        take: 30,
+        take: 100,
       }),
+      prisma.contadorVinculo.count({ where: { contadorId: userId, arquivadoEm: null, status: 'APROVADO' } }),
       prisma.ticket.findMany({
         where: { solicitanteId: userId, arquivadoEm: null },
         select: { id: true, protocolo: true, assunto: true, status: true, prioridade: true, createdAt: true, updatedAt: true },
@@ -111,7 +113,7 @@ export const GET = withApiGuard(async function GET(request: Request, { params: r
           status: v.status,
           clientePodeAcessarPortal: v.clientePodeAcessarPortal,
           nivelPortal: v.nivelPortal,
-          empresa: v.empresa,
+          empresa: { ...v.empresa, temCertificado: Boolean(v.empresa.certificadoA1), certificadoA1: undefined },
         })),
       },
       tickets,
@@ -130,7 +132,7 @@ export const GET = withApiGuard(async function GET(request: Request, { params: r
       problemas,
       resumo: {
         empresasProprietarias: empresasProprietarias.length,
-        empresasCustodiadas: vinculosContador.length,
+        empresasCustodiadas: totalVinculosContador,
         ticketsAbertos: tickets.filter((t) => ['ABERTO', 'EM_ANDAMENTO'].includes(t.status)).length,
         logsErroRecentes: logsRecentes.filter((l) => ['ERRO', 'ERROR', 'CRITICAL'].includes(l.level)).length,
       },
