@@ -4,21 +4,22 @@ import { CommercialError } from '@/app/utils/commercial-pricing';
 import { normalizeCnpj, validarCNPJ } from '@/app/utils/cnpj';
 import { commercialTransaction } from './commercialService';
 import { getEffectivePlanLimits } from './planService';
-import { consultPublicCompanyRegistry } from './publicCompanyRegistryService';
+import { consultPublicCompanyRegistry, resolveIbgeByCep } from './publicCompanyRegistryService';
 import { syncCnaesGlobalmente } from './syncService';
 
 const pendingStatuses = ['PENDENTE', 'PENDENTE_DONO', 'PENDENTE_CUSTODIANTE'];
 
-async function lookupNewCompany(documento: string) {
+export async function lookupNewCompany(documento: string) {
   const registry = await consultPublicCompanyRegistry(documento);
   if (registry.status === 'NOT_FOUND') throw new CommercialError('CNPJ não encontrado nas fontes cadastrais públicas. Confira o número informado. Nenhuma empresa foi alterada.', 422);
   if (registry.status === 'INVALID_RESPONSE') throw new CommercialError('A fonte cadastral devolveu dados inválidos ou incompletos. Nenhuma empresa foi alterada.', 502);
   if (registry.status !== 'FOUND') throw new CommercialError('Consulta cadastral temporariamente indisponível. Tente novamente em alguns minutos. Nenhuma empresa foi alterada.', 503);
   const publicData = registry.data;
+  const codigoIbge = publicData.codigoIbge || await resolveIbgeByCep(publicData.cep);
   const data = { razaoSocial: publicData.razaoSocial, nomeFantasia: publicData.nomeFantasia || publicData.razaoSocial,
     email: publicData.emailPublico, cep: publicData.cep, logradouro: publicData.logradouro, numero: publicData.numero,
     complemento: publicData.complemento, bairro: publicData.bairro, cidade: publicData.cidade, uf: publicData.uf,
-    codigoIbge: publicData.codigoIbge, cadastroCompleto: false };
+    codigoIbge, cadastroCompleto: false };
   return { data, cnaes: publicData.atividades.map(item => ({ ...item, descricao: item.descricao || 'CNAE cadastral' })),
     source: registry.source, consultedAt: registry.consultedAt };
 }

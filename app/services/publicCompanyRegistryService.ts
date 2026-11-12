@@ -146,3 +146,14 @@ export async function consultPublicCompanyRegistry(documento: string): Promise<P
   if (brasil.status === 'INVALID_RESPONSE' && receita.status === 'INVALID_RESPONSE') return { status: 'INVALID_RESPONSE' };
   return { status: 'TEMPORARY_UNAVAILABLE' };
 }
+
+/** Resolve o código municipal quando a fonte de CNPJ (notadamente ReceitaWS)
+ * fornece o endereço, mas não fornece o código IBGE. */
+export async function resolveIbgeByCep(cep: string | null | undefined): Promise<string | null> {
+  const normalized = String(cep || '').replace(/\D/g, '');
+  if (!/^\d{8}$/.test(normalized)) return null;
+  const result = await fetchProvider(`https://viacep.com.br/ws/${normalized}/json/`, 'VIACEP');
+  if (result.status !== 'FOUND' || result.raw.erro) return null;
+  const code = String(result.raw.ibge || '').replace(/\D/g, '');
+  return /^\d{7}$/.test(code) ? code : null;
+}

@@ -3,50 +3,7 @@ import { NextResponse } from 'next/server';
 import { getAuthenticatedUser, unauthorized } from '@/app/utils/api-middleware';
 import { normalizeCnpj, validarCNPJ } from '@/app/utils/cnpj';
 import { validateJsonContentLength } from '@/app/utils/request-guards';
-import { consultPublicCompanyRegistry } from '@/app/services/publicCompanyRegistryService';
-
-const MAX_EXTERNAL_JSON_BYTES = 2 * 1024 * 1024;
-
-// Função auxiliar para retry com timeout
-async function fetchSafe(url: string, options: any = {}, retries = 2) {
-    for (let i = 0; i <= retries; i++) {
-        let timeoutId: ReturnType<typeof setTimeout> | undefined;
-        try {
-            const controller = new AbortController();
-            timeoutId = setTimeout(() => controller.abort(), 8000); // 8s timeout
-            
-            const res = await fetch(url, { ...options, signal: controller.signal, redirect: 'error' });
-            const declaredLength = Number(res.headers.get('content-length') || 0);
-            if (declaredLength > MAX_EXTERNAL_JSON_BYTES) return null;
-            if (res.ok) {
-                const text = await res.text();
-                if (Buffer.byteLength(text, 'utf8') > MAX_EXTERNAL_JSON_BYTES) return null;
-                return JSON.parse(text);
-            }
-            if (res.status === 429) { // Rate limit
-                await new Promise(r => setTimeout(r, 2000)); // Espera 2s
-                continue;
-            }
-        } catch (e) {
-            if (i === retries) throw e;
-        } finally {
-            if (timeoutId) clearTimeout(timeoutId);
-        }
-    }
-    return null;
-}
-
-async function buscarIbgePorCep(cep?: string | null): Promise<string> {
-    const cepLimpo = String(cep || '').replace(/\D/g, '');
-    if (cepLimpo.length !== 8) return '';
-
-    try {
-        const data = await fetchSafe(`https://viacep.com.br/ws/${cepLimpo}/json/`, {}, 1);
-        return data && !data.erro && data.ibge ? String(data.ibge).replace(/\D/g, '') : '';
-    } catch {
-        return '';
-    }
-}
+import { consultPublicCompanyRegistry, resolveIbgeByCep } from '@/app/services/publicCompanyRegistryService';
 
 export const POST = withApiGuard(async function POST(request: Request) {
   // 1. Segurança
@@ -72,7 +29,7 @@ export const POST = withApiGuard(async function POST(request: Request) {
     const registry = await consultPublicCompanyRegistry(cnpjLimpo);
     if (registry.status === 'FOUND') {
       const data = registry.data;
-      const codigoIbge = data.codigoIbge || await buscarIbgePorCep(data.cep);
+      const codigoIbge = data.codigoIbge || await resolveIbgeByCep(data.cep) || '';
       return NextResponse.json({
         razaoSocial: data.razaoSocial, nomeFantasia: data.nomeFantasia || data.razaoSocial,
         email: data.emailPublico, cep: data.cep, logradouro: data.logradouro, numero: data.numero,

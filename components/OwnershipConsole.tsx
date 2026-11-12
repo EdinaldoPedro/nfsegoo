@@ -9,6 +9,8 @@ const emptyCreate = { empresaId: '', proposedOwnerId: '', caseTicketId: '', evid
 export default function OwnershipConsole({ administrative = false }: { administrative?: boolean }) {
   const [payload, setPayload] = useState<ResponseData | null>(null);
   const [page, setPage] = useState(1);
+  const [status, setStatus] = useState('PENDING');
+  const [empresaFilter, setEmpresaFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -18,14 +20,21 @@ export default function OwnershipConsole({ administrative = false }: { administr
   const load = useCallback(async () => {
     setLoading(true); setError('');
     try {
-      const response = await fetch(`${endpoint}?status=PENDING&page=${page}`, { cache: 'no-store' });
+      const query = new URLSearchParams({ status, page: String(page) });
+      if (empresaFilter) query.set('empresaId', empresaFilter);
+      const response = await fetch(`${endpoint}?${query}`, { cache: 'no-store' });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Não foi possível carregar as solicitações.');
       setPayload(data);
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Falha ao carregar.'); }
     finally { setLoading(false); }
-  }, [endpoint, page]);
+  }, [endpoint, page, status, empresaFilter]);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (!administrative) return;
+    const companyId = new URLSearchParams(window.location.search).get('empresaId') || '';
+    if (companyId) { setEmpresaFilter(companyId); setForm(previous => ({ ...previous, empresaId: companyId })); }
+  }, [administrative]);
 
   const send = async (body: Record<string, unknown>, key: string) => {
     setBusy(key); setError(''); setSuccess('');
@@ -83,7 +92,8 @@ export default function OwnershipConsole({ administrative = false }: { administr
     {error && <div role="alert" className="rounded-xl border border-red-300 bg-red-50 p-4 text-red-800">{error}</div>}
     {success && <div role="status" className="rounded-xl border border-green-300 bg-green-50 p-4 text-green-800">{success}</div>}
     <section aria-busy={loading} className="space-y-4">
-      <h2 className="text-xl font-black">Solicitações pendentes</h2>
+      <div className="flex flex-wrap items-end justify-between gap-3"><div><h2 className="text-xl font-black">Solicitações de titularidade</h2><p className="text-sm text-slate-500">Consulte pendências e o histórico concluído ou encerrado.</p></div>
+        <label className="text-sm font-bold">Situação<select value={status} onChange={event => { setStatus(event.target.value); setPage(1); }} className="ml-2 rounded-xl border border-slate-300 bg-white p-2 font-normal"><option value="PENDING">Pendentes</option><option value="COMPLETED">Concluídas</option><option value="REJECTED">Rejeitadas</option><option value="CANCELLED">Canceladas</option><option value="EXPIRED">Expiradas</option><option value="ALL">Todas</option></select></label></div>
       {loading ? <p role="status">Carregando…</p> : !payload?.data.length ? <p className="rounded-xl border bg-white p-5 text-slate-600">Nenhuma transferência depende desta conta.</p> :
         payload.data.map(request => <article key={request.id} className="rounded-2xl border bg-white p-5 shadow-sm space-y-4">
           <div><h3 className="font-black">{request.razaoSocial}</h3><p className="text-sm text-slate-600">CNPJ {request.documento} · destino: {request.recipient.nome} ({request.recipient.email})</p>

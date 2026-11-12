@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, CreditCard, Clock, MessageSquare, Activity, Mail, Send, AlertCircle, Building2, FileCheck, Wrench, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, CreditCard, Clock, MessageSquare, Activity, Mail, Send, AlertCircle, Building2, FileCheck, Wrench, ShieldCheck, Search, ExternalLink } from 'lucide-react';
+import Link from 'next/link';
 import { useDialog } from '@/app/contexts/DialogContext';
 
 export default function PerfilCrmCliente() {
@@ -15,6 +16,7 @@ export default function PerfilCrmCliente() {
     const [diagnostico, setDiagnostico] = useState<any>(null);
     const [novaNota, setNovaNota] = useState('');
     const [loading, setLoading] = useState(true);
+    const [buscaEmpresa, setBuscaEmpresa] = useState('');
 
     const carregarDados = useCallback(async () => {
         setLoading(true);
@@ -84,6 +86,11 @@ export default function PerfilCrmCliente() {
     const problemas = diagnostico?.problemas || [];
     const resumo = diagnostico?.resumo || {};
     const totalEmpresasOperacionais = (resumo.empresasProprietarias || 0) + (resumo.empresasCustodiadas || 0);
+    const empresas = [
+        ...(diagnostico?.empresas?.proprietarias || []).map((empresa: any) => ({ empresa, tipo: 'Proprietário', status: 'APROVADO' })),
+        ...(diagnostico?.empresas?.custodiadas || []).map((vinculo: any) => ({ ...vinculo, tipo: 'Acesso contábil' })),
+    ];
+    const empresasFiltradas = empresas.filter((item: any) => `${item.empresa.razaoSocial} ${item.empresa.documento}`.toLowerCase().includes(buscaEmpresa.toLowerCase()));
 
     return (
         <div className="mx-auto max-w-7xl space-y-6">
@@ -294,6 +301,19 @@ export default function PerfilCrmCliente() {
                     </div>
                 </div>
             </div>
+
+            <section className="grid gap-6 xl:grid-cols-[1.5fr_1fr_1fr]">
+                <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-black text-slate-900">Empresas e acessos</h2><p className="text-sm text-slate-500">Carteira operacional vinculada a esta conta.</p></div><span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">{totalEmpresasOperacionais} empresas</span></div>
+                    <label className="mt-4 flex items-center gap-2 rounded-xl border border-slate-200 px-3"><Search size={16} className="text-slate-400"/><input value={buscaEmpresa} onChange={event => setBuscaEmpresa(event.target.value)} placeholder="Buscar empresa ou CNPJ" className="w-full py-3 text-sm outline-none" /></label>
+                    <div className="mt-4 max-h-96 space-y-2 overflow-y-auto pr-1">{empresasFiltradas.map((item: any) => <article key={`${item.tipo}-${item.empresa.id}-${item.id || ''}`} className="rounded-xl border border-slate-200 p-3">
+                        <div className="flex items-start justify-between gap-3"><div><p className="font-bold text-slate-900">{item.empresa.razaoSocial}</p><p className="text-xs text-slate-500">{item.empresa.documento} · {item.tipo} · {item.status}</p></div><Link href={`/admin/empresas?search=${encodeURIComponent(item.empresa.documento)}`} aria-label="Abrir empresa" className="text-blue-600"><ExternalLink size={17}/></Link></div>
+                        <div className="mt-2 flex flex-wrap gap-2 text-[10px] font-black uppercase"><span className={`rounded px-2 py-1 ${item.empresa.ambiente === 'PRODUCAO' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{item.empresa.ambiente}</span>{item.empresa.codigoIbge === null && <span className="rounded bg-red-50 px-2 py-1 text-red-700">Sem IBGE</span>}{item.empresa.temCertificado === false && <span className="rounded bg-red-50 px-2 py-1 text-red-700">Sem certificado</span>}</div>
+                    </article>)}{!empresasFiltradas.length && <p className="py-8 text-center text-sm text-slate-400">Nenhuma empresa encontrada.</p>}</div>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><h2 className="font-black text-slate-900">Atendimento recente</h2><p className="mb-4 text-sm text-slate-500">Tickets vinculados à conta.</p><div className="space-y-2">{(diagnostico?.tickets || []).map((ticket: any) => <article key={ticket.id} className="rounded-xl border p-3"><div className="flex justify-between gap-2"><span className="text-xs font-black text-blue-700">{ticket.protocolo}</span><span className="text-[10px] font-black uppercase text-slate-500">{ticket.status}</span></div><p className="mt-1 text-sm font-bold">{ticket.assunto}</p><p className="mt-1 text-xs text-slate-400">Atualizado em {new Date(ticket.updatedAt).toLocaleString('pt-BR')}</p></article>)}{!diagnostico?.tickets?.length && <p className="text-sm text-slate-400">Nenhum ticket recente.</p>}</div></div>
+                <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><h2 className="font-black text-slate-900">Operação fiscal recente</h2><p className="mb-4 text-sm text-slate-500">Últimas vendas acessíveis por esta conta.</p><div className="space-y-2">{(diagnostico?.vendasRecentes || []).map((venda: any) => <Link key={venda.id} href={`/admin/vendas/${venda.id}`} className="block rounded-xl border p-3 transition hover:border-blue-300"><div className="flex justify-between gap-2"><span className="text-xs font-black uppercase text-slate-600">{venda.status}</span><span className="text-xs font-bold">{Number(venda.valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span></div><p className="mt-1 truncate text-sm font-bold">{venda.cliente?.nome || 'Tomador não identificado'}</p><p className="mt-1 text-xs text-slate-400">{new Date(venda.createdAt).toLocaleString('pt-BR')}</p></Link>)}{!diagnostico?.vendasRecentes?.length && <p className="text-sm text-slate-400">Nenhuma venda recente.</p>}</div></div>
+            </section>
         </div>
     );
 }
